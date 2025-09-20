@@ -453,9 +453,9 @@ class ServerRolloutWorker(Worker):
         """Convert training data from HTTP request into RolloutResult format."""
         try:
             # Extract text data
-            input_text = training_data.get('input_text', '')
-            output_text = training_data.get('output_text', '')
-            reward_score = training_data.get('reward_score', 0.0)
+            input_text = training_data.get('prompt', '')
+            output_text = training_data.get('completion', '')
+            reward_score = training_data.get('accepted', 0.0)
 
             # Tokenize texts
             input_encoding = self._tokenizer(
@@ -478,7 +478,7 @@ class ServerRolloutWorker(Worker):
             group_size = getattr(self._cfg.algorithm, 'group_size', 1)
             
             rollout_result = RolloutResult(
-                num_sequence=group_size,
+                num_sequence=1,
                 group_size=group_size,
                 prompt_lengths=[len(input_ids)],
                 prompt_ids=[input_ids],
