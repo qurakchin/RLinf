@@ -77,9 +77,9 @@ def loop():
     for i in range(10):
         print(f'zcy_dbg: loop: i={i}')
         time.sleep(0.001)
-        completion = agenerate(prefix="prefix", suffix="suffix")
+        completion = agenerate(prefix=prefix, suffix=suffix)
         time.sleep(0.001)
-        atrack(prefix="prefix", suffix="suffix", completion=completion, accepted=True)
+        atrack(prefix=prefix, suffix=suffix, completion=completion, accepted=True)
 
 if __name__ == "__main__":
     loop()

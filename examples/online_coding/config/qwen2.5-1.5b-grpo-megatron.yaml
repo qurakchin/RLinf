@@ -258,7 +258,7 @@ actor:
 
 reward:
   use_reward_model: false
-  reward_type: 'math'
+  reward_type: 'online_coding'
   reward_scale: 5.0
 
 critic:

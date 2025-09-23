@@ -144,6 +144,8 @@ class SGLangWorker(Worker):
                 "repetition_penalty": cfg_sampling_params.repetition_penalty,
                 "max_new_tokens": cfg_sampling_params.max_new_tokens,
             }
+            if 'stop' in cfg_sampling_params:
+                sampling_params['stop'] = cfg_sampling_params['stop']
         return sampling_params
 
     def _stop(self):
