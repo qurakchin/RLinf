@@ -37,7 +37,10 @@ class FSDPModelManager:
 
     def __init__(self, cfg: DictConfig):
         self._cfg = cfg
-        self.torch_dtype = torch_dtype_from_precision(self._cfg.model.precision)
+
+        self.torch_dtype = torch_dtype_from_precision(
+            self._cfg.get("model", {}).get("precision", "bf16")
+        )
 
         self.tokenizer = hf_tokenizer(cfg.tokenizer.tokenizer_model)
 
