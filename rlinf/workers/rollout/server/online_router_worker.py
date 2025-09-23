@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -20,7 +21,7 @@ import uuid
 from typing import Dict, List, Optional, Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from omegaconf.dictconfig import DictConfig
 from pydantic import BaseModel
 import uvicorn
@@ -107,22 +108,13 @@ class OnlineRouterWorker(Worker):
     def _setup_routes(self):
         """Setup FastAPI routes."""
 
-        @self.app.post("/v1/completions", response_model=CompleteResponse)
+        @self.app.post("/v1/completions")
         async def complete(request: CompleteRequest):
             """Handle complete requests."""
             logger.info("zcy_dbg: OnlineRouterWorker:complete: 1")
             self.log_info("zcy_dbg: OnlineRouterWorker:complete: 1")
             self.log_info(f"zcy_dbg: OnlineRouterWorker:complete: 2: {request}")
             return await self._handle_complete(request)
-
-        # @self.app.post("/v1/completions")
-        # async def complete(request: Request):
-        #     """Handle complete requests."""
-        #     logger.info("zcy_dbg: OnlineRouterWorker:complete: 1")
-        #     self.log_info("zcy_dbg: OnlineRouterWorker:complete: 1")
-        #     body = await request.json()
-        #     self.log_info(f"zcy_dbg: OnlineRouterWorker:complete: 2: {body}")
-        #     return await self._handle_complete(request)
 
         @self.app.get("/health")
         async def a():
@@ -162,47 +154,56 @@ class OnlineRouterWorker(Worker):
             sglang_instance_id = random.randint(0, self.rollout_instance_num - 1)
             generate_result = await self.rollout_worker.execute_on(sglang_instance_id).agenerate(request.prompt).async_wait()
             generated_text = generate_result[0]['text']
-            # generated_text = f"test-response-{sglang_instance_id}"
             self.log_info(f"zcy_dbg: OnlineRouterWorker:complete: 4: generated_text=[{generated_text}]")
 
             # Calculate latency
             latency_ms = (time.time() - start_time) * 1000
 
-            # Create response
-            response = CompleteResponse(
-                # request_id=request_id,
-                # response_id=str(uuid.uuid4()),
-                # generated_text=generated_text,
-                # latency_ms=latency_ms,
-                # status="success"
-                id=str(request_id),
-                choices=[{
-                    "text": generated_text,
-                    "index": 0,
-                    "logprobs": None,
-                    "finish_reason": "stop"
-                }],
-                created=int(start_time),
-                model="test-model",
-                object="text_completion"
-            )
+            if not request.stream:
+                # Create response
+                response = CompleteResponse(
+                    id=str(request_id),
+                    choices=[{
+                        "text": generated_text,
+                        "index": 0,
+                        "logprobs": None,
+                        "finish_reason": "stop"
+                    }],
+                    created=int(start_time),
+                    model="test-model",
+                    object="text_completion"
+                )
+            else:
+                def generate_stream():
+                    # Send final chunk with finish_reason
+                    final_data = {
+                        "id": request_id,
+                        "object": "text_completion.chunk",
+                        "created": int(start_time),
+                        "model": "test-model",
+                        "choices": [{
+                            "text": generated_text,
+                            "index": 0,
+                            "logprobs": None,
+                            "finish_reason": "stop"
+                        }]
+                    }
+                    yield f"data: {json.dumps(final_data)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                response = StreamingResponse(
+                    generate_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",  # Disable nginx buffering
+                    }
+                )
             
             # Set future result
             future.set_result(response)
             return response
-
-        # except Exception as e:
-        #     logger.error(f"Error handling complete request {request_id}: {e}")
-        #     self.log_error(f"Error handling complete request {request_id}: {e}")
-        #     error_response = CompleteResponse(
-        #         request_id=request_id,
-        #         response_id=str(uuid.uuid4()),
-        #         generated_text="",
-        #         latency_ms=(time.time() - start_time) * 1000,
-        #         status="error"
-        #     )
-        #     future.set_exception(e)
-        #     raise HTTPException(status_code=500, detail=str(e))
 
         finally:
             # Clean up
