@@ -523,7 +523,7 @@ def validate_embodied_cfg(cfg):
     return cfg
 
 
-def validate_math_cfg(cfg: DictConfig) -> DictConfig:
+def validate_reasoning_cfg(cfg: DictConfig) -> DictConfig:
     assert cfg.rollout.model_arch in SUPPORTED_MODEL_ARCHS, (
         f"Model {cfg.rollout.model_arch} is not supported"
     )
@@ -559,8 +559,8 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
 
     if cfg.runner.task_type == "embodied":
         cfg = validate_embodied_cfg(cfg)
-    if cfg.runner.task_type == "math":
-        cfg = validate_math_cfg(cfg)
+    if cfg.runner.task_type == "reasoning":
+        cfg = validate_reasoning_cfg(cfg)
 
     if (
         cfg.algorithm.adv_type == "embodied_grpo"
