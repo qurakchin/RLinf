@@ -391,3 +391,13 @@ class AsyncSGLangWorker(SGLangWorker):
         self.log_info(f"Shutting down SGLang worker {self._rank} ...")
         self._engine.shutdown()
         self.log_info(f"SGLang worker {self._rank} shutdown complete.")
+
+    async def agenerate(self, prompt: str):
+        sampling_params = self._sampling_params
+
+        result = await self._engine.async_generate(
+            prompt=prompt,
+            sampling_params=sampling_params,
+            return_logprob=self._return_logprobs,
+        )
+        return result
