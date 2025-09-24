@@ -14,7 +14,6 @@
 
 import asyncio
 import json
-import logging
 import random
 import time
 import uuid
@@ -31,9 +30,6 @@ from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.workers.rollout.sglang.sglang_worker import AsyncSGLangWorker
 from rlinf.utils.placement import ComponentPlacement
 
-logger = logging.getLogger(__name__)
-
-
 class CompleteRequest(BaseModel):
     """Complete request model."""
     prompt: str
@@ -46,20 +42,8 @@ class CompleteRequest(BaseModel):
     stop: Optional[List[str]] = None
     stream: Optional[bool] = False
 
-class CompletionTrackRequest(BaseModel):
-    """Completion track request model."""
-    data: Dict[str, Any]
-    batch_size: Optional[int] = None
-
-
 class CompleteResponse(BaseModel):
     """Complete response model."""
-    # request_id: str
-    # response_id: str
-    # generated_text: str
-    # tokens_used: Optional[int] = None
-    # latency_ms: float
-    # status: str = "success"
     id: str
     choices: List[Dict[str, Any]]
     model: str
@@ -72,23 +56,20 @@ class OnlineRouterWorker(Worker):
 
     def __init__(self, cfg: DictConfig, placement: ComponentPlacement):
         Worker.__init__(self)
-        self.log_info("zcy_dbg: OnlineRouterWorker:init: 1")
 
         self.cfg = cfg
         self.app = FastAPI(title="OnlineRouterWorker", version="1.0.0")
 
         # Configuration
-        # self.server_host = cfg.get('server_host', '0.0.0.0')
-        # self.server_port = cfg.get('server_port', 8081)
-        self.server_host = '0.0.0.0'
-        self.server_port = 8081
-        self.rollout_instance_num = placement.rollout_dp_size
+        self._server_host = cfg.server.online_router.get('host', '0.0.0.0')
+        self._server_port = cfg.server.online_router.get('port', 8081)
+        self._rollout_instance_num = placement.rollout_dp_size
 
         # Sync weight state management
-        self._sync_weight_lock = asyncio.Lock()
-        self._sync_weight_in_progress = False
+        self._sync_model_lock = asyncio.Lock()
+        self._sync_model_in_progress = False
         self._pending_requests: List[asyncio.Future] = []
-        
+
         # Request synchronization state
         self._sync_in_progress = False
         self._old_requests_complete = asyncio.Event()
@@ -101,7 +82,6 @@ class OnlineRouterWorker(Worker):
 
         # Setup FastAPI routes
         self._setup_routes()
-        self.log_info("zcy_dbg: OnlineRouterWorker:init: 2")
 
         self._server_running = False
 
@@ -111,29 +91,9 @@ class OnlineRouterWorker(Worker):
         @self.app.post("/v1/completions")
         async def complete(request: CompleteRequest):
             """Handle complete requests."""
-            logger.info("zcy_dbg: OnlineRouterWorker:complete: 1")
-            self.log_info("zcy_dbg: OnlineRouterWorker:complete: 1")
-            self.log_info(f"zcy_dbg: OnlineRouterWorker:complete: 2: {request}")
             return await self._handle_complete(request)
 
-        @self.app.get("/health")
-        async def a():
-            """Health check endpoint."""
-            return {"status": "healthy", "timestamp": time.time()}
-
-        @self.app.get("/status")
-        async def status():
-            """Status endpoint."""
-            return {
-                "status": "running",
-                "sync_weight_in_progress": self._sync_weight_in_progress,
-                "sync_in_progress": self._sync_in_progress,
-                "active_requests": len(self._active_requests),
-                "blocked_requests": len(self._blocked_requests),
-                "timestamp": time.time()
-            }
-
-    async def _handle_complete(self, request: CompleteRequest) -> CompleteResponse:
+    async def _handle_complete(self, request: CompleteRequest):
         """Handle complete requests with synchronization support."""
         request_id = str(uuid.uuid4())
         start_time = time.time()
@@ -151,13 +111,9 @@ class OnlineRouterWorker(Worker):
 
         try:
             # Forward request to rollout worker
-            sglang_instance_id = random.randint(0, self.rollout_instance_num - 1)
+            sglang_instance_id = random.randint(0, self._rollout_instance_num - 1)
             generate_result = await self.rollout_worker.execute_on(sglang_instance_id).agenerate(request.prompt).async_wait()
             generated_text = generate_result[0]['text']
-            self.log_info(f"zcy_dbg: OnlineRouterWorker:complete: 4: generated_text=[{generated_text}]")
-
-            # Calculate latency
-            latency_ms = (time.time() - start_time) * 1000
 
             if not request.stream:
                 # Create response
@@ -222,55 +178,55 @@ class OnlineRouterWorker(Worker):
         # Start the HTTP server
         config = uvicorn.Config(
             self.app,
-            host=self.server_host,
-            port=self.server_port,
+            host=self._server_host,
+            port=self._server_port,
             log_level="info"
         )
         self._server = uvicorn.Server(config)
-        
+
         # Start server in background task
         asyncio.create_task(self._server.serve())
 
-        logger.info(f"Rollout service started on {self.server_host}:{self.server_port}")
+        self.log_info(f"Rollout service started on {self._server_host}:{self._server_port}")
 
     def rollout_stop(self):
         """Stop rollout service."""
         assert self._server_running
         self._server_running = False
-        
+
         # Stop the HTTP server
         if hasattr(self, '_server') and self._server:
             self._server.should_exit = True
-        
-        logger.info("Rollout service stopped")
+
+        self.log_info("Rollout service stopped")
 
     async def sync_model_start(self):
         """Start model synchronization. Block new requests and wait for old ones to complete."""
-        async with self._sync_weight_lock:
+        async with self._sync_model_lock:
             assert not self._sync_in_progress
-            
-            logger.info("Starting model synchronization...")
+
+            self.log_info("Starting model synchronization...")
             self._sync_in_progress = True
-            
+
             # Clear the event to block new requests
             self._new_requests_blocked.clear()
-            
+
             # Wait for all existing requests to complete
             if self._active_requests:
-                logger.info(f"Waiting for {len(self._active_requests)} active requests to complete...")
+                self.log_info(f"Waiting for {len(self._active_requests)} active requests to complete...")
                 # Wait for all active requests to finish
                 await asyncio.gather(*self._active_requests.values(), return_exceptions=True)
-            
+
             # Set event to indicate old requests are complete
             self._old_requests_complete.set()
-            logger.info("All old requests completed, sync can proceed")
+            self.log_info("All old requests completed, sync can proceed")
 
     async def sync_model_end(self):
         """End model synchronization. Resume processing of blocked requests."""
-        async with self._sync_weight_lock:
+        async with self._sync_model_lock:
             assert self._sync_in_progress
             
-            logger.info("Ending model synchronization...")
+            self.log_info("Ending model synchronization...")
             
             # Reset sync state
             self._sync_in_progress = False
@@ -279,4 +235,4 @@ class OnlineRouterWorker(Worker):
             # Allow new requests to proceed
             self._new_requests_blocked.set()
             
-            logger.info("Model synchronization completed, new requests can proceed")
+            self.log_info("Model synchronization completed, new requests can proceed")

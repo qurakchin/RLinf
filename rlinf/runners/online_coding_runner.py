@@ -142,17 +142,6 @@ class OnlineCodingRunner:
 
         actor_checkpoint_path = os.path.join(self.cfg.runner.resume_dir, "actor")
         self.actor.load_checkpoint(actor_checkpoint_path).wait()
-        # load data
-        dataloader_local_path = os.path.join(self.cfg.runner.resume_dir, "data/data.pt")
-        if os.path.exists(dataloader_local_path):
-            dataloader_state_dict = torch.load(
-                dataloader_local_path, weights_only=False
-            )
-            self.train_dataloader.load_state_dict(dataloader_state_dict)
-        else:
-            logging.warning(
-                f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch"
-            )
 
     def _compute_flops_metrics(self, time_metrics, act_rollout_metrics) -> dict:
         rollout_time = time_metrics.get("rollout")
@@ -198,16 +187,10 @@ class OnlineCodingRunner:
             f"checkpoints/global_step_{self.global_steps}",
         )
         actor_save_path = os.path.join(base_output_dir, "actor")
-        data_save_path = os.path.join(base_output_dir, "data")
+        # data_save_path = os.path.join(base_output_dir, "data")
 
         # actor
         self.actor.save_checkpoint(actor_save_path, self.global_steps).wait()
-
-        # data
-        local_mkdir_safe(data_save_path)
-        dataloader_local_path = os.path.join(data_save_path, "data.pt")
-        dataloader_state_dict = self.train_dataloader.state_dict()
-        torch.save(dataloader_state_dict, dataloader_local_path)
 
     def _sync_weights(self):
         self.online_router.sync_model_start()
@@ -345,6 +328,7 @@ class OnlineCodingRunner:
                 global_pbar.set_postfix(logging_metrics)
                 global_pbar.update(1)
 
-        self.online_rollout_worker.rollout_stop()
+        self.online_router.rollout_stop()
+        self.server_rollout.shutdown()
         # No need to wait for rollout_handle since rollout service runs continuously
         self.metric_logger.finish()

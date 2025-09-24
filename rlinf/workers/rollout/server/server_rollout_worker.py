@@ -54,7 +54,6 @@ class TrainingDataStorage:
             storage_config: Configuration dict with options:
                 - enabled: bool, whether to enable storage (default: True)
                 - storage_dir: str, directory to store files (default: "./training_data")
-                - file_format: str, format for files ("json" or "jsonl", default: "jsonl")
                 - max_files_per_dir: int, max files per directory (default: 1000)
                 - compress: bool, whether to compress files (default: False)
         """
@@ -63,7 +62,6 @@ class TrainingDataStorage:
 
         self.enabled = storage_config.get('enabled', True)
         self.storage_dir = Path(storage_config.get('storage_dir', './training_data'))
-        self.file_format = storage_config.get('file_format', 'jsonl')
         self.max_files_per_dir = storage_config.get('max_files_per_dir', 1000)
         self.compress = storage_config.get('compress', False)
 
@@ -76,7 +74,7 @@ class TrainingDataStorage:
         self._current_file_handle = None
         self._entries_in_current_file = 0
 
-    async def store_training_data(self, training_data: Dict[str, Any]) -> Optional[str]:
+    def store_training_data(self, training_data: Dict[str, Any]) -> Optional[str]:
         """
         Store training data to file.
 
@@ -89,33 +87,22 @@ class TrainingDataStorage:
         if not self.enabled:
             return None
 
-        try:
-            # Add metadata
-            storage_entry = {
-                'timestamp': datetime.utcnow().isoformat(),
-                'stored_at': time.time(),
-                'data': training_data
-            }
+        # Add metadata
+        storage_entry = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'stored_at': time.time(),
+            'data': training_data
+        }
 
-            # Get or create file for writing
-            file_path = await self._get_current_file_path()
+        # Get or create file for writing
+        file_path = self._get_current_file_path()
 
-            # Write data based on format
-            if self.file_format == 'json':
-                await self._write_json_entry(file_path, storage_entry)
-            elif self.file_format == 'jsonl':
-                await self._write_jsonl_entry(file_path, storage_entry)
-            else:
-                raise ValueError(f"Unsupported file format: {self.file_format}")
+        # Write data based on format
+        self._write_jsonl_entry(file_path, storage_entry)
 
-            return str(file_path)
+        return str(file_path)
 
-        except Exception as e:
-            # Log error but don't fail the main process
-            print(f"Error storing training data: {str(e)}")
-            return None
-
-    async def _get_current_file_path(self) -> Path:
+    def _get_current_file_path(self) -> Path:
         """Get the current file path for writing, creating new file if needed."""
         # Check if we need a new file
         if (self._current_file_path is None or
@@ -128,7 +115,7 @@ class TrainingDataStorage:
 
             # Create new file path
             timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')[:-3]  # microseconds to milliseconds
-            filename = f"training_data_{timestamp}.{self.file_format}"
+            filename = f"training_data_{timestamp}.jsonl"
             if self.compress:
                 filename += ".gz"
 
@@ -137,28 +124,7 @@ class TrainingDataStorage:
 
         return self._current_file_path
 
-    async def _write_json_entry(self, file_path: Path, entry: Dict[str, Any]):
-        """Write entry to JSON file (array format)."""
-        # For JSON format, we need to read existing data, append, and rewrite
-        # This is less efficient but maintains valid JSON structure
-
-        existing_data = []
-        if file_path.exists():
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
-            except (json.JSONDecodeError, FileNotFoundError):
-                existing_data = []
-
-        existing_data.append(entry)
-
-        # Write back to file
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(existing_data, f, indent=2, ensure_ascii=False)
-
-        self._entries_in_current_file = len(existing_data)
-
-    async def _write_jsonl_entry(self, file_path: Path, entry: Dict[str, Any]):
+    def _write_jsonl_entry(self, file_path: Path, entry: Dict[str, Any]):
         """Write entry to JSONL file (one JSON per line)."""
         # JSONL is more efficient for appending
         with open(file_path, 'a', encoding='utf-8') as f:
@@ -175,7 +141,6 @@ class TrainingDataStorage:
         stats = {
             "enabled": True,
             "storage_dir": str(self.storage_dir),
-            "file_format": self.file_format,
             "current_file": str(self._current_file_path) if self._current_file_path else None,
             "entries_in_current_file": self._entries_in_current_file,
             "total_files": 0,
@@ -279,22 +244,18 @@ class ServerRolloutWorker(Worker):
     - Compatible with OnlineCodingRunner interface
     """
 
-    def __init__(self, config: DictConfig, placement: ComponentPlacement):
+    def __init__(self, cfg: DictConfig, placement: ComponentPlacement):
         Worker.__init__(self)
 
-        self._cfg = config
+        self._cfg = cfg
         self._placement = placement
 
         # Initialize tokenizer for text processing
         self._tokenizer = AutoTokenizer.from_pretrained(self._cfg.rollout.model_dir)
-        if self._tokenizer.pad_token is None:
-            self._tokenizer.pad_token = self._tokenizer.eos_token
 
         # Server configuration
-        # self._server_host = getattr(self._cfg.server, 'host', '0.0.0.0')
-        # self._server_port = getattr(self._cfg.server, 'port', 8081)
-        self._server_host = '0.0.0.0'
-        self._server_port = 8082
+        self._server_host = cfg.server.tracking_rollout.get('host', '0.0.0.0')
+        self._server_port = cfg.server.tracking_rollout.get('port', 8082)
 
         # Unified data source for both HTTP and Channel data
         # max_queue_size = getattr(self._cfg.server, 'max_queue_size', 1000)
@@ -407,7 +368,7 @@ class ServerRolloutWorker(Worker):
             training_data['received_at'] = time.time()
 
             # Store training data to file (async, non-blocking)
-            storage_path = await self._storage.store_training_data(training_data)
+            storage_path = self._storage.store_training_data(training_data)
             if storage_path:
                 training_data['storage_path'] = storage_path
                 self.log_debug(f"Training data stored to: {storage_path}")
@@ -461,7 +422,6 @@ class ServerRolloutWorker(Worker):
 
     def _convert_training_data_to_rollout_result(self, training_data: Dict[str, Any]) -> RolloutResult:
         """Convert training data from HTTP request into RolloutResult format."""
-        self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 1")
         # try:
         if True:
             # Extract text data
@@ -471,7 +431,6 @@ class ServerRolloutWorker(Worker):
             reward_score = training_data.get('accepted', 0.0)
             assert input_text is not None
             assert output_text is not None
-            self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 3")
 
             # Tokenize texts
             input_encoding = self._tokenizer(
@@ -480,9 +439,7 @@ class ServerRolloutWorker(Worker):
                 truncation=True,
                 max_length=self._cfg.runner.seq_length - self._max_new_tokens
             )
-            self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 4")
             input_ids = input_encoding['input_ids'][0].tolist()
-            self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 5")
 
             output_encoding = self._tokenizer(
                 text=output_text,
@@ -490,13 +447,10 @@ class ServerRolloutWorker(Worker):
                 truncation=True,
                 max_length=self._max_new_tokens
             )
-            self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 6")
             output_ids = output_encoding['input_ids'][0].tolist()
-            self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 7")
 
             # Create RolloutResult with the feedback data
             group_size = getattr(self._cfg.algorithm, 'group_size', 1)
-            self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 8")
 
             rollout_result = RolloutResult(
                 num_sequence=1,
@@ -513,7 +467,6 @@ class ServerRolloutWorker(Worker):
                 answers=[output_text]
             )
 
-            self.log_info("zcy_dbg: _convert_training_data_to_rollout_result: 9")
             self.log_debug(f"Created RolloutResult from HTTP data with reward {reward_score}")
 
             return rollout_result
@@ -580,56 +533,35 @@ class ServerRolloutWorker(Worker):
         while not self._should_stop:
             # try:
                 # Get data from unified source (either HTTP or Channel)
-                self.log_info("zcy_dbg: _process_unified_data_continuously: before get data")
                 data_item = await self._data_source.get()
-                self.log_info("zcy_dbg: _process_unified_data_continuously: after get data")
 
                 if data_item is None:  # Shutdown signal
-                    self.log_info("zcy_dbg: _process_unified_data_continuously: 1, break")
                     break
 
                 data_type, data = data_item
                 self.log_debug(f"Processing {data_type} data")
-                self.log_info("zcy_dbg: _process_unified_data_continuously: 2")
 
                 # Convert data to RolloutResult based on source type
                 if data_type == 'http':
-                    self.log_info("zcy_dbg: _process_unified_data_continuously: 3")
                     rollout_result = self._convert_training_data_to_rollout_result(data)
                     job_id = data.get('job_id', 'unknown')
                     self.log_info(f"Processed HTTP training data: job_id={job_id}")
                 elif data_type == 'channel':
-                    self.log_info("zcy_dbg: _process_unified_data_continuously: 4") 
                     rollout_result = self._convert_rollout_request_to_result(data)
                     self.log_info(f"Processed Channel rollout request with {len(data.input_ids)} sequences")
                 else:
-                    self.log_info("zcy_dbg: _process_unified_data_continuously: 5")
                     self.log_error(f"Unknown data type: {data_type}")
                     continue
 
                 # Send result to output channel if available
                 if self._output_channel:
-                    self.log_info("zcy_dbg: _process_unified_data_continuously: 6")
-                    self.log_info(f"Sending rollout result to output channel: job_id={job_id}")
                     await self._output_channel.put(item=rollout_result, async_op=True).async_wait()
                     # log the qsize of the output channel
                     self.log_info(f"Output channel qsize: {self._output_channel.qsize()}")
 
-                self.log_info("zcy_dbg: _process_unified_data_continuously: 7")
                 # Mark task as done
                 self._data_source.task_done()
-                self.log_info("zcy_dbg: _process_unified_data_continuously: 8")
 
-            # except asyncio.TimeoutError:
-            #     # Normal timeout, continue processing
-            #     continue
-            # except Exception as e:
-            #     self.log_error(f"Error in continuous data processing: {str(e)}")
-            #     # Mark task as done even if there was an error
-            #     try:
-            #         self._data_source.task_done()
-            #     except:
-            #         pass
 
         self.log_info("Continuous unified data processing stopped")
 
@@ -781,16 +713,3 @@ class ServerRolloutWorker(Worker):
         await self._storage.cleanup()
 
         self.log_info("ServerRolloutWorker shutdown complete")
-
-    def _stop(self):
-        """Stop the server and cleanup resources (sync version)."""
-        self.log_info("Stopping ServerRolloutWorker...")
-
-        self._should_stop = True
-
-        # Schedule shutdown in event loop
-        if self._loop and not self._loop.is_closed():
-            asyncio.run_coroutine_threadsafe(self.shutdown(), self._loop)
-
-        # Stop event loop
-        self._stop_event_loop()
