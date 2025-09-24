@@ -130,12 +130,14 @@ class DualOutput:
 
     def write(self, message):
         self.terminal.write(message)
-        self.file.write(message)
-        self.flush()  # Flush immediately to ensure the data is written.
+        if self.file is not None:
+            self.file.write(message)
+            self.flush()  # Flush immediately to ensure the data is written.
 
     def flush(self):
         self.terminal.flush()
-        self.file.flush()
+        if self.file is not None:
+            self.file.flush()
 
     def fileno(self):
         # Return the terminal's fileno to maintain expected behavior
@@ -146,7 +148,9 @@ class DualOutput:
 
     def close(self):
         self.flush()
-        self.file.close()
+        if self.file is not None:
+            self.file.close()
+            self.file = None
 
     def readable(self):
         return False
