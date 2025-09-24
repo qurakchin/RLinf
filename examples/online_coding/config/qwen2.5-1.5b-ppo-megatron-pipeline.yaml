@@ -22,11 +22,11 @@ runner:
     experiment_name: ${runner.experiment_name}
     logger_backends: ["tensorboard"] # wandb, swanlab
 
-  max_epochs: 100
+  max_epochs: 10
   max_steps: -1
 
   val_check_interval: 1
-  save_interval: 50
+  save_interval: 10
 
   seq_length: 2560
 
@@ -145,7 +145,7 @@ data:
   type: math
   max_prompt_length: 1024
   filter_prompt_by_length: True
-  rollout_batch_size: 512
+  rollout_batch_size: 16
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
