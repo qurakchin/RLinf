@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime
 
-def agenerate(prefix="", suffix=""):
+async def agenerate(prefix, suffix):
     TARGET_URL = "http://127.0.0.1:8081/v1/completions"
 
     # 获取原始请求的头部和主体
@@ -26,8 +26,8 @@ def agenerate(prefix="", suffix=""):
     # 检查是否启用流式输出
 
     # 非流式响应处理
-    with httpx.Client() as client:
-        response = client.post(
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
             TARGET_URL,
             headers=headers,
             json=body,
@@ -36,7 +36,7 @@ def agenerate(prefix="", suffix=""):
         print(f'zcy_dbg: 2, response: {response.json()}')
         return response.json()['choices'][0]['text']
 
-def atrack(prefix="", suffix="", completion="", accepted=True):
+async def atrack(prefix, suffix, completion, accepted):
     TARGET_URL = "http://127.0.0.1:8082/api/training/submit"
 
     headers = {
@@ -62,8 +62,8 @@ def atrack(prefix="", suffix="", completion="", accepted=True):
     }
 
     # 非流式响应处理
-    with httpx.Client() as client:
-        response = client.post(
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
             TARGET_URL,
             headers=headers,
             json=body,
@@ -71,15 +71,29 @@ def atrack(prefix="", suffix="", completion="", accepted=True):
         )
         print(f'zcy_dbg: 2, response: {response.json()}')
 
-def loop():
+async def single_iteration(prefix, suffix):
+    """单个迭代的异步函数"""
+    await asyncio.sleep(0.001)
+    completion = await agenerate(prefix=prefix, suffix=suffix)
+    await asyncio.sleep(0.001)
+    await atrack(prefix=prefix, suffix=suffix, completion=completion, accepted=True)
+
+async def loop():
     prefix = "if x[j] > x[j + 1]:\n                x[j], x[j + 1] = x[j + 1], x[j]\n    return x\n\ndef han"
     suffix = "\n# —————————————————————————————————————————————————     Agent      ————————————————————————————————————————————————— #\n#           Agent equips the Chat model with the tools needed to handle a wide range of coding tasks, allowing\n#           the model to make decisions and save you the work of manually finding context and performing actions.\n\n# 1. Switch from \"Chat\" to \"Agent\" mode using the dropdown in the bottom left of the input box"
-    for i in range(10):
-        print(f'zcy_dbg: loop: i={i}')
-        time.sleep(0.001)
-        completion = agenerate(prefix=prefix, suffix=suffix)
-        time.sleep(0.001)
-        atrack(prefix=prefix, suffix=suffix, completion=completion, accepted=True)
+
+    # 创建所有任务
+    tasks = []
+    for i in range(16 * 10):
+        task = asyncio.create_task(single_iteration(prefix, suffix))
+        tasks.append(task)
+
+        if i % 16 == 0:
+            await asyncio.gather(*tasks)
+            tasks = []
+
+    # 并发执行所有任务
+    await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    loop()
+    asyncio.run(loop())

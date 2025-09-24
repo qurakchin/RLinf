@@ -19,14 +19,13 @@ import time
 import uuid
 from typing import Dict, List, Optional, Any
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from omegaconf.dictconfig import DictConfig
 from pydantic import BaseModel
 import uvicorn
 
-from rlinf.scheduler import Channel, Worker
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
+from rlinf.scheduler import Worker
 from rlinf.workers.rollout.sglang.sglang_worker import AsyncSGLangWorker
 from rlinf.utils.placement import ComponentPlacement
 
@@ -57,8 +56,7 @@ class OnlineRouterWorker(Worker):
     def __init__(self, cfg: DictConfig, placement: ComponentPlacement):
         Worker.__init__(self)
 
-        self.cfg = cfg
-        self.app = FastAPI(title="OnlineRouterWorker", version="1.0.0")
+        self._cfg = cfg
 
         # Configuration
         self._server_host = cfg.server.online_router.get('host', '0.0.0.0')
@@ -82,16 +80,42 @@ class OnlineRouterWorker(Worker):
 
         # Setup FastAPI routes
         self._setup_routes()
-
-        self._server_running = False
+        self._server_task = None
 
     def _setup_routes(self):
         """Setup FastAPI routes."""
+        app = FastAPI(title="OnlineRouterWorker", version="1.0.0")
+        app.add_api_route("/v1/completions", self._handle_complete, methods=["POST"])
 
-        @self.app.post("/v1/completions")
-        async def complete(request: CompleteRequest):
-            """Handle complete requests."""
-            return await self._handle_complete(request)
+        # Init the HTTP server
+        self._server = uvicorn.Server(uvicorn.Config(
+            app,
+            host=self._server_host,
+            port=self._server_port,
+            log_level="info"
+        ))
+
+    def server_start(self):
+        """Start service."""
+        assert self._server_task is None
+
+        # Start server in background task
+        self._server_task = asyncio.create_task(self._server.serve())
+
+        self.log_info(f"service started on {self._server_host}:{self._server_port}")
+
+    def server_stop(self):
+        """Stop service."""
+        assert self._server_task is not None
+
+        # Stop the HTTP server
+        self._server.should_exit = True
+
+        # Wait the HTTP server to stop
+        asyncio.wait_for(self._server_task, timeout=10.0)
+
+        self._server_task = None
+        self.log_info("service stopped")
 
     async def _handle_complete(self, request: CompleteRequest):
         """Handle complete requests with synchronization support."""
@@ -169,36 +193,6 @@ class OnlineRouterWorker(Worker):
     async def init_worker(self, rollout_worker: AsyncSGLangWorker):
         """Initialize the worker."""
         self.rollout_worker = rollout_worker
-
-    def rollout_start(self):
-        """Start rollout service."""
-        assert not self._server_running
-        self._server_running = True
-        
-        # Start the HTTP server
-        config = uvicorn.Config(
-            self.app,
-            host=self._server_host,
-            port=self._server_port,
-            log_level="info"
-        )
-        self._server = uvicorn.Server(config)
-
-        # Start server in background task
-        asyncio.create_task(self._server.serve())
-
-        self.log_info(f"Rollout service started on {self._server_host}:{self._server_port}")
-
-    def rollout_stop(self):
-        """Stop rollout service."""
-        assert self._server_running
-        self._server_running = False
-
-        # Stop the HTTP server
-        if hasattr(self, '_server') and self._server:
-            self._server.should_exit = True
-
-        self.log_info("Rollout service stopped")
 
     async def sync_model_start(self):
         """Start model synchronization. Block new requests and wait for old ones to complete."""

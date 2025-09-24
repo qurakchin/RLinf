@@ -51,7 +51,7 @@ def main(cfg) -> None:
     online_router = OnlineRouterWorker.create_group(cfg, component_placement).launch(
         cluster=cluster, name='OnlineRouterWorker', placement_strategy=singleton_placement_strategy
     )
-    server_rollout = ServerRolloutWorker.create_group(cfg, component_placement).launch(
+    server_rollout = ServerRolloutWorker.create_group(cfg).launch(
         cluster=cluster, name='ServerRolloutWorker', placement_strategy=singleton_placement_strategy
     )
 
