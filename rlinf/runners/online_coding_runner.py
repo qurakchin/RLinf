@@ -54,14 +54,12 @@ class OnlineCodingRunner:
         actor: MegatronActor,
         online_router: OnlineRouterWorker,
         server_rollout: ServerRolloutWorker,
-        reward: Optional[Worker] = None,
     ):
         """"""
         self.cfg = cfg
         self.component_placement = placement
         self.is_pipeline = self.component_placement.is_disaggregated
         self.has_dedicated_inference = inference is not None
-        self.has_dedicated_reward = reward is not None
 
         # Workers
         self.rollout = rollout
@@ -70,7 +68,6 @@ class OnlineCodingRunner:
         self.server_rollout = server_rollout
         # Collocated mode uses actor as inference
         self.inference = inference if self.has_dedicated_inference else self.actor
-        self.reward = reward if self.has_dedicated_reward else self.actor
 
         # Data channels
         self.dataloader_channel = Channel.create("DataLoader")
@@ -78,9 +75,6 @@ class OnlineCodingRunner:
         # if inference is not a dedicated worker
         self.inference_channel = Channel.create(
             "Inference", local=not self.has_dedicated_inference
-        )
-        self.reward_channel = Channel.create(
-            "Reward", local=not self.has_dedicated_reward
         )
         self.actor_channel = Channel.create("Actor", local=True)
 
@@ -127,8 +121,6 @@ class OnlineCodingRunner:
         self.server_rollout.init_worker().wait()
         if self.has_dedicated_inference:
             self.inference.init_worker().wait()
-        if self.has_dedicated_reward:
-            self.reward.init_worker().wait()
 
         if self.cfg.runner.resume_dir is None:
             return
@@ -187,7 +179,6 @@ class OnlineCodingRunner:
             f"checkpoints/global_step_{self.global_steps}",
         )
         actor_save_path = os.path.join(base_output_dir, "actor")
-        # data_save_path = os.path.join(base_output_dir, "data")
 
         # actor
         self.actor.save_checkpoint(actor_save_path, self.global_steps).wait()
@@ -206,8 +197,6 @@ class OnlineCodingRunner:
     def run(self):
 
         global_pbar = tqdm(
-            # initial=self.global_steps,
-            # total=self.max_steps,
             initial=0,
             total=self.cfg.runner.max_epochs,
             desc="Global Step",
@@ -235,15 +224,9 @@ class OnlineCodingRunner:
                         infer_handle = None
                         inference_channel = self.dataloader_channel
 
-                    # Rewards
-                    reward_handle: Handle = self.reward.compute_rewards(
-                        input_channel=inference_channel,
-                        output_channel=self.reward_channel,
-                    )
-
                     # Advantages and returns
                     adv_handle: Handle = self.actor.compute_advantages_and_returns(
-                        input_channel=self.reward_channel,
+                        input_channel=self.inference_channel,
                         output_channel=self.actor_channel,
                     )
 
@@ -287,7 +270,6 @@ class OnlineCodingRunner:
 
                 time_metrics = self.timer.consume_durations()
                 time_metrics["training"] = actor_handle.consume_duration()
-                time_metrics["reward"] = reward_handle.consume_duration()
                 time_metrics["advantage"] = adv_handle.consume_duration()
                 if infer_handle is not None:
                     # Inference time should be the min time across ranks, because different DP receive the rollout results differently
