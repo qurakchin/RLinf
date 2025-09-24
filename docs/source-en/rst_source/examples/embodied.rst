@@ -93,7 +93,6 @@ Running the Script
 
    cluster:
       num_nodes: 2
-      num_gpus_per_node: 8
       component_placement:
          env: 0-7
          rollout: 8-15
@@ -110,7 +109,6 @@ Additionally, by setting `pipeline_stage_num = 2` in the configuration, you can 
    
    cluster:
       num_nodes: 1
-      num_gpus_per_node: 8
       component_placement:
          env,rollout,actor: all
 
@@ -120,7 +118,6 @@ You can also reconfigure the placement to achieve complete sharing, where env, r
 
    cluster:
       num_nodes: 2
-      num_gpus_per_node: 16
       component_placement:
          env: 0-3
          rollout: 4-7
