@@ -394,7 +394,7 @@ class MegatronActor(MegatronModelManager, Worker):
 
                 kl_loss = torch.tensor(0.0, device=torch.cuda.current_device())
                 if self.kl_beta > 0 and ref_logprobs is not None:
-                    kld = kl_penalty(ref_logprobs, curr_logprobs, self.kl_penalty_type)
+                    kld = kl_penalty(curr_logprobs, ref_logprobs, self.kl_penalty_type)
                     kl_loss = self.loss_agg_func(kld, mask)
                     loss = loss + kl_loss * self.kl_beta
 
