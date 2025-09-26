@@ -222,15 +222,6 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
     return cfg
 
 
-def set_new_omegaconf_resolvers():
-    OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
-    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y, replace=True)
-    OmegaConf.register_new_resolver("subtract", lambda x, y: x - y, replace=True)
-    OmegaConf.register_new_resolver(
-        "torch.dtype", lambda dtype_name: getattr(torch, dtype_name), replace=True
-    )
-
-
 def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
     OmegaConf.set_struct(cfg, True)
 
@@ -506,9 +497,12 @@ def validate_embodied_cfg(cfg):
     )
 
     # process num-envs
+    from rlinf.scheduler import Cluster
     from rlinf.utils.placement import HybridComponentPlacement
 
-    component_placement = HybridComponentPlacement(cfg)
+    component_placement = HybridComponentPlacement(
+        cfg, Cluster(num_nodes=cfg.cluster.num_nodes)
+    )
     stage_num = cfg.rollout.pipeline_stage_num
     env_world_size = component_placement.get_world_size("env")
     cfg.algorithm.num_group_envs = (

@@ -1,6 +1,11 @@
 Agentic RL-VLA
 ========================
 
+.. |huggingface| image:: /_static/svg/hf-logo.svg
+   :width: 16px
+   :height: 16px
+   :class: inline-icon
+
 This document provides a comprehensive guide to launching and managing the 
 Vision-Language-Action Models (VLAs) training task within the RLinf framework, 
 focusing on finetuning a VLA model for robotic manipulation in the ManiSkill3/LIBERO environment. 
@@ -88,7 +93,6 @@ Running the Script
 
    cluster:
       num_nodes: 2
-      num_gpus_per_node: 8
       component_placement:
          env: 0-7
          rollout: 8-15
@@ -105,7 +109,6 @@ Additionally, by setting `pipeline_stage_num = 2` in the configuration, you can 
    
    cluster:
       num_nodes: 1
-      num_gpus_per_node: 8
       component_placement:
          env,rollout,actor: all
 
@@ -115,7 +118,6 @@ You can also reconfigure the placement to achieve complete sharing, where env, r
 
    cluster:
       num_nodes: 2
-      num_gpus_per_node: 16
       component_placement:
          env: 0-3
          rollout: 4-7
@@ -247,27 +249,27 @@ The best-performing model for each task is highlighted in bold.
      - Semantic
      - Position 
      - Average
-   * - `rl4vla <https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup>`_
+   * - |huggingface| `rl4vla <https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup>`_
      - 76.6%
      - 75.4%
      - 77.6%
      - 76.1%
-   * - GRPO-OpenVLA-OFT
+   * - |huggingface| `GRPO-OpenVLA-OFT <https://huggingface.co/RLinf/RLinf-OpenVLAOFT-GRPO-ManiSkill3-25ood>`_
      - **84.6%**
      - 51.6%
      - 42.9%
      - 61.5%
-   * - PPO-OpenVLA-OFT
+   * - |huggingface| `PPO-OpenVLA-OFT <https://huggingface.co/RLinf/RLinf-OpenVLAOFT-PPO-ManiSkill3-25ood>`_
      - 80.5%
      - 56.6%
      - 56.1%
      - 64.5%
-   * - PPO-OpenVLA
+   * - |huggingface| `PPO-OpenVLA <https://huggingface.co/RLinf/RLinf-OpenVLA-PPO-ManiSkill3-25ood>`_
      - 82.0%
      - **80.6%**
      - **89.3%**
      - **82.2%**
-   * - GRPO-OpenVLA
+   * - |huggingface| `GRPO-OpenVLA <https://huggingface.co/RLinf/RLinf-OpenVLA-GRPO-ManiSkill3-25ood>`_
      - 74.7%
      - 74.4%
      - 81.6%

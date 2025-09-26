@@ -1,6 +1,11 @@
 具身智能 RL-VLA
 ========================
 
+.. |huggingface| image:: /_static/svg/hf-logo.svg
+   :width: 16px
+   :height: 16px
+   :class: inline-icon
+
 本文档给出在 RLinf 框架内启动与管理 **Vision-Language-Action Models (VLAs)** 训练任务的完整指南，  
 重点是在 ManiSkill3/LIBERO 环境中微调 VLA 模型以完成机器人操作。
 
@@ -80,7 +85,6 @@
 
    cluster:
       num_nodes: 2
-      num_gpus_per_node: 8
       component_placement:
          env: 0-7
          rollout: 8-15
@@ -89,7 +93,7 @@
    rollout:
       pipeline_stage_num: 2
 
-你可以灵活配置 env、rollout、actor 三个组件使用的 GPU 数量。  
+你可以灵活配置 env、rollout、actor 三个组件使用的 GPU等加速器 数量。  
 使用上述配置，可以让 env 与 rollout 之间流水线重叠，并与 actor 共享。  
 此外，在配置中设置 `pipeline_stage_num = 2`，可实现 **rollout 与 actor** 之间的流水线重叠，从而提升 rollout 效率。
 
@@ -97,7 +101,6 @@
    
    cluster:
       num_nodes: 1
-      num_gpus_per_node: 8
       component_placement:
          env,rollout,actor: all
 
@@ -107,7 +110,6 @@
 
    cluster:
       num_nodes: 2
-      num_gpus_per_node: 16
       component_placement:
          env: 0-3
          rollout: 4-7
@@ -239,27 +241,27 @@ ManiSkill3 结果
      - Semantic
      - Position
      - 平均值
-   * - `rl4vla <https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup>`_
+   * - |huggingface| `rl4vla <https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup>`_
      - 76.6%
      - 75.4%
      - 77.6%
      - 76.1%
-   * - GRPO-OpenVLA-OFT
+   * - |huggingface| `GRPO-OpenVLA-OFT <https://huggingface.co/RLinf/RLinf-OpenVLAOFT-GRPO-ManiSkill3-25ood>`_
      - **84.6%**
      - 51.6%
      - 42.9%
      - 61.5%
-   * - PPO-OpenVLA-OFT
+   * - |huggingface| `PPO-OpenVLA-OFT <https://huggingface.co/RLinf/RLinf-OpenVLAOFT-PPO-ManiSkill3-25ood>`_
      - 80.5%
      - 56.6%
      - 56.1%
      - 64.5%
-   * - PPO-OpenVLA
+   * - |huggingface| `PPO-OpenVLA <https://huggingface.co/RLinf/RLinf-OpenVLA-PPO-ManiSkill3-25ood>`_
      - 82.0%
      - **80.6%**
      - **89.3%**
      - **82.2%**
-   * - GRPO-OpenVLA
+   * - |huggingface| `GRPO-OpenVLA <https://huggingface.co/RLinf/RLinf-OpenVLA-GRPO-ManiSkill3-25ood>`_
      - 74.7%
      - 74.4%
      - 81.6%
