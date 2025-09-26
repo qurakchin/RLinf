@@ -35,13 +35,13 @@
 1. **安装 Continue 扩展**
    
    由于当前 Continue 未支持上传用户对代码补全的偏好反馈，因此我们修改了 Continue 的源码，支持上传用户对代码补全的偏好反馈。
-   用户可从 [这里](https://github.com/RLinf/continue) 获取编译好的修改后的 Continue 插件，或自行构建。
+   用户可从 `这里 <https://github.com/RLinf/continue>`_ 获取编译好的修改后的 Continue 插件，或自行构建。
 
    下载编译好的 Continue 插件后，在 VS Code 中安装。
 
    方法1: code --install-extension /path/to/continue-1.3.9.vsix"
 
-   方法2: 在 VSCode 中按 Cmd+Shift+P，输入 'Extensions: Install from VSIX'，选择上述文件
+   方法2: 在 VSCode 中按 Cmd+Shift+P ，输入 'Extensions: Install from VSIX'，选择上述文件
 
 2. **配置 Continue 设置**
 
@@ -84,7 +84,7 @@
 
 1. **准备模型和配置**
    
-   确保您有预训练的模型权重，并修改配置文件中的路径：
+   确保您有预训练的模型权重，并修改配置文件，匹配模型路径、需要使用的端口等
 
    .. code-block:: yaml
 
@@ -103,13 +103,13 @@
       cd /path/to/rlinf_online_rl
       
       # 启动训练服务
-      bash examples/online_coding/run_main_math_pipeline_grpo_megatron.sh qwen2.5-1.5b-grpo-megatron
+      bash examples/online_coding/run_main_math_pipeline_grpo_megatron.sh qwen2.5-1.5b-ppo-megatron
 
    这将启动以下服务：
    - **推理服务**：在端口 8081 提供代码补全 API
    - **训练服务**：在端口 8082 接收用户反馈数据
 
-### 与 Continue 联动
+**与 Continue 联动**
 
 1. **启动 Continue**
    
@@ -129,7 +129,7 @@
    - 拒绝的建议被标记为负面反馈
    - 模型参数根据反馈进行在线更新
 
-### 监控训练过程
+**监控训练过程**
 
 您可以通过以下方式监控训练过程：
 
@@ -138,7 +138,7 @@
    .. code-block:: bash
 
       # 查看训练日志
-      tail -f results/grpo-1.5b/train.log
+      tail -f results/ppo-1.5b/train.log
 
 2. **使用 TensorBoard**
    
@@ -151,7 +151,7 @@
    
    训练过程中会定期保存模型检查点到 `results/grpo-1.5b/checkpoints/` 目录。
 
-### 测试客户端
+**测试客户端**
 
 您可以使用提供的测试客户端来验证系统功能：
 
@@ -162,17 +162,7 @@
 
 测试客户端会模拟 Continue 的行为，发送代码补全请求并提交反馈数据。
 
-### 配置参数说明
-
-主要配置参数包括：
-
-- **cluster**: 集群配置（节点数、GPU 数等）
-- **algorithm**: 算法参数（学习率、批次大小等）
-- **rollout**: 推理配置（模型路径、推理引擎等）
-- **actor**: 训练配置（优化器、学习率调度等）
-- **reward**: 奖励函数配置
-
-### 故障排除
+**故障排除**
 
 常见问题及解决方案：
 
@@ -186,26 +176,6 @@
 
 3. **Continue 连接失败**
    
-   确保 Continue 配置中的 API 端点地址正确，检查网络连接。
+   确保 Continue 配置中的 API 端点地址正确，检查网络连接。还可使用 simple_test_client 测试是否能正常收到反馈数据。
 
-4. **内存不足**
-   
-   调整配置文件中的批次大小和 GPU 内存使用率设置。
-
-### 高级配置
-
-对于大规模部署，您可以：
-
-1. **使用多 GPU 训练**
-   
-   修改配置文件中的 `tensor_model_parallel_size` 和 `pipeline_model_parallel_size` 参数。
-
-2. **启用混合精度训练**
-   
-   设置 `actor.model.precision: fp16` 或 `bf16`。
-
-3. **优化通信效率**
-   
-   配置 `tp_comm_overlap_cfg` 参数以优化张量并行通信。
-
-通过以上步骤，您就可以成功运行在线编程强化学习系统，并实现与 Continue 编辑器的无缝集成。
+通过以上步骤，您就可以成功运行在线代码补全强化学习系统，并实现与 Continue 编辑器的无缝集成。
