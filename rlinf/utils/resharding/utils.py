@@ -156,7 +156,7 @@ class TransformFunc:
         tp_size = config.model_config.expert_tensor_parallel_size
         target_tp = config.reshard_tp_size
 
-        assert tp_size >= target_tp, f"tp_size {tp_size} must be greater than target_tp {target_tp}"
+        assert tp_size >= target_tp, f"tp_size {tp_size} must be greater than or equal to target_tp {target_tp}"
 
         split_size = linear_fc1.shape[0] // (tp_size // target_tp)
         linear_fc1_slice = torch.split(linear_fc1, split_size, dim=0)
@@ -258,7 +258,7 @@ class TransformFunc:
         """
         MoE expert layer weight conversion.
         """
-        # 提取专家ID和实际后缀
+        # Extract expert ID and actual suffix
         expert_pattern = r"mlp\.experts\.local_experts\.(\d+)\.(.+)"
         expert_match = re.search(expert_pattern, suffix)
         if not expert_match:
@@ -267,7 +267,7 @@ class TransformFunc:
         expert_id = expert_match.group(1)
         actual_suffix = expert_match.group(2)
         
-        # MoE专家层的权重映射
+        # MoE expert layer weight mapping
         expert_nmap = {
             "linear_fc1.weight": (
                 TransformType.SPLIT_FC1,
@@ -293,13 +293,11 @@ class TransformFunc:
     @staticmethod
     def mega_name_qwen3_30b_to_hf(name: str) -> Tuple[TransformType, List[str]]:
         """
-        Convert qwen2_5 model weight megatron name to hf name and do shape transform if needed.
-
+        Convert qwen3_30b model weight Megatron name to HuggingFace (HF) name and do shape transform if needed.
         Args:
-            name (str): megatron model weight name
-
+            name (str): Megatron model weight name
         Returns:
-            (TransformType, List[str]): transform type and the corresponding hf model weight name
+            (TransformType, List[str]): Transform type and the corresponding HF model weight name(s)
         """
         if "embedding.word_embeddings.weight" in name:
             return (TransformType.SPLIT_NONE, ["model.embed_tokens.weight"])
@@ -308,9 +306,9 @@ class TransformFunc:
         if "output_layer.weight" in name:
             return (TransformType.SPLIT_NONE, ["lm_head.weight"])
         layer_id, suffix = TransformFunc.extract_layer_info(name)
-        # 检查是否是MoE专家层
+        # check the MoE layer
         if "mlp.experts.local_experts" in suffix:
-            # 处理MoE专家层
+            # Handle MoE expert layer
             return TransformFunc.moe_expert_layer(layer_id, suffix)
         assert layer_id is not None, f"Cannot extract layer info from {name}"
         result_pattern = "model.layers.{}.{}"
