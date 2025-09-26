@@ -78,7 +78,7 @@ algorithm:
 
   # Use no-critic GAE advantage computation
   adv_type: math_gae_no_critic  # Will implement this function
-  normalize_advantages: True
+  normalize_advantages: False
   early_stop_imp_ratio: 5.0
   use_valid_token_scale: False
 
