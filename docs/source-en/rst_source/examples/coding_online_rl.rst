@@ -1,14 +1,14 @@
-Online Code Completion Reinforcement Learning
+Online Reinforcement Learning for Code Completion Agent
 =============================================
 
-Online Code Completion Reinforcement Learning is an important application scenario in the RLinf framework.
+Online Reinforcement Learning for Code Completion Agent is an important application scenario in the RLinf framework.
 Through integration with code editors like Continue, we can collect user preference feedback on code completions, enabling near real-time code generation and feedback learning to quickly improve code completion quality and align with user preferences.
 This example demonstrates how to use the RLinf framework to train a model capable of online code completion tasks.
 
 Overview
 --------
 
-The online code completion reinforcement learning system works through the following process:
+The online reinforcement learning for code completion agent system works through the following process:
 
 1. **Real-time Interaction**: The system receives code completion requests from editors like Continue
 2. **Model Inference**: Uses trained models to generate code completion suggestions
@@ -34,7 +34,7 @@ First, ensure you have installed the RLinf framework and its dependencies:
 1. **Install Continue Extension**
    
    Since the current Continue does not support uploading user preference feedback on code completions, we have modified the Continue source code to support uploading user preference feedback on code completions.
-   Users can get the compiled modified Continue plugin from `here <https://github.com/RLinf/continue>`_ or build it themselves.
+   Users can get the compiled modified Continue plugin from `here <https://github.com/RLinf/continue/releases>`_ or build it themselves.
 
    After downloading the compiled Continue plugin, install it in VS Code.
 
@@ -177,4 +177,4 @@ Common issues and solutions:
    
    Ensure the API endpoint addresses in Continue configuration are correct and check network connectivity. You can also use simple_test_client to test if feedback data can be received normally.
 
-Through these steps, you can successfully run the online code completion reinforcement learning system and achieve seamless integration with the Continue editor.
+Through these steps, you can successfully run the online reinforcement learning for code completion agent system and achieve seamless integration with the Continue editor.
