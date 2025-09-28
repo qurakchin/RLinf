@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 
 batch_size = 16
-epoch = 10
+epoch = 10 * 2
 
 async def agenerate(prefix, suffix):
     TARGET_URL = "http://127.0.0.1:8081/v1/completions"

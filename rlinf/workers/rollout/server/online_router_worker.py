@@ -104,7 +104,7 @@ class OnlineRouterWorker(Worker):
 
         self.log_info(f"service started on {self._server_host}:{self._server_port}")
 
-    def server_stop(self):
+    async def server_stop(self):
         """Stop service."""
         assert self._server_task is not None
 
@@ -112,7 +112,7 @@ class OnlineRouterWorker(Worker):
         self._server.should_exit = True
 
         # Wait the HTTP server to stop
-        asyncio.wait_for(self._server_task, timeout=10.0)
+        await self._server_task
 
         self._server_task = None
         self.log_info("service stopped")
