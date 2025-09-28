@@ -90,6 +90,17 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
+    stop: [
+      "<|endoftext|>",
+      "<|fim_prefix|>",
+      "<|fim_middle|>",
+      "<|fim_suffix|>",
+      "<|fim_pad|>",
+      "<|repo_name|>",
+      "<|file_sep|>",
+      "<|im_start|>",
+      "<|im_end|>",
+    ]
 
 inference:
   model_arch: ${rollout.model_arch}

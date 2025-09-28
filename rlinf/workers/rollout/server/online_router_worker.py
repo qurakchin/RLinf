@@ -136,7 +136,7 @@ class OnlineRouterWorker(Worker):
         try:
             # Forward request to rollout worker
             sglang_instance_id = random.randint(0, self._rollout_instance_num - 1)
-            generate_result = await self.rollout_worker.execute_on(sglang_instance_id).agenerate(request.prompt).async_wait()
+            generate_result = await self.rollout_worker.execute_on(sglang_instance_id).agenerate(request.prompt, stop=request.stop).async_wait()
             generated_text = generate_result[0]['text']
 
             if not request.stream:
@@ -147,7 +147,7 @@ class OnlineRouterWorker(Worker):
                         "text": generated_text,
                         "index": 0,
                         "logprobs": None,
-                        "finish_reason": "stop"
+                        "finish_reason": generate_result[0]["meta_info"]["finish_reason"]["type"]
                     }],
                     created=int(start_time),
                     model="test-model",

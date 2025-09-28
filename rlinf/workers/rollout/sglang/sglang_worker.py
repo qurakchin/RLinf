@@ -14,7 +14,7 @@
 
 import asyncio
 import dataclasses
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -394,8 +394,11 @@ class AsyncSGLangWorker(SGLangWorker):
         self._engine.shutdown()
         self.log_info(f"SGLang worker {self._rank} shutdown complete.")
 
-    async def agenerate(self, prompt: str):
+    async def agenerate(self, prompt: str, stop: Optional[List[str]] = None):
         sampling_params = self._sampling_params
+        if stop is not None:
+            sampling_params = {k: v for k, v in sampling_params.items()}
+            sampling_params['stop'] = stop
 
         result = await self._engine.async_generate(
             prompt=prompt,
