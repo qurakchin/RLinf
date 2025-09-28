@@ -42,12 +42,10 @@ def main(cfg) -> None:
     cfg = validate_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 
-    cluster = Cluster(
-        num_nodes=cfg.cluster.num_nodes, num_gpus_per_node=cfg.cluster.num_gpus_per_node
-    )
-    component_placement = ModelParallelComponentPlacement(cfg)
+    cluster = Cluster(num_nodes=cfg.cluster.num_nodes)
+    component_placement = ModelParallelComponentPlacement(cfg, cluster)
 
-    singleton_placement_strategy = PackedPlacementStrategy(start_gpu_id=0, end_gpu_id=0)
+    singleton_placement_strategy = PackedPlacementStrategy(start_accelerator_id=0, end_accelerator_id=0)
     online_router = OnlineRouterWorker.create_group(cfg, component_placement).launch(
         cluster=cluster, name='OnlineRouterWorker', placement_strategy=singleton_placement_strategy
     )
@@ -55,9 +53,6 @@ def main(cfg) -> None:
         cluster=cluster, name='ServerRolloutWorker', placement_strategy=singleton_placement_strategy
     )
 
-    # online_router_group.rollout_start()
-    # import time
-    # time.sleep(1000)
     rollout_worker_cls = get_rollout_backend_worker(cfg, component_placement)
 
     # Rollout group
