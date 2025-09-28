@@ -21,7 +21,7 @@ from omegaconf.omegaconf import OmegaConf
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
-from rlinf.runners.online_coding_runner import OnlineCodingRunner
+from rlinf.runners.coding_online_rl_runner import CodingOnlineRLRunner
 from rlinf.scheduler import Cluster
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
 from rlinf.utils.utils import output_redirector
@@ -86,7 +86,7 @@ def main(cfg) -> None:
 
     tokenizer = hf_tokenizer(cfg.actor.tokenizer.tokenizer_model)
 
-    runner = OnlineCodingRunner(
+    runner = CodingOnlineRLRunner(
         cfg=cfg,
         placement=component_placement,
         rollout=rollout_group,

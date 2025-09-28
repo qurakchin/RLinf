@@ -141,12 +141,12 @@ class ServerRolloutWorker(Worker):
     """
     ServerRolloutWorker that supports both HTTP API and Channel interfaces.
     It can receive training data from router's feedback_worker via HTTP
-    and also work with OnlineCodingRunner via Channel interface.
+    and also work with CodingOnlineRLRunner via Channel interface.
 
     Key features:
     - Unified data processing for both HTTP and Channel inputs
     - Automatic rollout processing after server startup
-    - Compatible with OnlineCodingRunner interface
+    - Compatible with CodingOnlineRLRunner interface
     """
 
     def __init__(self, cfg: DictConfig):

@@ -36,7 +36,7 @@ from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
 logging.getLogger().setLevel(logging.INFO)
 
 
-class OnlineCodingRunner:
+class CodingOnlineRLRunner:
     """Runner for online coding model training."""
 
     def __init__(

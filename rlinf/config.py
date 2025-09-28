@@ -556,7 +556,7 @@ def validate_math_cfg(cfg: DictConfig) -> DictConfig:
     return cfg
 
 
-def validate_online_coding_cfg(cfg: DictConfig) -> DictConfig:
+def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
     assert cfg.rollout.model_arch == "qwen2.5", (
         f"Model {cfg.rollout.model_arch} is not supported"
     )
@@ -608,8 +608,8 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
         cfg = validate_embodied_cfg(cfg)
     if cfg.runner.task_type == "math":
         cfg = validate_math_cfg(cfg)
-    if cfg.runner.task_type == "online_coding":
-        cfg = validate_online_coding_cfg(cfg)
+    if cfg.runner.task_type == "coding_online_rl":
+        cfg = validate_coding_online_rl_cfg(cfg)
 
     if (
         cfg.algorithm.adv_type == "embodied_grpo"

@@ -147,10 +147,10 @@ class MegatronActor(MegatronModelManager, Worker):
         if not self.cfg.reward.use_reward_model:
             if self.cfg.reward.reward_type == "math":
                 self.reward_fn = math_verify_call
-            elif self.cfg.reward.reward_type == "online_coding":
+            elif self.cfg.reward.reward_type == "coding_online_rl":
                 self.reward_fn = None
             else:
-                assert False, "only support math and online_coding"
+                assert False, "only support math and coding_online_rl"
 
         # Rollout configurations
         self.rollout_group_name = self.cfg.rollout.group_name

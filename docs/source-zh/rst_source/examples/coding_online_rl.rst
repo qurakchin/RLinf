@@ -103,7 +103,7 @@
       cd /path/to/rlinf_online_rl
       
       # 启动训练服务
-      bash examples/online_coding/run_main_math_pipeline_grpo_megatron.sh qwen2.5-1.5b-ppo-megatron
+      bash examples/coding_online_rl/run_main_math_pipeline_grpo_megatron.sh qwen2.5-1.5b-ppo-megatron
 
    这将启动以下服务：
    - **推理服务**：在端口 8081 提供代码补全 API
@@ -158,7 +158,7 @@
 .. code-block:: bash
 
    # 运行测试客户端
-   python examples/online_coding/simple_test_client.py
+   python examples/coding_online_rl/simple_test_client.py
 
 测试客户端会模拟 Continue 的行为，发送代码补全请求并提交反馈数据。
 

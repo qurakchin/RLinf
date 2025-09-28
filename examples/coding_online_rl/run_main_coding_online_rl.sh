@@ -18,4 +18,4 @@ else
     CONFIG_NAME=$1
 fi
 
-python ${REPO_PATH}/examples/online_coding/main_online_coding.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
+python ${REPO_PATH}/examples/coding_online_rl/main_coding_online_rl.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME

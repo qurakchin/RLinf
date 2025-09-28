@@ -102,7 +102,7 @@ First, ensure you have installed the RLinf framework and its dependencies:
       cd /path/to/rlinf_online_rl
       
       # Start training service
-      bash examples/online_coding/run_main_math_pipeline_grpo_megatron.sh qwen2.5-1.5b-ppo-megatron
+      bash examples/coding_online_rl/run_main_math_pipeline_grpo_megatron.sh qwen2.5-1.5b-ppo-megatron
 
    This will start the following services:
    - **Inference Service**: Provides code completion API on port 8081
@@ -157,7 +157,7 @@ You can use the provided test client to verify system functionality:
 .. code-block:: bash
 
    # Run test client
-   python examples/online_coding/simple_test_client.py
+   python examples/coding_online_rl/simple_test_client.py
 
 The test client simulates Continue behavior by sending code completion requests and submitting feedback data.
 
