@@ -162,9 +162,7 @@ class ServerRolloutWorker(Worker):
         self._server_port = cfg.server.tracking_rollout.get('port', 8082)
 
         # Unified data source for both HTTP and Channel data
-        # max_queue_size = getattr(self._cfg.server, 'max_queue_size', 1000)
-        max_queue_size = 1000
-        self._data_source = asyncio.Queue(maxsize=max_queue_size)
+        self._data_source = asyncio.Queue()
 
         # Initialize training data storage
         # storage_config = getattr(self._cfg, 'storage', None)
@@ -317,7 +315,7 @@ class ServerRolloutWorker(Worker):
             # Send result to output channel if available
             await output_channel.put(item=rollout_result, async_op=True).async_wait()
             # log the qsize of the output channel
-            self.log_info(f"Output channel qsize: {output_channel.qsize()}")
+            self.log_debug(f"Output channel qsize: {output_channel.qsize()}")
 
             # Mark task as done
             self._data_source.task_done()
