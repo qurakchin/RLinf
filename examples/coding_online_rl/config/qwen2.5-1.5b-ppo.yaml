@@ -34,7 +34,7 @@ runner:
 
   resume_dir: null
   experiment_name: online-ppo-1.5b-pipeline
-  output_dir: /mnt/public/zhuchunyang_rl/logs
+  output_dir: ../results
 
 algorithm:
   group_size: 1
@@ -116,7 +116,7 @@ rollout:
 
   gpu_memory_utilization: 0.55
 
-  model_dir: /mnt/public/hf_models/Qwen2.5-Coder-1.5B
+  model_dir: /path/to/model/Qwen2.5-Coder-1.5B
   model_arch: qwen2.5
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
@@ -161,9 +161,7 @@ data:
   prompt_key: prompt
   shuffle: True
   validation_shuffle: True
-  seed: 3456
-  train_data_paths: ["/mnt/public/guozhen/data/boba_106k_0319_prompt_1024.jsonl"]
-  val_data_paths: ["/mnt/public/guozhen/data/boba_106k_0319_prompt_1024.jsonl"]
+  seed: 1234
 
 actor:
   group_name: "ActorGroup"
@@ -171,7 +169,7 @@ actor:
   mcore_gpt: True
   spec_name: decoder_gpt
 
-  checkpoint_load_path: None
+  checkpoint_load_path: null
 
   offload_optimizer: True
   offload_weight: True
@@ -245,7 +243,7 @@ actor:
     lr_decay_iters: 10
 
   tokenizer:
-    tokenizer_model: /mnt/public/hf_models/Qwen2.5-Coder-1.5B
+    tokenizer_model: /path/to/model/Qwen2.5-Coder-1.5B
     use_fast: False
     trust_remote_code: True
     padding_side: 'right'
