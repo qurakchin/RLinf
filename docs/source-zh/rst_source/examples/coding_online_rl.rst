@@ -28,7 +28,7 @@
 .. code-block:: bash
 
    # 安装额外依赖
-   pip install httpx asyncio
+   pip install httpx asyncio fuzzywuzzy
 
 **配置 Continue 集成**
 

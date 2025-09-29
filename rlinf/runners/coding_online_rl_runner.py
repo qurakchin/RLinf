@@ -92,7 +92,6 @@ class CodingOnlineRLRunner:
 
         self.metric_logger = MetricLogger(cfg)
 
-
     def init_workers(self):
         # Must be done before actor init
         if self.cfg.runner.resume_dir is None:
@@ -266,6 +265,8 @@ class CodingOnlineRLRunner:
                     )
                     return
 
+                # To ensure the router server is paused (old requests are finished and new requests are paused).
+                # So it's safe to do weight sync on sglang.
                 rollout_handle.wait()
 
             time_metrics = self.timer.consume_durations()

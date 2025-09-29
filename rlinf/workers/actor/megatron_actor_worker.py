@@ -79,8 +79,8 @@ from rlinf.utils.utils import (
     seq_mean_token_sum,
 )
 from rlinf.workers.rollout.utils import RankMapper
-from toolkits.math_verifier.verify import math_verify_call
-from toolkits.code_verifier.verify import fim_verify_call
+from rlinf.algorithms.registry import get_reward_fn
+from toolkits import register_rewards
 
 
 class MegatronActor(MegatronModelManager, Worker):
@@ -146,12 +146,8 @@ class MegatronActor(MegatronModelManager, Worker):
 
         # Reward configurations
         if not self.cfg.reward.use_reward_model:
-            if self.cfg.reward.reward_type == "math":
-                self.reward_fn = math_verify_call
-            elif self.cfg.reward.reward_type == "coding_online_rl":
-                self.reward_fn = fim_verify_call
-            else:
-                assert False, "only support math and coding_online_rl"
+            register_rewards()
+            self.reward_fn = get_reward_fn(self.cfg.reward.reward_type)
 
         # Rollout configurations
         self.rollout_group_name = self.cfg.rollout.group_name

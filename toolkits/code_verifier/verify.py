@@ -1,7 +1,8 @@
 from typing import List
 from fuzzywuzzy import fuzz
+from rlinf.algorithms.registry import register_reward_fn
 
-
+@register_reward_fn("fim_verify_call")
 def fim_verify_call(
     responses: List[str],
     references: List[str],

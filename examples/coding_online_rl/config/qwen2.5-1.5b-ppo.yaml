@@ -152,15 +152,8 @@ rollout:
   cuda_graph_max_bs: 128 # the maximum batch size for cuda graph. If the batch size is larger than this, cuda graph will not be used.
 
 data:
-  type: math
   max_prompt_length: 1024
-  filter_prompt_by_length: True
   rollout_batch_size: 16
-  val_rollout_batch_size: null
-  num_workers: 2
-  prompt_key: prompt
-  shuffle: True
-  validation_shuffle: True
   seed: 1234
 
 actor:
@@ -288,7 +281,7 @@ actor:
 
 reward:
   use_reward_model: false
-  reward_type: 'coding_online_rl'
+  reward_type: fim_verify_call
   reward_scale: 5.0
 
 critic:

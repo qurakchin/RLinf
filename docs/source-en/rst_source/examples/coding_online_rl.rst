@@ -27,7 +27,7 @@ First, ensure you have installed the RLinf framework and its dependencies:
 .. code-block:: bash
 
    # Install additional dependencies
-   pip install httpx asyncio
+   pip install httpx asyncio fuzzywuzzy
 
 **Configure Continue Integration**
 
