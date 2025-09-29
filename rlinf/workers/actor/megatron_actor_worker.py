@@ -80,6 +80,7 @@ from rlinf.utils.utils import (
 )
 from rlinf.workers.rollout.utils import RankMapper
 from toolkits.math_verifier.verify import math_verify_call
+from toolkits.code_verifier.verify import fim_verify_call
 
 
 class MegatronActor(MegatronModelManager, Worker):
@@ -148,7 +149,7 @@ class MegatronActor(MegatronModelManager, Worker):
             if self.cfg.reward.reward_type == "math":
                 self.reward_fn = math_verify_call
             elif self.cfg.reward.reward_type == "coding_online_rl":
-                self.reward_fn = None
+                self.reward_fn = fim_verify_call
             else:
                 assert False, "only support math and coding_online_rl"
 
@@ -920,12 +921,16 @@ class MegatronActor(MegatronModelManager, Worker):
 
         if torch.distributed.get_rank() == parallel_state.get_model_parallel_src_rank():
             rewards = self.reward_fn(texts, answers)
-            reward_scores = [
-                self.cfg.reward.reward_scale
-                if reward == 1
-                else -self.cfg.reward.reward_scale
-                for reward in rewards
-            ]
+            if self.cfg.reward.reward_type == "math":
+                reward_scores = [
+                    self.cfg.reward.reward_scale
+                    if reward == 1
+                    else -self.cfg.reward.reward_scale
+                    for reward in rewards
+                ]
+            else:
+                reward_scores = rewards
+
             all_reward_scores.extend(reward_scores)
 
         if len(all_reward_scores) > 0:

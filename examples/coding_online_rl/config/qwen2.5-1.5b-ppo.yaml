@@ -217,13 +217,13 @@ actor:
 
   optim:
     optimizer: adam
-    bf16: False
-    fp16: True
-    lr: 2e-05
+    bf16: True
+    fp16: False
+    lr: 2e-06
     adam_beta1: 0.9
     adam_beta2: 0.95
     adam_eps: 1.0e-05
-    min_lr: 2.0e-6
+    min_lr: 2.0e-7
     weight_decay: 0.05
     use_distributed_optimizer: True
     overlap_grad_reduce: False
@@ -237,7 +237,7 @@ actor:
     lr_warmup_fraction: 0.01
     lr_warmup_init: 0.0
     lr_warmup_iters: 0
-    max_lr: 2.0e-5
+    max_lr: 2.0e-6
     min_lr: 0.0
     lr_decay_style: constant
     lr_decay_iters: 10
