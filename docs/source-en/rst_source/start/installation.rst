@@ -186,22 +186,25 @@ vLLM installation:
 
 .. _embodied-dependencies:
 
-Additional Embodied Dependencies
+Embodied Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For embodied experiments, first install the necessary system dependencies (currently only supported on Debian/Ubuntu via ``apt``):
 
 .. code-block:: shell
 
-   bash requirements/install_embodied_deps.sh
    uv sync --extra embodied
+   bash requirements/install_embodied_deps.sh # Must be run after the above command
 
 Then, depending on the experiment type, install the required packages for ``openvla``, ``openvla-oft`` and ``pi0``:
 
 .. code-block:: shell
 
-   # For OpenVLA/OpenVLA-oft experiments
+   # For OpenVLA experiments
    UV_TORCH_BACKEND=auto uv pip install -r requirements/openvla.txt --no-build-isolation
+
+   # For OpenVLA-oft experiment
+   UV_TORCH_BACKEND=auto uv pip install -r requirements/openvla_oft.txt --no-build-isolation
 
    # For Pi0 experiments
    UV_TORCH_BACKEND=auto uv pip install -r requirements/pi0.txt --no-build-isolation
