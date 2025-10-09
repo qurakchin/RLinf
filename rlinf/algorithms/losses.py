@@ -271,11 +271,18 @@ def compute_math_ppo_actor_loss(**kwargs):
     }
 
     # Add value loss if provided and critic is enabled
-    if (use_critic and use_value_loss and
-        values is not None and prev_values is not None and returns is not None):
-        value_pred_clipped = prev_values + (values - prev_values).clamp(
-            -value_clip, value_clip
-        ) if value_clip is not None else values
+    if (
+        use_critic
+        and use_value_loss
+        and values is not None
+        and prev_values is not None
+        and returns is not None
+    ):
+        value_pred_clipped = (
+            prev_values + (values - prev_values).clamp(-value_clip, value_clip)
+            if value_clip is not None
+            else values
+        )
         error_clipped = returns - value_pred_clipped
         error_original = returns - values
         value_loss_clipped = huber_loss(error_clipped, huber_delta)
@@ -291,19 +298,23 @@ def compute_math_ppo_actor_loss(**kwargs):
         value_loss = loss_agg_func(value_loss, loss_mask)
         total_loss = total_loss + value_loss
 
-        metrics_data.update({
-            "value_loss": masked_mean(value_loss.detach(), loss_mask),
-            "value_clip_ratio": value_clip_ratio.detach().item(),
-        })
+        metrics_data.update(
+            {
+                "value_loss": masked_mean(value_loss.detach(), loss_mask),
+                "value_clip_ratio": value_clip_ratio.detach().item(),
+            }
+        )
 
     # Add entropy loss if provided
     if entropy is not None and entropy_bonus > 0:
         entropy_loss = loss_agg_func(entropy, loss_mask)
         total_loss = total_loss - entropy_bonus * entropy_loss
 
-        metrics_data.update({
-            "entropy_loss": masked_mean(entropy_loss.detach(), loss_mask),
-        })
+        metrics_data.update(
+            {
+                "entropy_loss": masked_mean(entropy_loss.detach(), loss_mask),
+            }
+        )
 
     # Update total loss in metrics
     metrics_data["total_loss"] = masked_mean(total_loss.detach(), loss_mask)
@@ -347,7 +358,9 @@ if __name__ == "__main__":
         "value_clip": 0.2,
         "huber_delta": 1.0,
     }
-    loss_with_value, metrics_with_value = compute_math_ppo_actor_loss(**kwargs_with_value)
+    loss_with_value, metrics_with_value = compute_math_ppo_actor_loss(
+        **kwargs_with_value
+    )
     print(f"\nWith value loss: {loss_with_value=}")
     print(f"Value metrics: {metrics_with_value}")
 
@@ -358,7 +371,9 @@ if __name__ == "__main__":
         "entropy": entropy,
         "entropy_bonus": 0.01,
     }
-    loss_with_entropy, metrics_with_entropy = compute_math_ppo_actor_loss(**kwargs_with_entropy)
+    loss_with_entropy, metrics_with_entropy = compute_math_ppo_actor_loss(
+        **kwargs_with_entropy
+    )
     print(f"\nWith entropy loss: {loss_with_entropy=}")
     print(f"Entropy metrics: {metrics_with_entropy}")
 

@@ -32,6 +32,7 @@ from rlinf.workers.rollout.sglang.sglang_worker import AsyncSGLangWorker
 
 class CompleteRequest(BaseModel):
     """Complete request model."""
+
     prompt: str
     model: Optional[str] = None
     max_tokens: Optional[int] = 1024
@@ -45,11 +46,12 @@ class CompleteRequest(BaseModel):
 
 class CompleteResponse(BaseModel):
     """Complete response model."""
+
     id: str
     choices: List[Dict[str, Any]]
     model: str
     created: int
-    object: str = 'text_completion'
+    object: str = "text_completion"
 
 
 class OnlineRouterWorker(Worker):
@@ -61,8 +63,8 @@ class OnlineRouterWorker(Worker):
         self._cfg = cfg
 
         # Configuration
-        self._server_host = cfg.server.online_router.get('host', '0.0.0.0')
-        self._server_port = cfg.server.online_router.get('port', 8081)
+        self._server_host = cfg.server.online_router.get("host", "0.0.0.0")
+        self._server_port = cfg.server.online_router.get("port", 8081)
         self._rollout_instance_num = placement.rollout_dp_size
 
         # Sync weight state management
@@ -90,12 +92,11 @@ class OnlineRouterWorker(Worker):
         app.add_api_route("/v1/completions", self._handle_complete, methods=["POST"])
 
         # Init the HTTP server
-        self._server = uvicorn.Server(uvicorn.Config(
-            app,
-            host=self._server_host,
-            port=self._server_port,
-            log_level="info"
-        ))
+        self._server = uvicorn.Server(
+            uvicorn.Config(
+                app, host=self._server_host, port=self._server_port, log_level="info"
+            )
+        )
 
     def server_start(self):
         """Start service."""
@@ -138,24 +139,33 @@ class OnlineRouterWorker(Worker):
         try:
             # Forward request to rollout worker
             sglang_instance_id = random.randint(0, self._rollout_instance_num - 1)
-            generate_result = await self.rollout_worker.execute_on(sglang_instance_id).agenerate(request.prompt, stop=request.stop).async_wait()
-            generated_text = generate_result[0]['text']
+            generate_result = (
+                await self.rollout_worker.execute_on(sglang_instance_id)
+                .agenerate(request.prompt, stop=request.stop)
+                .async_wait()
+            )
+            generated_text = generate_result[0]["text"]
 
             if not request.stream:
                 # Create response
                 response = CompleteResponse(
                     id=str(request_id),
-                    choices=[{
-                        "text": generated_text,
-                        "index": 0,
-                        "logprobs": None,
-                        "finish_reason": generate_result[0]["meta_info"]["finish_reason"]["type"]
-                    }],
+                    choices=[
+                        {
+                            "text": generated_text,
+                            "index": 0,
+                            "logprobs": None,
+                            "finish_reason": generate_result[0]["meta_info"][
+                                "finish_reason"
+                            ]["type"],
+                        }
+                    ],
                     created=int(start_time),
                     model="test-model",
-                    object="text_completion"
+                    object="text_completion",
                 )
             else:
+
                 def generate_stream():
                     # Send final chunk with finish_reason
                     final_data = {
@@ -163,12 +173,14 @@ class OnlineRouterWorker(Worker):
                         "object": "text_completion.chunk",
                         "created": int(start_time),
                         "model": "test-model",
-                        "choices": [{
-                            "text": generated_text,
-                            "index": 0,
-                            "logprobs": None,
-                            "finish_reason": "stop"
-                        }]
+                        "choices": [
+                            {
+                                "text": generated_text,
+                                "index": 0,
+                                "logprobs": None,
+                                "finish_reason": "stop",
+                            }
+                        ],
                     }
                     yield f"data: {json.dumps(final_data)}\n\n"
                     yield "data: [DONE]\n\n"
@@ -180,7 +192,7 @@ class OnlineRouterWorker(Worker):
                         "Cache-Control": "no-cache",
                         "Connection": "keep-alive",
                         "X-Accel-Buffering": "no",  # Disable nginx buffering
-                    }
+                    },
                 )
 
             # Set future result
@@ -209,9 +221,13 @@ class OnlineRouterWorker(Worker):
 
             # Wait for all existing requests to complete
             if self._active_requests:
-                self.log_info(f"Waiting for {len(self._active_requests)} active requests to complete...")
+                self.log_info(
+                    f"Waiting for {len(self._active_requests)} active requests to complete..."
+                )
                 # Wait for all active requests to finish
-                await asyncio.gather(*self._active_requests.values(), return_exceptions=True)
+                await asyncio.gather(
+                    *self._active_requests.values(), return_exceptions=True
+                )
 
             # Set event to indicate old requests are complete
             self._old_requests_complete.set()

@@ -43,12 +43,18 @@ def main(cfg) -> None:
     cluster = Cluster(num_nodes=cfg.cluster.num_nodes)
     component_placement = ModelParallelComponentPlacement(cfg, cluster)
 
-    singleton_placement_strategy = PackedPlacementStrategy(start_accelerator_id=0, end_accelerator_id=0)
+    singleton_placement_strategy = PackedPlacementStrategy(
+        start_accelerator_id=0, end_accelerator_id=0
+    )
     online_router = OnlineRouterWorker.create_group(cfg, component_placement).launch(
-        cluster=cluster, name='OnlineRouterWorker', placement_strategy=singleton_placement_strategy
+        cluster=cluster,
+        name="OnlineRouterWorker",
+        placement_strategy=singleton_placement_strategy,
     )
     server_rollout = ServerRolloutWorker.create_group(cfg).launch(
-        cluster=cluster, name='ServerRolloutWorker', placement_strategy=singleton_placement_strategy
+        cluster=cluster,
+        name="ServerRolloutWorker",
+        placement_strategy=singleton_placement_strategy,
     )
 
     rollout_worker_cls = get_rollout_backend_worker(cfg, component_placement)

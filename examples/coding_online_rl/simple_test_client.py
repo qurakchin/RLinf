@@ -26,8 +26,8 @@ async def agenerate(prefix, suffix):
     TARGET_URL = "http://127.0.0.1:8081/v1/completions"
 
     headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer test-token',
+        "Content-Type": "application/json",
+        "Authorization": "Bearer test-token",
     }
     body = {
         "model": "test-model",
@@ -44,16 +44,16 @@ async def agenerate(prefix, suffix):
             json=body,
             timeout=15.0,
         )
-        print(f'agenerate get response: {response.json()}')
-        return response.json()['choices'][0]['text']
+        print(f"agenerate get response: {response.json()}")
+        return response.json()["choices"][0]["text"]
 
 
 async def atrack(prefix, suffix, completion, accepted):
     TARGET_URL = "http://127.0.0.1:8082/api/training/submit"
 
     headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer test-token',
+        "Content-Type": "application/json",
+        "Authorization": "Bearer test-token",
     }
 
     body = {
@@ -80,7 +80,7 @@ async def atrack(prefix, suffix, completion, accepted):
             json=body,
             timeout=15.0,
         )
-        print(f'atrack get response: {response.json()}')
+        print(f"atrack get response: {response.json()}")
 
 
 async def single_iteration(prefix, suffix):
@@ -92,7 +92,7 @@ async def single_iteration(prefix, suffix):
 
 async def loop():
     prefix = "if x[j] > x[j + 1]:\n                x[j], x[j + 1] = x[j + 1], x[j]\n    return x\n\ndef han"
-    suffix = "\n# —————————————————————————————————————————————————     Agent      ————————————————————————————————————————————————— #\n#           Agent equips the Chat model with the tools needed to handle a wide range of coding tasks, allowing\n#           the model to make decisions and save you the work of manually finding context and performing actions.\n\n# 1. Switch from \"Chat\" to \"Agent\" mode using the dropdown in the bottom left of the input box"
+    suffix = '\n# —————————————————————————————————————————————————     Agent      ————————————————————————————————————————————————— #\n#           Agent equips the Chat model with the tools needed to handle a wide range of coding tasks, allowing\n#           the model to make decisions and save you the work of manually finding context and performing actions.\n\n# 1. Switch from "Chat" to "Agent" mode using the dropdown in the bottom left of the input box'
 
     tasks = []
     for i in range(batch_size * epoch):

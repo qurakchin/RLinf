@@ -48,10 +48,10 @@ class TrainingDataStorage:
         if storage_config is None:
             storage_config = {}
 
-        self.enabled = storage_config.get('enabled', True)
-        self.storage_dir = Path(storage_config.get('storage_dir', './training_data'))
-        self.max_files_per_dir = storage_config.get('max_files_per_dir', 1000)
-        self.compress = storage_config.get('compress', False)
+        self.enabled = storage_config.get("enabled", True)
+        self.storage_dir = Path(storage_config.get("storage_dir", "./training_data"))
+        self.max_files_per_dir = storage_config.get("max_files_per_dir", 1000)
+        self.compress = storage_config.get("compress", False)
 
         # Create storage directory if enabled
         if self.enabled:
@@ -76,9 +76,9 @@ class TrainingDataStorage:
 
         # Add metadata
         storage_entry = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'stored_at': time.time(),
-            'data': training_data
+            "timestamp": datetime.utcnow().isoformat(),
+            "stored_at": time.time(),
+            "data": training_data,
         }
 
         # Get or create file for writing
@@ -92,11 +92,14 @@ class TrainingDataStorage:
     def _get_current_file_path(self) -> Path:
         """Get the current file path for writing, creating new file if needed."""
         # Check if we need a new file
-        if (self._current_file_path is None or
-            self._entries_in_current_file >= self.max_files_per_dir):
-
+        if (
+            self._current_file_path is None
+            or self._entries_in_current_file >= self.max_files_per_dir
+        ):
             # Create new file path
-            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')[:-3]  # microseconds to milliseconds
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")[
+                :-3
+            ]  # microseconds to milliseconds
             filename = f"training_data_{timestamp}.jsonl"
             if self.compress:
                 filename += ".gz"
@@ -109,9 +112,9 @@ class TrainingDataStorage:
     def _write_jsonl_entry(self, file_path: Path, entry: Dict[str, Any]):
         """Write entry to JSONL file (one JSON per line)."""
         # JSONL is more efficient for appending
-        with open(file_path, 'a', encoding='utf-8') as f:
+        with open(file_path, "a", encoding="utf-8") as f:
             json.dump(entry, f, ensure_ascii=False)
-            f.write('\n')
+            f.write("\n")
 
         self._entries_in_current_file += 1
 
@@ -123,10 +126,12 @@ class TrainingDataStorage:
         stats = {
             "enabled": True,
             "storage_dir": str(self.storage_dir),
-            "current_file": str(self._current_file_path) if self._current_file_path else None,
+            "current_file": str(self._current_file_path)
+            if self._current_file_path
+            else None,
             "entries_in_current_file": self._entries_in_current_file,
             "total_files": 0,
-            "total_size_bytes": 0
+            "total_size_bytes": 0,
         }
 
         # Count files and calculate total size
@@ -160,8 +165,8 @@ class ServerRolloutWorker(Worker):
         self._tokenizer = AutoTokenizer.from_pretrained(self._cfg.rollout.model_dir)
 
         # Configuration
-        self._server_host = cfg.server.tracking_rollout.get('host', '0.0.0.0')
-        self._server_port = cfg.server.tracking_rollout.get('port', 8082)
+        self._server_host = cfg.server.tracking_rollout.get("host", "0.0.0.0")
+        self._server_port = cfg.server.tracking_rollout.get("port", 8082)
 
         # Unified data source for both HTTP and Channel data
         self._data_source = asyncio.Queue()
@@ -174,7 +179,9 @@ class ServerRolloutWorker(Worker):
         self._storage = TrainingDataStorage(storage_config)
 
         # Processing configuration
-        self._max_new_tokens = getattr(self._cfg.algorithm.sampling_params, 'max_new_tokens', 512)
+        self._max_new_tokens = getattr(
+            self._cfg.algorithm.sampling_params, "max_new_tokens", 512
+        )
         self._batch_size = cfg.data.rollout_batch_size * cfg.algorithm.group_size
 
         # Processing control
@@ -192,12 +199,11 @@ class ServerRolloutWorker(Worker):
         app.add_route("/api/training/submit", self._handle_track, methods=["POST"])
 
         # Init the HTTP server
-        self._server = uvicorn.Server(uvicorn.Config(
-            app,
-            host=self._server_host,
-            port=self._server_port,
-            log_level="info"
-        ))
+        self._server = uvicorn.Server(
+            uvicorn.Config(
+                app, host=self._server_host, port=self._server_port, log_level="info"
+            )
+        )
 
     def server_start(self):
         """Start service."""
@@ -226,15 +232,17 @@ class ServerRolloutWorker(Worker):
         # Parse incoming training data
         training_data = await request.json()
 
-        self.log_debug(f"Received training data: {training_data.get('metadata', {}).get('request_id', 'unknown')}")
+        self.log_debug(
+            f"Received training data: {training_data.get('metadata', {}).get('request_id', 'unknown')}"
+        )
 
-        training_data['received_at'] = time.time()
+        training_data["received_at"] = time.time()
 
         if self._track_data_enable:
             # Store training data to file (async, non-blocking)
             storage_path = self._storage.store_training_data(training_data)
             if storage_path:
-                training_data['storage_path'] = storage_path
+                training_data["storage_path"] = storage_path
                 self.log_debug(f"Training data stored to: {storage_path}")
 
             # Put data into unified data source
@@ -244,7 +252,7 @@ class ServerRolloutWorker(Worker):
         response_data = {
             "status": "submitted",
             "message": "Training data submitted successfully",
-            "queue_position": self._data_source.qsize()
+            "queue_position": self._data_source.qsize(),
         }
 
         return Response(
@@ -252,12 +260,14 @@ class ServerRolloutWorker(Worker):
             media_type="application/json",
         )
 
-    def _convert_training_data_to_rollout_result(self, training_data: Dict[str, Any]) -> RolloutResult:
+    def _convert_training_data_to_rollout_result(
+        self, training_data: Dict[str, Any]
+    ) -> RolloutResult:
         """Convert training data from HTTP request into RolloutResult format."""
         # Extract text data
-        input_text = training_data.get('prompt', '')
-        output_text = training_data.get('completion', '')
-        reward_score = training_data.get('accepted', 0.0)
+        input_text = training_data.get("prompt", "")
+        output_text = training_data.get("completion", "")
+        reward_score = training_data.get("accepted", 0.0)
         assert input_text is not None
         assert output_text is not None
 
@@ -266,20 +276,20 @@ class ServerRolloutWorker(Worker):
             input_text,
             return_tensors="pt",
             truncation=True,
-            max_length=self._cfg.runner.seq_length - self._max_new_tokens
+            max_length=self._cfg.runner.seq_length - self._max_new_tokens,
         )
-        input_ids = input_encoding['input_ids'][0].tolist()
+        input_ids = input_encoding["input_ids"][0].tolist()
 
         output_encoding = self._tokenizer(
             text=output_text,
             return_tensors="pt",
             truncation=True,
-            max_length=self._max_new_tokens
+            max_length=self._max_new_tokens,
         )
-        output_ids = output_encoding['input_ids'][0].tolist()
+        output_ids = output_encoding["input_ids"][0].tolist()
 
         # Create RolloutResult with the feedback data
-        group_size = getattr(self._cfg.algorithm, 'group_size', 1)
+        group_size = getattr(self._cfg.algorithm, "group_size", 1)
 
         rollout_result = RolloutResult(
             num_sequence=1,
@@ -293,10 +303,12 @@ class ServerRolloutWorker(Worker):
             advantages=[0.0],  # Will be computed later in the training pipeline
             prompt_texts=[input_text],
             response_texts=[output_text],
-            answers=[output_text]
+            answers=[output_text],
         )
 
-        self.log_debug(f"Created RolloutResult from HTTP data with reward {reward_score}")
+        self.log_debug(
+            f"Created RolloutResult from HTTP data with reward {reward_score}"
+        )
 
         return rollout_result
 
@@ -334,7 +346,9 @@ class ServerRolloutWorker(Worker):
         # Start automatic processing
         await self._process_unified_data_continuously(output_channel)
 
-        self.log_info("ServerRolloutWorker is running with HTTP server and auto processing")
+        self.log_info(
+            "ServerRolloutWorker is running with HTTP server and auto processing"
+        )
 
     def init_worker(self):
         """Initialize the worker (sync version)."""

@@ -1,5 +1,5 @@
 Online Reinforcement Learning for Code Completion Agent
-=============================================
+=======================================================
 
 Online Reinforcement Learning for Code Completion Agent is an important application scenario in the RLinf framework.
 Through integration with code editors like Continue, we can collect user preference feedback on code completions, enabling near real-time code generation and feedback learning to quickly improve code completion quality and align with user preferences.
