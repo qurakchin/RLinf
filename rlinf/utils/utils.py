@@ -174,6 +174,7 @@ def output_redirector(func):
             dual_err.flush()
             f.flush()
             f.close()
+
         atexit.register(close)
 
         dual_out = DualOutput(f, sys.stdout)

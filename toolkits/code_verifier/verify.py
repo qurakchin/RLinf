@@ -16,6 +16,7 @@ from typing import List
 
 try:
     from fuzzywuzzy import fuzz
+
     FUZZY_AVAILABLE = True
 except ImportError:
     fuzz = None

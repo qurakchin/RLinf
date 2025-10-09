@@ -144,8 +144,8 @@ class SGLangWorker(Worker):
                 "repetition_penalty": cfg_sampling_params.repetition_penalty,
                 "max_new_tokens": cfg_sampling_params.max_new_tokens,
             }
-            if 'stop' in cfg_sampling_params:
-                sampling_params['stop'] = cfg_sampling_params['stop']
+            if "stop" in cfg_sampling_params:
+                sampling_params["stop"] = cfg_sampling_params["stop"]
         return sampling_params
 
     def _stop(self):
@@ -398,7 +398,7 @@ class AsyncSGLangWorker(SGLangWorker):
         sampling_params = self._sampling_params
         if stop is not None:
             sampling_params = dict(sampling_params)
-            sampling_params['stop'] = stop
+            sampling_params["stop"] = stop
 
         result = await self._engine.async_generate(
             prompt=prompt,

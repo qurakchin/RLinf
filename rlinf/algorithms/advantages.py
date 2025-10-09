@@ -278,10 +278,16 @@ def compute_math_gae_advantages_and_returns(**kwargs):
     for t in reversed(range(seq_len)):
         if t == seq_len - 1:
             # Last timestep
-            delta = rewards[:, t] + gamma * next_values[:, 0] * (~dones[:, t]) - values[:, t]
+            delta = (
+                rewards[:, t]
+                + gamma * next_values[:, 0] * (~dones[:, t])
+                - values[:, t]
+            )
         else:
             # Regular timestep
-            delta = rewards[:, t] + gamma * values[:, t + 1] * (~dones[:, t]) - values[:, t]
+            delta = (
+                rewards[:, t] + gamma * values[:, t + 1] * (~dones[:, t]) - values[:, t]
+            )
 
         gae = delta + gamma * gae_lambda * (~dones[:, t]) * gae
         advantages[:, t] = gae

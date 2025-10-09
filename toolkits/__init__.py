@@ -19,12 +19,14 @@ from rlinf.algorithms.registry import get_reward_fn
 def register_rewards():
     try:
         from toolkits.code_verifier.verify import fim_verify_call
+
         assert get_reward_fn("fim_verify_call") == fim_verify_call
     except ImportError:
         pass
 
     try:
         from toolkits.math_verifier.verify import math_verify_call
+
         assert get_reward_fn("math") == math_verify_call
     except ImportError:
         pass
