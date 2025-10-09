@@ -19,7 +19,7 @@ from megatron.core.transformer import TransformerConfig
 
 from rlinf.utils.convertor.utils import get_mg2hf_convertor
 
-from .utils import get_pp_reshard_fn, get_tp_reshard_fn
+from .utils import get_pp_reshard_fn, get_tp_reshard_fn, get_tpe_reshard_fn
 
 
 @dataclass
@@ -47,6 +47,9 @@ class ReshardConfig:
     pp_reshard_fn: Callable = None
     """Resharding function to use for resharding the model parallelism from pipeline_model_parallel_size to reshard_pp_size."""
 
+    tpe_reshard_fn: Callable = None
+    """Resharding function to use for resharding the model parallelism from expert_tensor_parallel_size to reshard_tpe_size."""
+
     def __post_init__(self):
         if self.model_config.tensor_model_parallel_size < self.reshard_tp_size:
             raise ValueError(
@@ -69,3 +72,7 @@ class ReshardConfig:
 
         if self.pp_reshard_fn is None:
             self.pp_reshard_fn = get_pp_reshard_fn(self.model_arch)
+
+        # the tpe_reshard_fn is only used for ep > 1 or tpe > 1
+        if self.tpe_reshard_fn is None and (self.model_config.expert_model_parallel_size > 1 or self.model_config.expert_tensor_parallel_size > 1):
+            self.tpe_reshard_fn = get_tpe_reshard_fn(self.model_arch)

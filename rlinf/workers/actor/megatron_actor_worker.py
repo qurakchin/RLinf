@@ -979,7 +979,8 @@ class MegatronActor(MegatronModelManager, Worker):
     def _get_rollout_model_state_dict(self):
         """Get the state dictionary of the model for rollout."""
         return self.rollout_weights_reshard.gather_and_reshard_model(
-            unwrap_model(self.model)
+            unwrap_model(self.model), 
+            self._weight_dst_rank_in_rollout
         )
 
     def _setup_rollout_weight_dst_ranks(self):

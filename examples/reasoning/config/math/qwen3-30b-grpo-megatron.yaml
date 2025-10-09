@@ -7,7 +7,7 @@ hydra:
   output_subdir: null
 
 cluster:
-  num_nodes: 1
+  num_nodes: 2
   num_gpus_per_node: 8
   component_placement:
     actor,rollout: all
@@ -26,18 +26,17 @@ runner:
   val_check_interval: 1
   save_interval: 50
 
-  seq_length: 512
-  # num_experts: 8
+  seq_length: 16384
 
   enable_dynamic_batch_size: False
-  max_tokens_per_mbs: 512
+  max_tokens_per_mbs: 16384
 
   resume_dir: null
-  experiment_name: grpo-1.5b
+  experiment_name: grpo-qwen3-30b-moe
   output_dir: ../results
 
 algorithm:
-  group_size: 4
+  group_size: 32
 
   n_minibatches: 4
   training_batch_size_per_gpu: 1 # micro batch size
@@ -84,8 +83,8 @@ rollout:
 
   gpu_memory_utilization: 0.3
 
-  model_dir: /mnt/public/rl_fuxu/example_qwen3/qwen3_30b_a3b_hf/
-  model_arch: qwen3-30b
+  model_dir: /path/to/model/Qwen-30B-A3B/
+  model_arch: qwen3_moe
   enforce_eager: False         # if False, vllm will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
   disable_log_stats: False
@@ -113,17 +112,17 @@ rollout:
 
 data:
   type: math
-  max_prompt_length: 256
+  max_prompt_length: 1024
   filter_prompt_by_length: True
-  rollout_batch_size: 16
+  rollout_batch_size: 512
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
   shuffle: True
   validation_shuffle: True
   seed: 1234
-  train_data_paths: ["/mnt/public/rl_fuxu/data/boba_106k_0319_prompt_1024.jsonl"]
-  val_data_paths: ["/mnt/public/rl_fuxu/data/boba_106k_0319_prompt_1024.jsonl"]
+  train_data_paths: ["/dataset/boba/AReaL-boba-106k.jsonl"]
+  val_data_paths: ["/dataset/boba/AReaL-boba-106k.jsonl"]
 
 actor:
   group_name: "ActorGroup"
@@ -131,7 +130,7 @@ actor:
   mcore_gpt: True
   spec_name: decoder_gpt
 
-  checkpoint_load_path: /mnt/public/rl_fuxu/example_qwen3/qwen3_30b_a3b_mg_tp4_tpe4_ep1_pp2
+  checkpoint_load_path: null
 
   offload_optimizer: True
   offload_weight: True
@@ -148,9 +147,9 @@ actor:
     add_bias_linear: False
 
     tensor_model_parallel_size: 4
-    pipeline_model_parallel_size: 2
-    expert_model_parallel_size: 1
-    expert_tensor_parallel_size: 4
+    pipeline_model_parallel_size: 4
+    expert_model_parallel_size: 4
+    expert_tensor_parallel_size: 1
 
     activation: swiglu
     sequence_parallel: True
@@ -230,12 +229,12 @@ actor:
     use_dist_ckpt: False
     tp_comm_bootstrap_backend: nccl
     tp_comm_overlap_cfg: null # tp_comm_overlap_cfg.yaml
-    use_hf_ckpt: False # if true, will transfer hf model to generate megatron checkpoint and use it for training.
+    use_hf_ckpt: True # if true, will transfer hf model to generate megatron checkpoint and use it for training.
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor
       model: Qwen3-30B-A3B
-      model_type: null # will be set by hf model's config if null
+      model_type: moe # will be set by hf model's config if null
       hf_model_path: ${rollout.model_dir} # path to the hf model
       save_path: ${runner.output_dir}/${runner.experiment_name}/converted_ckpts/actor
       use_gpu_num : 0
@@ -246,21 +245,21 @@ actor:
       expert_model_parallel_size: ${actor.model.expert_model_parallel_size}
       expert_tensor_parallel_size: ${actor.model.expert_tensor_parallel_size}
       
-    # profiler: # profile megatron when inference and traning
-    #   output_dir: ${runner.output_dir}/${runner.experiment_name}/profiler
-    #   activities: ["cpu", "cuda"]
-    #   record_shapes: False
-    #   profile_memory: False
-    #   with_stack: False
-    #   with_flops: False
-    #   with_modules: True
-    #   export_tensorboard: True
-    #   export_chrome_trace: False
-    #   chrome_filename_prefix: "chrome_trace"
-    #   schedule_warmup: 2
-    #   schedule_active: 1
-    #   schedule_repeat: 1 # inference and training will repeat such times
-    #   # schedule_wait: it will be set at runtime
+    profiler: # profile megatron when inference and traning
+      output_dir: ${runner.output_dir}/${runner.experiment_name}/profiler
+      activities: ["cpu", "cuda"]
+      record_shapes: False
+      profile_memory: False
+      with_stack: False
+      with_flops: False
+      with_modules: True
+      export_tensorboard: True
+      export_chrome_trace: False
+      chrome_filename_prefix: "chrome_trace"
+      schedule_warmup: 2
+      schedule_active: 1
+      schedule_repeat: 1 # inference and training will repeat such times
+      # schedule_wait: it will be set at runtime
 
 
 reward:

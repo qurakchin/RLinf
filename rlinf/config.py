@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logging.getLogger().setLevel(logging.INFO)
 
-SUPPORTED_MODEL_ARCHS = ["qwen2.5", "qwen2.5_vl", "openvla", "openvla_oft", "qwen3-30b"]
+SUPPORTED_MODEL_ARCHS = ["qwen2.5", "qwen2.5_vl", "openvla", "openvla_oft", "qwen3_moe"]
 SUPPORTED_ROLLOUT_BACKENDS = ["sglang", "vllm"]
 
 __all__ = ["build_config"]
@@ -394,14 +394,21 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.model.pipeline_model_parallel_split_rank = cfg.model.get(
             "pipeline_model_parallel_split_rank", None
         )
-        cfg.model.context_parallel_size = cfg.model.context_parallel_size = (
-            cfg.model.get("context_parallel_size", 1)
+        cfg.model.context_parallel_size = cfg.model.get(
+            "context_parallel_size", 1
         )
-        cfg.model.expert_model_parallel_size = cfg.model.expert_model_parallel_size = (
-            cfg.model.get("expert_model_parallel_size", 1)
+        
+        cfg.model.expert_model_parallel_size = cfg.model.get(
+            "expert_model_parallel_size", 1
         )
-        cfg.model.expert_tensor_parallel_size = cfg.model.expert_tensor_parallel_size = (
-            cfg.model.get("expert_tensor_parallel_size", 1)
+        
+        cfg.model.expert_tensor_parallel_size = cfg.model.get(
+            "expert_tensor_parallel_size", 1
+        )
+
+        # TODO: remove this after we support patch the megatron load ckpt from huggingface
+        assert cfg.model.expert_tensor_parallel_size <= cfg.model.tensor_model_parallel_size, (
+            f"expert_tensor_parallel_size ({cfg.model.expert_tensor_parallel_size}) must be less than or equal to tensor_model_parallel_size ({cfg.model.tensor_model_parallel_size})"
         )
 
         cfg.model.position_embedding_type = cfg.model.get(
