@@ -397,7 +397,7 @@ class AsyncSGLangWorker(SGLangWorker):
     async def agenerate(self, prompt: str, stop: Optional[List[str]] = None):
         sampling_params = self._sampling_params
         if stop is not None:
-            sampling_params = {k: v for k, v in sampling_params.items()}
+            sampling_params = dict(sampling_params)
             sampling_params['stop'] = stop
 
         result = await self._engine.async_generate(

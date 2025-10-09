@@ -168,6 +168,7 @@ def output_redirector(func):
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
         f = open(log_path, "w", encoding="utf-8", buffering=1)
+
         def close():
             dual_out.flush()
             dual_err.flush()

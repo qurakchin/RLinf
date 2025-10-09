@@ -12,13 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import httpx
 import asyncio
 import uuid
 from datetime import datetime
 
+import httpx
+
 batch_size = 16
 epoch = 10 * 2
+
 
 async def agenerate(prefix, suffix):
     TARGET_URL = "http://127.0.0.1:8081/v1/completions"
@@ -44,6 +46,7 @@ async def agenerate(prefix, suffix):
         )
         print(f'agenerate get response: {response.json()}')
         return response.json()['choices'][0]['text']
+
 
 async def atrack(prefix, suffix, completion, accepted):
     TARGET_URL = "http://127.0.0.1:8082/api/training/submit"
@@ -79,11 +82,13 @@ async def atrack(prefix, suffix, completion, accepted):
         )
         print(f'atrack get response: {response.json()}')
 
+
 async def single_iteration(prefix, suffix):
     await asyncio.sleep(0.001)
     completion = await agenerate(prefix=prefix, suffix=suffix)
     await asyncio.sleep(0.001)
     await atrack(prefix=prefix, suffix=suffix, completion=completion, accepted=True)
+
 
 async def loop():
     prefix = "if x[j] > x[j + 1]:\n                x[j], x[j + 1] = x[j + 1], x[j]\n    return x\n\ndef han"
@@ -99,6 +104,7 @@ async def loop():
             tasks = []
 
     await asyncio.gather(*tasks)
+
 
 if __name__ == "__main__":
     asyncio.run(loop())

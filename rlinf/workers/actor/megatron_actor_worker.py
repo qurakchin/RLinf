@@ -31,6 +31,7 @@ import rlinf.algorithms  # noqa: F401
 from rlinf.algorithms.registry import (
     actor_loss,
     calculate_adv_and_returns,
+    get_reward_fn,
 )
 from rlinf.algorithms.utils import kl_penalty
 from rlinf.data.io_struct import (
@@ -79,7 +80,6 @@ from rlinf.utils.utils import (
     seq_mean_token_sum,
 )
 from rlinf.workers.rollout.utils import RankMapper
-from rlinf.algorithms.registry import get_reward_fn
 from toolkits import register_rewards
 
 

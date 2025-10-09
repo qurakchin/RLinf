@@ -24,8 +24,8 @@ from omegaconf import OmegaConf, open_dict
 from omegaconf.dictconfig import DictConfig
 from transformers import AutoConfig
 
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
 from rlinf.scheduler.cluster import Cluster
+from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
 
 if TYPE_CHECKING:
     from megatron.core.model_parallel_config import ModelParallelConfig
@@ -565,18 +565,18 @@ def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
         "Exactly one of `algorithm.recompute_logprobs` or `rollout.return_logprobs` must be True to compute `prev_logprobs`."
     )
 
-    assert cfg.algorithm.recompute_logprobs == True, (
-        f"Online coding task must use recompute_logprobs"
+    assert cfg.algorithm.recompute_logprobs, (
+        "Online coding task must use recompute_logprobs"
     )
 
     assert cfg.actor.training_backend == "megatron", (
-        f"Online coding task must use megatron training backend"
+        "Online coding task must use megatron training backend"
     )
 
     cluster = Cluster(num_nodes=cfg.cluster.num_nodes)
     component_placement = ModelParallelComponentPlacement(cfg, cluster)
     assert component_placement.placement_mode == PlacementMode.DISAGGREGATED, (
-        f"Online coding task must use disaggregated placement mode"
+        "Online coding task must use disaggregated placement mode"
     )
 
     with open_dict(cfg):

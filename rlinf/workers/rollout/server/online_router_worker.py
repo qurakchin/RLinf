@@ -17,17 +17,18 @@ import json
 import random
 import time
 import uuid
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from omegaconf.dictconfig import DictConfig
 from pydantic import BaseModel
-import uvicorn
 
 from rlinf.scheduler import Worker
-from rlinf.workers.rollout.sglang.sglang_worker import AsyncSGLangWorker
 from rlinf.utils.placement import ComponentPlacement
+from rlinf.workers.rollout.sglang.sglang_worker import AsyncSGLangWorker
+
 
 class CompleteRequest(BaseModel):
     """Complete request model."""
@@ -41,13 +42,14 @@ class CompleteRequest(BaseModel):
     stop: Optional[List[str]] = None
     stream: Optional[bool] = False
 
+
 class CompleteResponse(BaseModel):
     """Complete response model."""
     id: str
     choices: List[Dict[str, Any]]
     model: str
     created: int
-    object: str='text_completion'
+    object: str = 'text_completion'
 
 
 class OnlineRouterWorker(Worker):
@@ -121,14 +123,14 @@ class OnlineRouterWorker(Worker):
         """Handle complete requests with synchronization support."""
         request_id = str(uuid.uuid4())
         start_time = time.time()
-        
+
         # Check if sync is in progress
         if self._sync_in_progress:
             # Wait for old requests to complete
             await self._old_requests_complete.wait()
             # Block new requests during sync
             await self._new_requests_blocked.wait()
-        
+
         # Create future for this request
         future = asyncio.Future()
         self._active_requests[request_id] = future
@@ -180,7 +182,7 @@ class OnlineRouterWorker(Worker):
                         "X-Accel-Buffering": "no",  # Disable nginx buffering
                     }
                 )
-            
+
             # Set future result
             future.set_result(response)
             return response
@@ -219,14 +221,14 @@ class OnlineRouterWorker(Worker):
         """End model synchronization. Resume processing of blocked requests."""
         async with self._sync_model_lock:
             assert self._sync_in_progress
-            
+
             self.log_info("Ending model synchronization...")
-            
+
             # Reset sync state
             self._sync_in_progress = False
             self._old_requests_complete.clear()
-            
+
             # Allow new requests to proceed
             self._new_requests_blocked.set()
-            
+
             self.log_info("Model synchronization completed, new requests can proceed")

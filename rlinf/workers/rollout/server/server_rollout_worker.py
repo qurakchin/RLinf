@@ -17,8 +17,11 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple, Optional, Any, Union
+from typing import Any, Dict, Optional
+
 import torch
+import uvicorn
+from fastapi import FastAPI, Request, Response
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
@@ -26,9 +29,7 @@ from rlinf.data.io_struct import (
     RolloutResult,
 )
 from rlinf.scheduler import Channel, Worker
-from fastapi import FastAPI, Request, Response
-from pydantic import BaseModel
-import uvicorn
+
 
 class TrainingDataStorage:
     """Storage manager for training data received via HTTP API."""
@@ -136,6 +137,7 @@ class TrainingDataStorage:
                     stats["total_size_bytes"] += file_path.stat().st_size
 
         return stats
+
 
 class ServerRolloutWorker(Worker):
     """
@@ -302,8 +304,11 @@ class ServerRolloutWorker(Worker):
         """Continuously process data from the unified data source."""
         self.log_info("Starting continuous unified data processing")
 
+        # clear existing data in self._data_source
         while not self._data_source.empty():
             self._data_source.get_nowait()
+
+        # start tracking new data
         self._track_data_enable = True
         for i in range(self._batch_size):
             # Get data from unified source (either HTTP or Channel)

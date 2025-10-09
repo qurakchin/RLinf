@@ -362,6 +362,8 @@ class MathRunner:
                     )
 
                     metrics = actor_handle.wait()
+                    rollout_metrics = metrics[0][0]
+                    actor_training_metrics = metrics[0][1]
                     self.global_steps += 1
 
                     run_time_exceeded = self.run_timer.is_finished()
@@ -407,13 +409,13 @@ class MathRunner:
                 ) * self.cfg.algorithm.n_minibatches
                 # add prefix to the metrics
                 log_time_metrics = {f"time/{k}": v for k, v in time_metrics.items()}
-                rollout_metrics = {f"rollout/{k}": v for k, v in metrics[0][0].items()}
+                rollout_metrics = {f"rollout/{k}": v for k, v in rollout_metrics.items()}
 
                 self.metric_logger.log(log_time_metrics, logging_steps)
                 self.metric_logger.log(rollout_metrics, logging_steps)
                 for i in range(self.cfg.algorithm.n_minibatches):
                     training_metrics = {
-                        f"train/{k}": v for k, v in metrics[0][1][i].items()
+                        f"train/{k}": v for k, v in actor_training_metrics[i].items()
                     }
                     self.metric_logger.log(training_metrics, logging_steps + i)
 
@@ -421,14 +423,14 @@ class MathRunner:
 
                 if self.cfg.actor.get("calculate_flops", False):
                     flops_metrics = self._compute_flops_metrics(
-                        time_metrics, metrics[0][0]
+                        time_metrics, rollout_metrics
                     )
                     flops_metrics = {f"flops/{k}": v for k, v in flops_metrics.items()}
                     self.metric_logger.log(flops_metrics, logging_steps)
                     logging_metrics.update(flops_metrics)
 
-                logging_metrics.update(metrics[0][0])
-                logging_metrics.update(metrics[0][1][-1])
+                logging_metrics.update(rollout_metrics)
+                logging_metrics.update(actor_training_metrics[-1])
 
                 global_pbar.set_postfix(logging_metrics)
                 global_pbar.update(1)

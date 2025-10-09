@@ -23,8 +23,8 @@ from sympy import N, simplify
 from sympy.parsing.latex import parse_latex
 from sympy.parsing.sympy_parser import parse_expr
 
-from toolkits.math_verifier.parser import extract_answer
 from rlinf.algorithms.registry import register_reward_fn
+from toolkits.math_verifier.parser import extract_answer
 
 global_executor = ProcessPoolExecutor(max_workers=40)
 

@@ -207,18 +207,18 @@ def compute_math_ppo_actor_loss(**kwargs):
     advantages = kwargs["advantages"]
     loss_mask = kwargs.get("loss_mask", None)
     c_clip = kwargs.get("c_clip", None)
-    
+
     # Control critic usage (similar to AReaL's disable_head)
     use_critic = kwargs.get("use_critic", True)
     use_value_loss = kwargs.get("use_value_loss", True)
-    
+
     # Optional value loss parameters
     values = kwargs.get("values", None)
     prev_values = kwargs.get("prev_values", None)
     returns = kwargs.get("returns", None)
     value_clip = kwargs.get("value_clip", None)
     huber_delta = kwargs.get("huber_delta", 1.0)
-    
+
     # Optional entropy loss parameters
     entropy = kwargs.get("entropy", None)
     entropy_bonus = kwargs.get("entropy_bonus", 0.0)
@@ -271,7 +271,7 @@ def compute_math_ppo_actor_loss(**kwargs):
     }
 
     # Add value loss if provided and critic is enabled
-    if (use_critic and use_value_loss and 
+    if (use_critic and use_value_loss and
         values is not None and prev_values is not None and returns is not None):
         value_pred_clipped = prev_values + (values - prev_values).clamp(
             -value_clip, value_clip
@@ -281,16 +281,16 @@ def compute_math_ppo_actor_loss(**kwargs):
         value_loss_clipped = huber_loss(error_clipped, huber_delta)
         value_loss_original = huber_loss(error_original, huber_delta)
         value_loss = torch.max(value_loss_original, value_loss_clipped)
-        
+
         if value_clip is not None:
             value_clip_indicator = (value_pred_clipped - prev_values).abs() > value_clip
             value_clip_ratio = value_clip_indicator.float().mean()
         else:
             value_clip_ratio = torch.tensor(0.0, device=value_loss.device)
-        
+
         value_loss = loss_agg_func(value_loss, loss_mask)
         total_loss = total_loss + value_loss
-        
+
         metrics_data.update({
             "value_loss": masked_mean(value_loss.detach(), loss_mask),
             "value_clip_ratio": value_clip_ratio.detach().item(),
@@ -300,14 +300,14 @@ def compute_math_ppo_actor_loss(**kwargs):
     if entropy is not None and entropy_bonus > 0:
         entropy_loss = loss_agg_func(entropy, loss_mask)
         total_loss = total_loss - entropy_bonus * entropy_loss
-        
+
         metrics_data.update({
             "entropy_loss": masked_mean(entropy_loss.detach(), loss_mask),
         })
 
     # Update total loss in metrics
     metrics_data["total_loss"] = masked_mean(total_loss.detach(), loss_mask)
-    
+
     return total_loss, metrics_data
 
 
@@ -321,7 +321,7 @@ if __name__ == "__main__":
     advantages = torch.randn(bsz, max_seqlen)
     loss_mask = torch.randint(0, 2, (bsz, max_seqlen)).bool()
     eps_clip = 0.2
-    
+
     # Test basic policy loss
     kwargs = {
         "logprobs": logprobs,
@@ -334,7 +334,7 @@ if __name__ == "__main__":
     loss, metrics_data = compute_math_ppo_actor_loss(**kwargs)
     print(f"Basic policy loss: {loss=}")
     print(f"Metrics: {metrics_data}")
-    
+
     # Test with value loss
     values = torch.randn(bsz, max_seqlen)
     prev_values = values + torch.randn(bsz, max_seqlen) * 0.1
@@ -350,7 +350,7 @@ if __name__ == "__main__":
     loss_with_value, metrics_with_value = compute_math_ppo_actor_loss(**kwargs_with_value)
     print(f"\nWith value loss: {loss_with_value=}")
     print(f"Value metrics: {metrics_with_value}")
-    
+
     # Test with entropy loss
     entropy = torch.randn(bsz, max_seqlen)
     kwargs_with_entropy = {
