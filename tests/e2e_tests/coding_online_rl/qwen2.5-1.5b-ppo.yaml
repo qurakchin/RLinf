@@ -296,3 +296,4 @@ server:
   tracking_rollout:
     host: 0.0.0.0
     port: 8082
+    enable_dummy_data: True

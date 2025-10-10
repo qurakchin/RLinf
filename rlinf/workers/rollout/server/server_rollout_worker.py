@@ -167,6 +167,7 @@ class ServerRolloutWorker(Worker):
         # Configuration
         self._server_host = cfg.server.tracking_rollout.get("host", "0.0.0.0")
         self._server_port = cfg.server.tracking_rollout.get("port", 8082)
+        self._enable_dummy_data = cfg.server.tracking_rollout.get("enable_dummy_data", False)
 
         # Unified data source for both HTTP and Channel data
         self._data_source = asyncio.Queue()
@@ -322,6 +323,15 @@ class ServerRolloutWorker(Worker):
 
         # start tracking new data
         self._track_data_enable = True
+        if self._enable_dummy_data:
+            for i in range(self._batch_size):
+                data = {
+                    "prompt": "Hello, world!",
+                    "completion": "Hello, world!",
+                    "accepted": 1.0,
+                }
+                await self._data_source.put(data)
+
         for i in range(self._batch_size):
             # Get data from unified source (either HTTP or Channel)
             data = await self._data_source.get()
