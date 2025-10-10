@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import copy
 import dataclasses
 from typing import Dict, List, Optional, Tuple
 
@@ -397,7 +398,7 @@ class AsyncSGLangWorker(SGLangWorker):
     async def agenerate(self, prompt: str, stop: Optional[List[str]] = None):
         sampling_params = self._sampling_params
         if stop is not None:
-            sampling_params = dict(sampling_params)
+            sampling_params = copy.deepcopy(sampling_params)
             sampling_params["stop"] = stop
 
         result = await self._engine.async_generate(

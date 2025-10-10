@@ -167,7 +167,9 @@ class ServerRolloutWorker(Worker):
         # Configuration
         self._server_host = cfg.server.tracking_rollout.get("host", "0.0.0.0")
         self._server_port = cfg.server.tracking_rollout.get("port", 8082)
-        self._enable_dummy_data = cfg.server.tracking_rollout.get("enable_dummy_data", False)
+        self._enable_dummy_data = cfg.server.tracking_rollout.get(
+            "enable_dummy_data", False
+        )
 
         # Unified data source for both HTTP and Channel data
         self._data_source = asyncio.Queue()

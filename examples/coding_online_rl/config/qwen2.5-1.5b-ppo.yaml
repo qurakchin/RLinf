@@ -34,7 +34,7 @@ runner:
 
   resume_dir: null
   experiment_name: online-ppo-1.5b-pipeline
-  output_dir: ../results
+  output_dir: /mnt/public/zhuchunyang_rl/logs
 
 algorithm:
   group_size: 1
@@ -67,8 +67,8 @@ algorithm:
   clip_ratio_c: null # 3.0
 
   # Control critic usage (similar to AReaL's disable_head)
-  use_critic: false  # Disable critic model
-  use_value_loss: false  # Disable value loss computation
+  use_critic: False  # Disable critic model
+  use_value_loss: False  # Disable value loss computation
   
   # PPO parameters for no-critic setup
   gamma: 0.99
@@ -76,7 +76,7 @@ algorithm:
   # value_clip and huber_delta not needed without critic
 
   # Use no-critic GAE advantage computation
-  adv_type: math_gae_no_critic  # Will implement this function
+  adv_type: math_gae_no_critic
   normalize_advantages: False
   early_stop_imp_ratio: 5.0
   use_valid_token_scale: False
@@ -116,7 +116,7 @@ rollout:
 
   gpu_memory_utilization: 0.55
 
-  model_dir: /path/to/model/Qwen2.5-Coder-1.5B
+  model_dir: /mnt/public/hf_models/Qwen2.5-Coder-1.5B
   model_arch: qwen2.5
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
@@ -125,7 +125,7 @@ rollout:
   padding: null               # will be tokenizer.pad_token_id if null. it is used to filter megatron's padding for rollout engine
   eos: null                   # will be tokenizer.eos_token_id if null.
 
-  rollout_backend: sglang     # here choose which backend to rollout,support [sglang, vllm] 
+  rollout_backend: sglang     # online_rl now only support sglang 
 
   sglang:
     attention_backend: triton # [flashinfer, triton] for more, see sglang's doc
@@ -134,6 +134,7 @@ rollout:
     torch_compile_max_bs: 128 # the maximum batch size for torch compile. If the batch size is larger than this, torch compile will not be used.
 
   vllm:
+    # not used, but reserved to pass config validate
     attention_backend: FLASH_ATTN #[FLASH_ATTN,XFORMERS] for more, see vllm's doc
     enable_chunked_prefill: True  # enable vllm to use chunked_prefill.
     enable_prefix_caching: True   # enable vllm to use prefix_caching.
@@ -221,7 +222,7 @@ actor:
     use_distributed_optimizer: True
     overlap_grad_reduce: False
     overlap_param_gather: False
-    optimizer_enable_pin: false
+    optimizer_enable_pin: False
     overlap_param_gather_with_optimizer_step: False
     clip_grad: 0.8
     loss_scale: 65536
@@ -236,7 +237,7 @@ actor:
     lr_decay_iters: 10
 
   tokenizer:
-    tokenizer_model: /path/to/model/Qwen2.5-Coder-1.5B
+    tokenizer_model: ${rollout.model_dir}
     use_fast: False
     trust_remote_code: True
     padding_side: 'right'
@@ -280,14 +281,15 @@ actor:
       # schedule_wait: it will be set at runtime
 
 reward:
-  use_reward_model: false
+  use_reward_model: False
   reward_type: fim_verify_call
   reward_scale: 5.0
 
 critic:
-  use_critic_model: false
+  use_critic_model: False
 
 server:
+  # online serving and user reward track
   online_router:
     host: 0.0.0.0
     port: 8081
@@ -295,3 +297,4 @@ server:
   tracking_rollout:
     host: 0.0.0.0
     port: 8082
+    enable_dummy_data: True

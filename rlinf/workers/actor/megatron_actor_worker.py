@@ -28,6 +28,7 @@ from omegaconf import DictConfig
 from torch.multiprocessing.reductions import reduce_tensor
 
 import rlinf.algorithms  # noqa: F401
+from rlinf.algorithms.losses import compute_value_loss
 from rlinf.algorithms.registry import (
     actor_loss,
     calculate_adv_and_returns,
@@ -387,15 +388,21 @@ class MegatronActor(MegatronModelManager, Worker):
                 )
 
                 # Add value loss if enabled
-                use_value_loss = getattr(self.cfg.algorithm, 'use_value_loss', False)
-                if use_value_loss and "values" in output and "returns" in batch and "prev_values" in batch:
-                    from rlinf.algorithms.losses import compute_value_loss
+                use_value_loss = getattr(self.cfg.algorithm, "use_value_loss", False)
+                if (
+                    use_value_loss
+                    and "values" in output
+                    and "returns" in batch
+                    and "prev_values" in batch
+                ):
                     value_kwargs = {
-                        "values": output["values"][:, -response_len - 1 : -1].contiguous(),
+                        "values": output["values"][
+                            :, -response_len - 1 : -1
+                        ].contiguous(),
                         "prev_values": batch["prev_values"][:, -response_len:],
                         "returns": batch["returns"][:, -response_len:],
-                        "value_clip": getattr(self.cfg.algorithm, 'value_clip', None),
-                        "huber_delta": getattr(self.cfg.algorithm, 'huber_delta', 1.0),
+                        "value_clip": getattr(self.cfg.algorithm, "value_clip", None),
+                        "huber_delta": getattr(self.cfg.algorithm, "huber_delta", 1.0),
                         "loss_agg_func": self.loss_agg_func,
                         "loss_mask": mask,
                     }

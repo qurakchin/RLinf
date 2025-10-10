@@ -67,8 +67,8 @@ algorithm:
   clip_ratio_c: null # 3.0
 
   # Control critic usage (similar to AReaL's disable_head)
-  use_critic: false  # Disable critic model
-  use_value_loss: false  # Disable value loss computation
+  use_critic: False  # Disable critic model
+  use_value_loss: False  # Disable value loss computation
   
   # PPO parameters for no-critic setup
   gamma: 0.99
@@ -76,7 +76,7 @@ algorithm:
   # value_clip and huber_delta not needed without critic
 
   # Use no-critic GAE advantage computation
-  adv_type: math_gae_no_critic  # Will implement this function
+  adv_type: math_gae_no_critic
   normalize_advantages: False
   early_stop_imp_ratio: 5.0
   use_valid_token_scale: False
@@ -121,7 +121,7 @@ rollout:
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
   disable_log_stats: False
-  detokenize: False           # Whether to detokenize the output. During RL we actually don't need to detokenize it. Can be set to True for debugging.
+  detokenize: True            # Whether to detokenize the output. During RL we actually don't need to detokenize it. Can be set to True for debugging.
   padding: null               # will be tokenizer.pad_token_id if null. it is used to filter megatron's padding for rollout engine
   eos: null                   # will be tokenizer.eos_token_id if null.
 
@@ -134,6 +134,7 @@ rollout:
     torch_compile_max_bs: 128 # the maximum batch size for torch compile. If the batch size is larger than this, torch compile will not be used.
 
   vllm:
+    # not used, but reserved to pass config validate
     attention_backend: FLASH_ATTN #[FLASH_ATTN,XFORMERS] for more, see vllm's doc
     enable_chunked_prefill: True  # enable vllm to use chunked_prefill.
     enable_prefix_caching: True   # enable vllm to use prefix_caching.
@@ -280,12 +281,12 @@ actor:
       # schedule_wait: it will be set at runtime
 
 reward:
-  use_reward_model: false
+  use_reward_model: False
   reward_type: fim_verify_call
   reward_scale: 5.0
 
 critic:
-  use_critic_model: false
+  use_critic_model: False
 
 server:
   # online serving and user reward track
