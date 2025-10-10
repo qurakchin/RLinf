@@ -386,6 +386,23 @@ class MegatronActor(MegatronModelManager, Worker):
                     loss_mask=mask,
                 )
 
+                # Add value loss if enabled
+                use_value_loss = getattr(self.cfg.algorithm, 'use_value_loss', False)
+                if use_value_loss and "values" in output and "returns" in batch and "prev_values" in batch:
+                    from rlinf.algorithms.losses import compute_value_loss
+                    value_kwargs = {
+                        "values": output["values"][:, -response_len - 1 : -1].contiguous(),
+                        "prev_values": batch["prev_values"][:, -response_len:],
+                        "returns": batch["returns"][:, -response_len:],
+                        "value_clip": getattr(self.cfg.algorithm, 'value_clip', None),
+                        "huber_delta": getattr(self.cfg.algorithm, 'huber_delta', 1.0),
+                        "loss_agg_func": self.loss_agg_func,
+                        "loss_mask": mask,
+                    }
+                    value_loss, value_metrics = compute_value_loss(**value_kwargs)
+                    loss = loss + value_loss
+                    metrics_data.update(value_metrics)
+
                 entropy_loss = torch.zeros(1, device=loss.device)
                 if self.calculate_entropy:
                     entropy = output["entropy"][:, -response_len - 1 : -1].contiguous()
