@@ -249,57 +249,6 @@ def compute_math_ppo_actor_loss(**kwargs):
     return policy_loss, metrics_data
 
 
-def compute_value_loss(**kwargs):
-    """
-    Compute value loss for critic network.
-
-    Args:
-        values (torch.Tensor): Current value predictions.
-        prev_values (torch.Tensor): Previous value predictions.
-        returns (torch.Tensor): Return values.
-        value_clip (Optional[float]): Value clipping threshold.
-        huber_delta (Optional[float]): Huber loss delta parameter.
-        loss_agg_func: Function to aggregate loss with mask.
-        loss_mask (Optional[torch.BoolTensor]): Mask for loss computation.
-
-    Returns:
-        Tuple[torch.Tensor, Dict]: Value loss and metrics dictionary.
-    """
-    values = kwargs["values"]
-    prev_values = kwargs["prev_values"]
-    returns = kwargs["returns"]
-    value_clip = kwargs.get("value_clip", None)
-    huber_delta = kwargs.get("huber_delta", 1.0)
-    loss_agg_func = kwargs["loss_agg_func"]
-    loss_mask = kwargs.get("loss_mask", None)
-
-    value_pred_clipped = (
-        prev_values + (values - prev_values).clamp(-value_clip, value_clip)
-        if value_clip is not None
-        else values
-    )
-    error_clipped = returns - value_pred_clipped
-    error_original = returns - values
-    value_loss_clipped = huber_loss(error_clipped, huber_delta)
-    value_loss_original = huber_loss(error_original, huber_delta)
-    value_loss = torch.max(value_loss_original, value_loss_clipped)
-
-    if value_clip is not None:
-        value_clip_indicator = (value_pred_clipped - prev_values).abs() > value_clip
-        value_clip_ratio = value_clip_indicator.float().mean()
-    else:
-        value_clip_ratio = torch.tensor(0.0, device=value_loss.device)
-
-    value_loss = loss_agg_func(value_loss, loss_mask)
-
-    metrics_data = {
-        "value_loss": masked_mean(value_loss.detach(), loss_mask),
-        "value_clip_ratio": value_clip_ratio.detach().item(),
-    }
-
-    return value_loss, metrics_data
-
-
 if __name__ == "__main__":
     # test math_actor_loss_fn
     torch.manual_seed(0)
@@ -321,23 +270,6 @@ if __name__ == "__main__":
     loss, metrics_data = compute_math_ppo_actor_loss(**kwargs)
     print(f"Policy loss: {loss=}")
     print(f"Metrics: {metrics_data}")
-
-    # test value loss
-    values = torch.randn(bsz, max_seqlen)
-    prev_values = values + torch.randn(bsz, max_seqlen) * 0.1
-    returns = values + advantages + torch.randn(bsz, max_seqlen)
-    value_kwargs = {
-        "values": values,
-        "prev_values": prev_values,
-        "returns": returns,
-        "value_clip": 0.2,
-        "huber_delta": 1.0,
-        "loss_agg_func": lambda x, mask: (x * mask).sum() / (mask.sum() or 1),
-        "loss_mask": loss_mask,
-    }
-    value_loss, value_metrics = compute_value_loss(**value_kwargs)
-    print(f"\nValue loss: {value_loss=}")
-    print(f"Value metrics: {value_metrics}")
 
     # test grpo_actor_loss_fn
     torch.manual_seed(0)
