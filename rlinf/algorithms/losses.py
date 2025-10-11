@@ -267,18 +267,9 @@ if __name__ == "__main__":
         "loss_mask": loss_mask,
         "loss_agg_func": lambda x, mask: (x * mask).sum() / (mask.sum() or 1),
     }
-    (
-        loss,
-        clip_fraction,
-        approx_kl,
-        ratio,
-        clipped_ratio,
-        dual_cliped_ratio,
-    ) = compute_math_ppo_actor_loss(**kwargs)
-    print(f"{loss=}, {clip_fraction=}, {approx_kl=}")
-    print(f"{ratio=}")
-    print(f"{clipped_ratio=}")
-    print(f"{dual_cliped_ratio=}")
+    loss, metrics_data = compute_math_ppo_actor_loss(**kwargs)
+    print(f"Policy loss: {loss=}")
+    print(f"Metrics: {metrics_data}")
 
     # test grpo_actor_loss_fn
     torch.manual_seed(0)
@@ -298,6 +289,7 @@ if __name__ == "__main__":
         "clip_ratio_high": clip_ratio_high,
         "loss_mask": loss_mask,
         "loss_mask_sum": loss_mask.sum(),
+        "max_episode_steps": 512,
     }
     loss, metrics_data = compute_embodied_grpo_actor_loss_fn(**kwargs)
     print(f"{loss=}, {metrics_data=}")
