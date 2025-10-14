@@ -21,10 +21,8 @@ try:
 except ImportError:
     fuzz = None
     FUZZY_AVAILABLE = False
-from rlinf.algorithms.registry import register_reward_fn
 
 
-@register_reward_fn("fim_verify_call")
 def fim_verify_call(
     responses: List[str],
     references: List[str],

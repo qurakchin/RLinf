@@ -12,6 +12,7 @@ cluster:
     rollout: 0-3
     inference: 4-5
     actor: 6-7
+    reward: 0-3
 
 runner:
   task_type: coding_online_rl
@@ -282,7 +283,7 @@ actor:
 
 reward:
   use_reward_model: False
-  reward_type: fim_verify_call
+  reward_type: code
   reward_scale: 5.0
 
 critic:

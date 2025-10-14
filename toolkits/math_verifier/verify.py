@@ -14,7 +14,13 @@
 
 import multiprocessing
 import re
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    as_completed,
+)
+from concurrent.futures import (
+    TimeoutError as FuturesTimeoutError,
+)
 from typing import List, Union
 
 import regex
@@ -23,7 +29,6 @@ from sympy import N, simplify
 from sympy.parsing.latex import parse_latex
 from sympy.parsing.sympy_parser import parse_expr
 
-from rlinf.algorithms.registry import register_reward_fn
 from toolkits.math_verifier.parser import extract_answer
 
 global_executor = ProcessPoolExecutor(max_workers=40)
@@ -348,22 +353,22 @@ def process_results(answer, solution):
         extracted_solution = extract_answer(solution, "math", use_last_number=True)
 
         if extracted_answer is None or extracted_answer.strip() in ["None", "none", ""]:
-            retval = 0
+            retval = -1
         elif extracted_solution is None or extracted_solution.strip() in [
             "None",
             "none",
             "",
         ]:
-            retval = 0
+            retval = -1
         elif math_equal(extracted_answer, extracted_solution, timeout=False):
             # elif call_with_timeout(math_equal, extracted_answer, extracted_solution):
             retval = 1
         else:
-            retval = 0
+            retval = -1
 
         return retval, (extracted_answer, extracted_solution)
     except Exception:
-        return 0, ("None", "None")
+        return -1, ("None", "None")
 
 
 def process_results_process(a, b, output_queue):
@@ -383,7 +388,6 @@ def verify_math_solution(answer: str, solution: str):
     return process_results(answer, solution)[0]
 
 
-@register_reward_fn("math")
 def math_verify_call(
     responses: List[str],
     references: List[str],
@@ -403,7 +407,7 @@ def math_verify_call(
             jobs.append(job)
         all_jobs.append(jobs)
 
-    labels = []
+    labels: List[int] = []
     has_timeout = False
     for jobs in all_jobs:
         label = 0
@@ -411,38 +415,16 @@ def math_verify_call(
             for job in as_completed(jobs, timeout=timeout):
                 x = job.result()
                 label = label or x
-        except TimeoutError:
+        except FuturesTimeoutError:
             has_timeout = True
-        labels.append(label)
+            for job in jobs:
+                job.cancel()
+        finally:
+            labels.append(label)
 
     if has_timeout:
         reset_global_process_pool()
     return labels
-
-
-class MathRewardModel:
-    def __init__(self, scale: float):
-        self.scale = scale
-
-    def get_reward(
-        self, response: List[str], reference: List[List[str]]
-    ) -> List[float]:
-        """
-        Calculates reward scores for a list of responses compared to corresponding lists of reference answers.
-        For each response, the function checks if it matches any of the provided references using the `process_results` function.
-        The reward for each response is computed as the first element of the result (converted to float) multiplied by `self.scale`.
-        Args:
-            response (List[str]): A list of response strings to be evaluated.
-            reference (List[List[str]]): A list where each element is a list of reference strings corresponding to each response.
-        Returns:
-            List[float]: A list of reward scores, one for each response.
-        """
-
-        results = []
-        for resp, refs in zip(response, reference):
-            result = any(process_results(resp, ref)[0] for ref in refs)
-            results.append((1 if result else -1) * self.scale)
-        return results
 
 
 if __name__ == "__main__":
