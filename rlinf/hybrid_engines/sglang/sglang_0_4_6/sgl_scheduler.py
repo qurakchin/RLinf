@@ -16,6 +16,7 @@ import faulthandler
 import logging
 import os
 import signal
+from tqdm import tqdm
 from typing import Optional
 
 import psutil
@@ -190,6 +191,14 @@ class Scheduler(_Scheduler, Worker):
 
         if colocate:
             self.resume_memory_occupation(ResumeMemoryOccupationReqInput())
+            # now the bucket size is 4GB
+            bucket_size = 4 * 1024 * 1024 * 1024
+            batch_weights = []
+            current_bucket = []
+            total_items = len(state_dict)
+
+            # divide state_dict into buckets to load in sglang
+            current_bucket_size = 0
             for name, handle in state_dict.items():
                 func, args = handle
                 list_args = list(args)
@@ -198,8 +207,27 @@ class Scheduler(_Scheduler, Worker):
                 list_args[6] = torch.cuda.current_device()
                 new_weight = func(*list_args)
 
-                model.load_weights([(name, new_weight)])
-                del new_weight
+                # load weight in bf16, so the size is 2 * numel
+                if current_bucket_size + (new_weight.numel() * 2) > bucket_size:
+                    assert len(current_bucket) > 0, "current_bucket is empty"
+                    batch_weights.append(current_bucket)
+                    current_bucket = []
+                    current_bucket_size = 0
+
+                # add weight to current bucket
+                current_bucket.append((name, new_weight))
+                current_bucket_size += (new_weight.numel() * 2)
+            
+            assert len(current_bucket) > 0, "current_bucket is empty"
+            # load the last bucket
+            batch_weights.append(current_bucket)
+            
+            for bucket in tqdm(batch_weights,disable=self.get_parent_rank() != 0 or self.tp_rank != 0,desc="Load weights"):
+                model.load_weights(bucket)
+                for name, weight in bucket:
+                    del weight
+                bucket.clear()
+            torch.cuda.empty_cache()
         else:
             # disaggregate mode, recv tensor directly
             for name, tensor in state_dict.items():

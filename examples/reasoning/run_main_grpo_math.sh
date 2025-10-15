@@ -12,8 +12,7 @@ MEGATRON_PATH=/opt/Megatron-LM
 export PYTHONPATH=${REPO_PATH}:${MEGATRON_PATH}:$PYTHONPATH
 
 if [ -z "$1" ]; then
-    CONFIG_NAME="qwen3-30b-grpo-megatron"
-    # CONFIG_NAME="qwen2.5-1.5b-grpo-megatron"
+    CONFIG_NAME="qwen2.5-1.5b-grpo-megatron"
 else
     CONFIG_NAME=$1
 fi

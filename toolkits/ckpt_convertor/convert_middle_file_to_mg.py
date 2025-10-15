@@ -31,6 +31,7 @@ from toolkits.ckpt_convertor.config import ConvertorConfig
 from .utils.fp8_utils import dict_push
 from .utils.safetensors_loader import STLoader, STLoaderLazy
 from .utils.tensor_operations import Operation, SplitTpTpe
+from .utils.mg_moe_groupgemm import moe_seq_to_group, moe_seq_to_te_group
 
 
 def get_megatron_iteration(convert_config: ConvertorConfig) -> int:
@@ -134,12 +135,14 @@ class Save(Operation):
             else:
                 ep_rank = (model_rank - tpe_rank) // target_tpe
 
-            if target_tpe * target_ep > target_tp:
+            # fix: for Megatron 0.11.0, patch the megatron load ckpt from huggingface
+            # if target_tpe * target_ep <= target_tp:
+            if target_ep > 1:
                 if target_pp == 1:
-                    key = f"mp_rank_for_expert{tpe_rank:02d}_{ep_rank:03d}"
+                    key = f"mp_rank_{tp_rank:02d}_{ep_rank:03d}"
                 else:
                     key = (
-                        f"mp_rank_for_expert{tpe_rank:02d}_{pp_rank:03d}_{ep_rank:03d}"
+                        f"mp_rank_{tp_rank:02d}_{pp_rank:03d}_{ep_rank:03d}"
                     )
                 yield key, tp_rank, tpe_rank
             else:
@@ -610,6 +613,17 @@ def convert_layer(
 
     for op in operations:
         op.execute()
+
+    if convert_config.grouped_gemm == 'te':
+        for model_key in saver.full_checkpoint:
+            state_dict = saver.full_checkpoint[model_key]['model']
+            moe_seq_to_te_group(state_dict)
+    elif convert_config.grouped_gemm == 'legacy':
+        for model_key in saver.full_checkpoint:
+            state_dict = saver.full_checkpoint[model_key]['model']
+            moe_seq_to_group(state_dict, num_local_experts, glu=True)
+    else:
+        assert False
 
     gc.collect()
     if Operation.global_device != "cpu":

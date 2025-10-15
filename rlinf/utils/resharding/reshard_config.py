@@ -13,13 +13,13 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 from megatron.core.transformer import TransformerConfig
 
 from rlinf.utils.convertor.utils import get_mg2hf_convertor
 
-from .utils import get_pp_reshard_fn, get_tp_reshard_fn
+from .utils import get_pp_reshard_fn, get_tp_reshard_fn, get_tpe_reshard_fn
 
 
 @dataclass
@@ -38,6 +38,9 @@ class ReshardConfig:
     reshard_pp_size: int = 1
     """Resharding pp size."""
 
+    moe_grouped_gemm: Optional[str] = None
+    """Resharding moe_grouped_gemm. avail in [None, 'te']"""
+
     convert_fn: Callable = None
     """Function to convert the model weights from megatron format to HuggingFace format."""
 
@@ -46,6 +49,9 @@ class ReshardConfig:
 
     pp_reshard_fn: Callable = None
     """Resharding function to use for resharding the model parallelism from pipeline_model_parallel_size to reshard_pp_size."""
+
+    tpe_reshard_fn: Callable = None
+    """Resharding function to use for resharding the model parallelism from expert_tensor_parallel_size to reshard_tpe_size."""
 
     def __post_init__(self):
         if self.model_config.tensor_model_parallel_size < self.reshard_tp_size:
@@ -69,3 +75,6 @@ class ReshardConfig:
 
         if self.pp_reshard_fn is None:
             self.pp_reshard_fn = get_pp_reshard_fn(self.model_arch)
+
+        if self.tpe_reshard_fn is None:
+            self.tpe_reshard_fn = get_tpe_reshard_fn(self.model_arch)

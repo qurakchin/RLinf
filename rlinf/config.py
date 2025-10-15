@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 logging.getLogger().setLevel(logging.INFO)
 
-SUPPORTED_MODEL_ARCHS = ["qwen2.5", "qwen2.5_vl", "openvla", "openvla_oft", "qwen3-30b", "openpi"]
+SUPPORTED_MODEL_ARCHS = ["qwen2.5", "qwen2.5_vl", "openvla", "openvla_oft", "qwen3-moe", "openpi"]
 SUPPORTED_ROLLOUT_BACKENDS = ["sglang", "vllm"]
 SUPPORTED_TASK_TYPE = ["embodied", "reasoning", "coding_online_rl"]
 SUPPORTED_TRAINING_BACKENDS = ["megatron", "fsdp"]
@@ -430,6 +430,14 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         )
         cfg.model.expert_tensor_parallel_size = cfg.model.expert_tensor_parallel_size = (
             cfg.model.get("expert_tensor_parallel_size", 1)
+        )
+        cfg.model.moe_grouped_gemm = (
+            cfg.model.get("moe_grouped_gemm", None)
+        )
+        assert cfg.model.moe_grouped_gemm in [None, 'te'], f'grouped_gemm type only avail in [null, te]. get value ({cfg.model.moe_grouped_gemm})'
+
+        assert cfg.model.expert_tensor_parallel_size <= cfg.model.tensor_model_parallel_size, (
+            f"expert_tensor_parallel_size ({cfg.model.expert_tensor_parallel_size}) must be less than or equal to tensor_model_parallel_size ({cfg.model.tensor_model_parallel_size})"
         )
 
         cfg.model.position_embedding_type = cfg.model.get(
