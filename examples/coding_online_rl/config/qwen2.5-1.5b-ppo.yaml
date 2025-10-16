@@ -12,6 +12,7 @@ cluster:
     rollout: 0-3
     inference: 4-5
     actor: 6-7
+    reward: 0-3
 
 runner:
   task_type: coding_online_rl
