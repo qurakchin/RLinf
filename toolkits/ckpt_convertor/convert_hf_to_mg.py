@@ -16,11 +16,10 @@ import os
 from concurrent.futures import Future, ProcessPoolExecutor
 from copy import deepcopy
 
-from omegaconf.dictconfig import DictConfig
 import torch
+from omegaconf.dictconfig import DictConfig
 
 from .config import ConvertorConfig, load_convertor_config
-
 from .convert_hf_to_middle_file import (
     convert_layer_loadsave,
 )
@@ -246,16 +245,24 @@ def middle_file_to_mg(convert_config: ConvertorConfig) -> None:
                     )
                     for i, (ckpt_key, ckpt_value) in enumerate(all_ckpts.items()):
                         if convert_config.te_ln_add_extra_state is not None:
-                            if convert_config.te_ln_add_extra_state == 'none':
+                            if convert_config.te_ln_add_extra_state == "none":
                                 extra_state = None
-                            elif convert_config.te_ln_add_extra_state == 'tensor_pickle_none':
+                            elif (
+                                convert_config.te_ln_add_extra_state
+                                == "tensor_pickle_none"
+                            ):
                                 import pickle
+
                                 state_serialized = bytearray(pickle.dumps(None))
-                                extra_state = torch.frombuffer(state_serialized, dtype=torch.uint8)
-                            elif convert_config.te_ln_add_extra_state == 'tensor_0_dim':
+                                extra_state = torch.frombuffer(
+                                    state_serialized, dtype=torch.uint8
+                                )
+                            elif convert_config.te_ln_add_extra_state == "tensor_0_dim":
                                 extra_state = torch.tensor([])
                             else:
-                                assert False, f"te_ln_add_extra_state only avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']"
+                                assert False, (
+                                    "te_ln_add_extra_state only avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']"
+                                )
 
                             for model_key in ckpt_value.keys():
                                 if not model_key.startswith("model"):
@@ -271,14 +278,16 @@ def middle_file_to_mg(convert_config: ConvertorConfig) -> None:
                                         or key_name.endswith(".weight0")
                                     ):
                                         module_base_name = key_name.rsplit(".", 1)[0]
-                                        if module_base_name.endswith('.router'):
+                                        if module_base_name.endswith(".router"):
                                             # moe model router.weight don't need _extra_state
                                             continue
                                         extra_state_key = (
                                             f"{module_base_name}._extra_state"
                                         )
                                         if extra_state_key not in model_dict:
-                                            extra_states_to_add[extra_state_key] = extra_state
+                                            extra_states_to_add[extra_state_key] = (
+                                                extra_state
+                                            )
                                 model_dict.update(extra_states_to_add)
 
                         ckpt_value["iteration"] = iteration
@@ -340,7 +349,8 @@ def convert_hf_to_mg(
     load_path = convert_config.load_path
     save_path = convert_config.save_path
     assert (
-        convert_config.te_ln_add_extra_state in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']
+        convert_config.te_ln_add_extra_state
+        in [None, "none", "tensor_pickle_none", "tensor_0_dim"]
         and convert_config.te_ln_linear_qkv is True
         and convert_config.te_ln_linear_mlp_fc1 is True
     )

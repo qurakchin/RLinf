@@ -38,6 +38,12 @@ class ReshardConfig:
     reshard_pp_size: int = 1
     """Resharding pp size."""
 
+    mg_ep_size: int = 1
+    """Megatron expert model parallel size."""
+
+    mg_tpe_size: int = 1
+    """Megatron expert tensor parallel size."""
+
     moe_grouped_gemm: Optional[str] = None
     """Resharding moe_grouped_gemm. avail in [None, 'te']"""
 
@@ -76,5 +82,8 @@ class ReshardConfig:
         if self.pp_reshard_fn is None:
             self.pp_reshard_fn = get_pp_reshard_fn(self.model_arch)
 
-        if self.tpe_reshard_fn is None:
+        # tpe_reshard_fn only use in moe model parallel
+        if (
+            self.mg_ep_size > 1 or self.mg_tpe_size > 1
+        ) and self.tpe_reshard_fn is None:
             self.tpe_reshard_fn = get_tpe_reshard_fn(self.model_arch)

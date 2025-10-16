@@ -539,7 +539,9 @@ class Qwen3_MoEConvertor(BaseConvertor):
             ),
             # mlp expert fc1
             ConvertorRule(
-                re.compile(rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc1\.{WB}$"),
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc1\.{WB}$"
+                ),
                 TransformType.SPLIT_EXPERT_FC1,
                 [
                     r"model.layers.\g<i>.mlp.experts.\g<ei>.gate_proj.\g<wb>",
@@ -548,23 +550,21 @@ class Qwen3_MoEConvertor(BaseConvertor):
             ),
             # mlp expert fc2
             ConvertorRule(
-                re.compile(rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc2\.{WB}$"),
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc2\.{WB}$"
+                ),
                 TransformType.SPLIT_NONE,
                 [r"model.layers.\g<i>.mlp.experts.\g<ei>.down_proj.\g<wb>"],
             ),
             # pre_mlp_layernorms
             ConvertorRule(
-                re.compile(
-                    rf"decoder\.layers\.{LID}\.pre_mlp_layernorm\.{WB}$"
-                ),
+                re.compile(rf"decoder\.layers\.{LID}\.pre_mlp_layernorm\.{WB}$"),
                 TransformType.SPLIT_NONE,
                 [r"model.layers.\g<i>.post_attention_layernorm.\g<wb>"],
             ),
             # router weight
             ConvertorRule(
-                re.compile(
-                    rf"decoder\.layers\.{LID}\.mlp\.router\.{WB}$"
-                ),
+                re.compile(rf"decoder\.layers\.{LID}\.mlp\.router\.{WB}$"),
                 TransformType.SPLIT_NONE,
                 [
                     r"model.layers.\g<i>.mlp.gate.\g<wb>",
@@ -584,7 +584,7 @@ def register_mg2hf_convertor(model_arch: str, convertor_cls: Callable) -> None:
 
 register_mg2hf_convertor("qwen2.5", Qwen2_5Convertor)
 register_mg2hf_convertor("qwen2.5-vl", Qwen2_5VLConvertor)
-register_mg2hf_convertor("qwen3-moe", Qwen3_MoEConvertor)
+register_mg2hf_convertor("qwen3_moe", Qwen3_MoEConvertor)
 
 
 def get_mg2hf_convertor(model_arch: str, config, strict: bool = False) -> BaseConvertor:

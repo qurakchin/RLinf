@@ -136,11 +136,14 @@ class MegatronCoreWeightReshard:
 
         if ep_size > 1 or tpe_size > 1:
             reshard_ep_model = True
-        
+            if self.config.model_config.num_moe_experts is None:
+                raise ValueError(
+                    "the model is a moe model, but num_moe_experts is not set"
+                )
+            experts_per_chunk = self.config.model_config.num_moe_experts // ep_size
 
         layers_per_pp = self.config.model_config.num_layers // pp_size
         layers_per_chunk = layers_per_pp // vp_size
-        experts_per_chunk = self.config.model_config.num_moe_experts // ep_size
 
         tl_params = {}
         expert_params = {}
@@ -195,11 +198,16 @@ class MegatronCoreWeightReshard:
 
         if reshard_ep_model:
             # if use the te group gemm, we need to convert the weight type from te group to seq group
-            if self.config.moe_grouped_gemm == 'te':
-                from toolkits.ckpt_convertor.utils.mg_moe_groupgemm import moe_te_group_to_seq
+            if self.config.moe_grouped_gemm == "te":
+                from toolkits.ckpt_convertor.utils.mg_moe_groupgemm import (
+                    moe_te_group_to_seq,
+                )
+
                 expert_params = moe_te_group_to_seq(expert_params)
             else:
-                assert self.config.moe_grouped_gemm is 'legacy', f"now the rlinf just support moe_grouped_gemm to be None or 'te', got {self.config.moe_grouped_gemm}"
+                assert self.config.moe_grouped_gemm in [None, "te"], (
+                    f"now the rlinf just support moe_grouped_gemm to be None or 'te', got {self.config.moe_grouped_gemm}"
+                )
 
             # gather experts across ep ranks
             ep_gathered_params = {}
@@ -207,12 +215,18 @@ class MegatronCoreWeightReshard:
                 weight_list = [torch.zeros_like(val) for _ in range(ep_size)]
                 torch.distributed.all_gather(weight_list, val, group=ep_group)
                 for idx in range(ep_size):
-                    key2 = rename_expert_layer_num(key, get_expert_num(key) + idx * experts_per_chunk)
+                    key2 = rename_expert_layer_num(
+                        key, get_expert_num(key) + idx * experts_per_chunk
+                    )
                     ep_gathered_params[key2] = weight_list[idx]
 
             # reshard experts across tpe ranks
             ep_gathered_params = self.config.tpe_reshard_fn(
-                ep_gathered_params, tpe_size, tpe_group, self.config.reshard_tp_size, dst_rank
+                ep_gathered_params,
+                tpe_size,
+                tpe_group,
+                self.config.reshard_tp_size,
+                dst_rank,
             )
 
             # gather experts across pp ranks

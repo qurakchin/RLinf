@@ -25,7 +25,6 @@ import safetensors.torch
 import torch
 
 from .config import ConvertorConfig
-
 from .utils.fp8_utils import dict_push
 from .utils.safetensors_loader import STLoaderLazy
 from .utils.tensor_operations import CopyEquals, MergeGlu, MergeQKV, Operation
