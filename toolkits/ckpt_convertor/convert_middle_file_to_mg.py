@@ -620,7 +620,7 @@ def convert_layer(
         for model_key in saver.full_checkpoint:
             state_dict = saver.full_checkpoint[model_key]["model"]
             moe_seq_to_group(state_dict, num_local_experts, glu=True)
-    else:
+    elif convert_config.grouped_gemm != None:
         assert False
 
     gc.collect()
