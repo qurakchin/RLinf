@@ -111,10 +111,11 @@ def tp_reshard_fn_qwen3_moe(model_state_dict, merge_factor, tp_group):
 ##############################
 
 
-def tpe_reshard_fn_qwen3_moe(model_state_dict, tpe_size, tpe_group, rollout_tp_size, dst_rank):
+def tpe_reshard_fn_qwen3_moe(
+    model_state_dict, tpe_size, tpe_group, rollout_tp_size, dst_rank
+):
+    rollout_dp_rank, rollout_tp_rank = dst_rank
 
-    rollout_dp_rank, rollout_tp_rank = dst_rank 
-    
     for key, value in model_state_dict.items():
         if "linear_fc1.weight" in key:
             dim = 0
@@ -123,9 +124,7 @@ def tpe_reshard_fn_qwen3_moe(model_state_dict, tpe_size, tpe_group, rollout_tp_s
         else:
             continue
         if tpe_size != 1:
-            value = _gather_tp_group_tensor_and_reshard(
-                value, dim, tpe_size, tpe_group
-            )
+            value = _gather_tp_group_tensor_and_reshard(value, dim, tpe_size, tpe_group)
         if dim == 0:
             # for the fc1 weight, we need to split it into two parts gate weight and up weight
             tpe_split_size = value.shape[dim] // tpe_size
@@ -146,14 +145,16 @@ def tpe_reshard_fn_qwen3_moe(model_state_dict, tpe_size, tpe_group, rollout_tp_s
             gate_value_slice = torch.split(gate_weight, rollout_split_size, dim=dim)
             up_value_slice = torch.split(up_weight, rollout_split_size, dim=dim)
 
-            model_state_dict[key] = torch.cat([gate_value_slice[rollout_tp_rank], up_value_slice[rollout_tp_rank]], dim=0).contiguous()
+            model_state_dict[key] = torch.cat(
+                [gate_value_slice[rollout_tp_rank], up_value_slice[rollout_tp_rank]],
+                dim=0,
+            ).contiguous()
             del gate_weight, up_weight, gate_value_slice, up_value_slice, value
         else:
             rollout_split_size = value.shape[dim] // rollout_tp_size
             value_slice = torch.split(value, rollout_split_size, dim=dim)
             model_state_dict[key] = value_slice[rollout_tp_rank].contiguous()
             del value
-
 
     return model_state_dict
 

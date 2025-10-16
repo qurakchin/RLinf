@@ -539,7 +539,9 @@ class Qwen3_MoEConvertor(BaseConvertor):
             ),
             # mlp expert fc1
             ConvertorRule(
-                re.compile(rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc1\.{WB}$"),
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc1\.{WB}$"
+                ),
                 TransformType.SPLIT_EXPERT_FC1,
                 [
                     r"model.layers.\g<i>.mlp.experts.\g<ei>.gate_proj.\g<wb>",
@@ -548,23 +550,21 @@ class Qwen3_MoEConvertor(BaseConvertor):
             ),
             # mlp expert fc2
             ConvertorRule(
-                re.compile(rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc2\.{WB}$"),
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc2\.{WB}$"
+                ),
                 TransformType.SPLIT_NONE,
                 [r"model.layers.\g<i>.mlp.experts.\g<ei>.down_proj.\g<wb>"],
             ),
             # pre_mlp_layernorms
             ConvertorRule(
-                re.compile(
-                    rf"decoder\.layers\.{LID}\.pre_mlp_layernorm\.{WB}$"
-                ),
+                re.compile(rf"decoder\.layers\.{LID}\.pre_mlp_layernorm\.{WB}$"),
                 TransformType.SPLIT_NONE,
                 [r"model.layers.\g<i>.post_attention_layernorm.\g<wb>"],
             ),
             # router weight
             ConvertorRule(
-                re.compile(
-                    rf"decoder\.layers\.{LID}\.mlp\.router\.{WB}$"
-                ),
+                re.compile(rf"decoder\.layers\.{LID}\.mlp\.router\.{WB}$"),
                 TransformType.SPLIT_NONE,
                 [
                     r"model.layers.\g<i>.mlp.gate.\g<wb>",

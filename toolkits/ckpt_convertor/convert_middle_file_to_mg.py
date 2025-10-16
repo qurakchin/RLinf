@@ -29,9 +29,9 @@ import torch
 from toolkits.ckpt_convertor.config import ConvertorConfig
 
 from .utils.fp8_utils import dict_push
+from .utils.mg_moe_groupgemm import moe_seq_to_group, moe_seq_to_te_group
 from .utils.safetensors_loader import STLoader, STLoaderLazy
 from .utils.tensor_operations import Operation, SplitTpTpe
-from .utils.mg_moe_groupgemm import moe_seq_to_group, moe_seq_to_te_group
 
 
 def get_megatron_iteration(convert_config: ConvertorConfig) -> int:
@@ -141,9 +141,7 @@ class Save(Operation):
                 if target_pp == 1:
                     key = f"mp_rank_{tp_rank:02d}_{ep_rank:03d}"
                 else:
-                    key = (
-                        f"mp_rank_{tp_rank:02d}_{pp_rank:03d}_{ep_rank:03d}"
-                    )
+                    key = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}_{ep_rank:03d}"
                 yield key, tp_rank, tpe_rank
             else:
                 if target_pp == 1:
@@ -614,13 +612,13 @@ def convert_layer(
     for op in operations:
         op.execute()
 
-    if convert_config.grouped_gemm == 'te':
+    if convert_config.grouped_gemm == "te":
         for model_key in saver.full_checkpoint:
-            state_dict = saver.full_checkpoint[model_key]['model']
+            state_dict = saver.full_checkpoint[model_key]["model"]
             moe_seq_to_te_group(state_dict)
-    elif convert_config.grouped_gemm == 'legacy':
+    elif convert_config.grouped_gemm == "legacy":
         for model_key in saver.full_checkpoint:
-            state_dict = saver.full_checkpoint[model_key]['model']
+            state_dict = saver.full_checkpoint[model_key]["model"]
             moe_seq_to_group(state_dict, num_local_experts, glu=True)
     else:
         assert False

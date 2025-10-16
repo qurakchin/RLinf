@@ -260,7 +260,7 @@ class MegatronActor(MegatronModelManager, Worker):
             model_config=self.transformer_config,
             reshard_tp_size=self.cfg.rollout.tensor_parallel_size,
             reshard_pp_size=self.cfg.rollout.pipeline_parallel_size,
-            moe_grouped_gemm=self.cfg.actor.model.get('moe_grouped_gemm', None),
+            moe_grouped_gemm=self.cfg.actor.model.get("moe_grouped_gemm", None),
         )
         self.rollout_weights_reshard = MegatronCoreWeightReshard(rollout_reshard_config)
         self._setup_rollout_weight_dst_ranks()
@@ -918,8 +918,7 @@ class MegatronActor(MegatronModelManager, Worker):
     def _get_rollout_model_state_dict(self):
         """Get the state dictionary of the model for rollout."""
         return self.rollout_weights_reshard.gather_and_reshard_model(
-            unwrap_model(self.model), 
-            self._weight_dst_rank_in_rollout
+            unwrap_model(self.model), self._weight_dst_rank_in_rollout
         )
 
     def _setup_rollout_weight_dst_ranks(self):

@@ -71,8 +71,10 @@ class ConvertorConfig:
     # special for mg
     te_ln_linear_qkv: bool = True
     te_ln_linear_mlp_fc1: bool = True
-    te_ln_add_extra_state: Optional[str] = None # avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']
-    grouped_gemm: Optional[str] = None # avail in [None, 'te']
+    te_ln_add_extra_state: Optional[str] = (
+        None  # avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']
+    )
+    grouped_gemm: Optional[str] = None  # avail in [None, 'te']
 
 
 def load_convertor_config(hf_ckpt_path: str, ckpt_cfg: DictConfig) -> ConvertorConfig:
@@ -80,7 +82,7 @@ def load_convertor_config(hf_ckpt_path: str, ckpt_cfg: DictConfig) -> ConvertorC
     convertor_config = ConvertorConfig()
     convertor_config.load_path = hf_ckpt_path
 
-    convertor_config.num_layers = ckpt_cfg.get('num_hidden_layers', None)
+    convertor_config.num_layers = ckpt_cfg.get("num_hidden_layers", None)
 
     convertor_config.num_attention_heads = hf_config.num_attention_heads
     # num_key_value_heads is gqa/mqa num_groups
@@ -189,8 +191,8 @@ def load_convertor_config(hf_ckpt_path: str, ckpt_cfg: DictConfig) -> ConvertorC
             convertor_config.first_dense = 0
         if convertor_config.num_experts is None:
             convertor_config.num_experts = getattr(hf_config, "num_experts", None)
-        convertor_config.grouped_gemm = ckpt_cfg.get('grouped_gemm', None)
-        assert convertor_config.grouped_gemm in [None, 'te']
+        convertor_config.grouped_gemm = ckpt_cfg.get("grouped_gemm", None)
+        assert convertor_config.grouped_gemm in [None, "te"]
         assert convertor_config.num_experts is not None
     else:
         assert convertor_config.num_experts in (0, None)
@@ -208,7 +210,11 @@ def load_convertor_config(hf_ckpt_path: str, ckpt_cfg: DictConfig) -> ConvertorC
     ), "num_layers must be specified and greater than 0."
 
     convertor_config.te_ln_linear_qkv = getattr(ckpt_cfg, "te_ln_linear_qkv", True)
-    convertor_config.te_ln_linear_mlp_fc1 = getattr(ckpt_cfg, "te_ln_linear_mlp_fc1", True)
-    convertor_config.te_ln_add_extra_state = getattr(ckpt_cfg, "te_ln_add_extra_state", None)
+    convertor_config.te_ln_linear_mlp_fc1 = getattr(
+        ckpt_cfg, "te_ln_linear_mlp_fc1", True
+    )
+    convertor_config.te_ln_add_extra_state = getattr(
+        ckpt_cfg, "te_ln_add_extra_state", None
+    )
 
     return convertor_config
