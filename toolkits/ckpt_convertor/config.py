@@ -72,7 +72,7 @@ class ConvertorConfig:
     te_ln_linear_qkv: bool = True
     te_ln_linear_mlp_fc1: bool = True
     te_ln_add_extra_state: Optional[str] = (
-        'tensor_pickle_none'  # avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']
+        "tensor_pickle_none"  # avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']
     )
     grouped_gemm: Optional[str] = None  # avail in [None, 'te']
 
