@@ -32,7 +32,7 @@ class ConvertorConfig:
     num_attention_heads: int = None
     num_query_groups: int = None
     head_dim: int = None
-    tie_word_embeddings: bool = False
+    tie_word_embeddings: bool = None
     model_type: str = None
     model: str = None
 
@@ -72,7 +72,7 @@ class ConvertorConfig:
     te_ln_linear_qkv: bool = True
     te_ln_linear_mlp_fc1: bool = True
     te_ln_add_extra_state: Optional[str] = (
-        None  # avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']
+        'tensor_pickle_none'  # avail in [None, 'none', 'tensor_pickle_none', 'tensor_0_dim']
     )
     grouped_gemm: Optional[str] = None  # avail in [None, 'te']
 
