@@ -1,139 +1,145 @@
-构建一个 Online RL 代码补全案例
-============================
+智能体落地“最后一公里”初探之Cursor在线强化学习
+========================================
 
 最后更新：10/20/2025。
 
 相关阅读：:doc:`代码补全在线强化学习 <../examples/coding_online_rl>`。
 
-1. 概览
+1. 背景
 ------
 
-在搜索与推荐等场景，Online Learning 已被验证有效。面向代码编辑器的智能补全，我们关心：能否把真实的用户“接受/拒绝”作为即时反馈，通过 Online RL 持续优化在线效果？我们参考 Cursor 团队的实践（见 `博文 <https://mp.weixin.qq.com/s/ShalRibfp9YSE5UFS0GLVg>`_），尝试在真实交互中提升补全质量与接受率。
+最近，Cursor 团队推出了一种基于 **在线强化学习（Online RL）** 的新型 Tab 模型（ `链接 <https://mp.weixin.qq.com/s/ShalRibfp9YSE5UFS0GLVg>`_ ）。该模型将用户的每一次交互（如接受或拒绝建议）视作强化信号，直接参与模型的在线优化。在每日超过 4 亿次请求的真实反馈驱动下，模型能够以极高频率持续学习与改进，成为首个利用在线强化学习提升实际服务效果的成功案例
 
-为何该问题适合 Online RL：
-1. 行为模式天然闭环：模型给出下一步建议，用户行为直接形成 reward 反馈；
-2. 需求与场景持续变化，难以长期依赖“构建离线数据集 -> 低频离线训练”的路径；
-3. 具备足量、可度量的实时用户反馈，可同时作为线上指标与训练信号。
+随着 **Agentic AI** 时代的到来，越来越多的智能体（Agent）被部署到真实生产环境中，并通过在线强化学习实现个性化与性能自适应优化。这一范式有望成为推动智能体“落地最后一公里”的关键技术路径。
 
-基于上述判断，我们在 RLinf 框架上实现了一个可运行的原型系统（下文统一称“原型系统”，等同于常说的 Demo），聚焦“代码补全”任务：
-- 集成 VSCode 侧的数据采集（基于 continue），在用户按下 Tab 或放弃时上报 prompt 与 accepted 标记；
-- 在 RLinf 中打通在线推理/训练闭环，确保服务与训练可并行、互不阻塞；
-- 针对补全任务做了一系列算法与工程上的轻量优化与尝试。
+嗅到这一趋势，我们团队基于大规模强化学习框架 **RLinf** 对 Cursor 的在线强化学习方案进行了复现实验，探索在线强化学习能否进一步提升模型的代码补全能力。具体而言，我们采用 **Continue** 作为代码编辑器端，用户可直接在 VSCode 中安装 `Continue 插件 <https://github.com/RLinf/continue>`_ 进行开发； **RLinf** 则作为后端系统，既负责大模型的 Serving，也承担在线强化学习的训练。值得注意的是，大模型的 Serving 后端也可以替换为已部署的 Agent 服务，而 **RLinf** 可灵活作为提供在线强化学习能力的通用组件接入系统。
 
-后续章节将依次介绍：任务与数据采集、系统实现（基于 RLinf）、算法与离线验证，最后给出结论与价值判断。需要说明的是，RLinf 在这里充当分布式执行与高性能通信的底座，使我们能在同一套框架内协同编排推理与训练。
-
-2. 代码补全任务
--------------
-
-对于如 Cursor 这样的编辑器，核心功能之一就是高效的代码补全能力。对于代码补全任务，最基础的功能为：当光标处在某个位置时，编程助手给出当前位置建议的插入内容。针对此功能，我们可以使用 FIM (Fill-In-the-Middle) 任务实现：给出上文和下文，大模型返回中间补全的建议。现如今大多数 llm 在预训练时已经针对 FIM 进行了训练，通过对模型输入 `<|fim_prefix|>上文<|fim_suffix|>下文<|fim_middle|>` 的 prompt，模型即可完成补全。
-
-我们基于开源 ai 编程插件 continue 实现了该原型系统的数据采集。continue 默认已支持使用 FIM 任务格式提供代码补全能力，但并不支持人类反馈 reward 的上报。我们稍作改造：当用户按下 Tab 时，插件上报 prompt 与 accepted=True；当超过 10 秒未按下 Tab 或进行了其他代码操作，上报 prompt 与 accepted=False。由此我们直接获得人类反馈，可作为实时指标与训练信号，而无需额外训练一个 reward 模型。
-
-对于 Cursor 实际使用场景，除了往光标处补全外，还支持了跨行补全、对另一段相似代码执行刚刚用户的修改操作等高级功能。很遗憾，这种能让人“一路火花带闪电狂按 tab”的高级能力不是 FIM 任务可以实现的，需要更高级的任务类型才能支持了。
-
-3. 系统实现
+2. 前情提要
 ----------
 
-为承载“在线服务与训练并存”的目标，我们在 RLinf 上采用“推理与训练分离”的部署形态，并通过 `Worker`/`WorkerGroup` 进行组件抽象与编排。RLinf 框架提供了 Worker 的编程接口，这是其构建整个系统的基石。其中：
+2.1 代码补全功能简介
+~~~~~~~~~~~~~~~~~~
 
-- Worker 表示一个远程进程或计算单元，通过继承 Worker 类，可以将一个具体的执行单元的逻辑进行抽象，并提供和其他 Worker 交互、及被 RLinf 分配和管理的能力。
-- WorkerGroup 是一个用于创建和管理一组同类 Worker 的工具类，通过 Worker.create_group().launch(cluster, placement) 操作，可在集群资源上创建一组 Worker 实例，并且通过 WorkerGroup 接口可以进行远程调用。
+对于像 **Cursor** 这样的智能编程编辑器，核心功能之一就是高效、上下文感知的 **代码补全** 。在典型的代码补全任务中，当光标停留在某个位置时，编程助手会根据上下文给出插入内容的建议。实现这一能力的常见方式是 **FIM（Fill-In-the-Middle）** 任务：模型接收光标位置的上文和下文，预测中间应填充的内容。目前，大多数大语言模型（LLM）在预训练阶段已针对 FIM 任务进行过优化，只需按照以下格式组织输入：
+`<|fim_prefix|>上文<|fim_suffix|>下文<|fim_middle|>`
 
-math rl 训练代码的主要组件有：
+模型即可生成合理的中间补全内容。这种设计使得 LLM 能够自然地适应编辑器中的代码补全场景。
 
-- Runner：调度者，通过调用 RolloutWorker / InferenceWorker / ActorWorker 等不同组件，完成组件间配合以顺利执行代码
-- RolloutWorker / InferenceWorker / ActorWorker：RL 训练中 rollout actor 的组件抽象。其中 inference 用于计算 pref_logprobs，以防止 actor 权重更新无法对后续数据计算 pref_logprobs
+2.2 Continue 插件的代码补全逻辑
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-我们基于已有的 math rl 训练代码进行 online rl 的改造。框架层面的关键调整包括：
+在我们的实验中，我们基于开源 AI 编程IDE **Continue** 实现了完整的在线强化学习（Online RL）代码补全案例。
 
-- 由于需要支持在线服务，使用共享式调度策略会导致训练时无法提供补全服务，因此必须使用分离式的调度策略。
-- 保留 RolloutWorker / InferenceWorker / ActorWorker，但训练数据不再使用 RolloutWorker -> InferenceWorker -> ActorWorker 的流程，而是增加一个 ServerRolloutWorker 用于接受用户上报数据，训练数据的流程变为 ServerRolloutWorker -> InferenceWorker -> ActorWorker。
-- 由于不再需要训练数据集，因此 RLRunner 中不再需要 training dataset 及各种处理，而是增加一个 OnlineRouterWorker 用于接受用户在线请求，使用 OnlineRouterWorker -> RolloutWorker 的流程提供线上服务。同时保留每步训练后 ActorWorker -> RolloutWorker 的权重更新过程，以支持 Online 的模型更新。
+Continue 默认支持基于 FIM 格式的补全任务，但原生版本并不具备人类反馈（Human Feedback）上报功能。
 
-RLinf 框架提供了高性能、易用的异步通信抽象 Channel，自适应使用优化过的点对点后端（如 CUDA IPC 和 NCCL），并封装为生产者-消费者队列的通信模式。因此 ServerRolloutWorker -> InferenceWorker 可以如下实现：
+为此，我们对插件进行了轻量级改造：
 
-1. 创建一个 channel。我们使用与 math 一致的命名，在 Runner.__init__中调用 `self.dataloader_channel = Channel.create("DataLoader")` 即可创建
-2. 在 Runner.run 中调用
+- 当用户按下 **Tab** 键接受补全建议时，插件上报 accepted=True；
+- 当用户在 10 秒内未按下 Tab 或进行了其他编辑操作时，上报 accepted=False。
 
-.. code-block:: python
+通过这种方式，我们能够直接从真实用户交互中获得强化信号（reward），无需额外训练一个 reward 模型去拟合人类偏好，实现了 **从人类到模型的直接强化学习闭环**。
 
-   rollout_handle: Handle = self.server_rollout.rollout(
-       output_channel=self.dataloader_channel,
-   )
+3. 系统搭建
+----------
 
-   infer_handle: Handle = self.inference.run_inference(
-       input_channel=self.dataloader_channel,
-       output_channel=self.inference_channel,
-       compute_ref_logprobs=self.compute_ref_logprobs,
-   )
+3.1 流程概览
+~~~~~~~~~~~
 
-即可实现 ServerRolloutWorker -> InferenceWorker 的逻辑，大大简化了代码逻辑使用。
+整个在线强化学习的流程可以概括为三个核心步骤：
 
-4. 算法与离线验证
----------------
+1. **交互与反馈采集**：
 
-通过强化学习，我们可以使我们对用户接受率的目标转换为奖励设定，进而将针对奖励设定的策略通过强化学习训练进模型中，从而不再需要一个单独的模型来预测用户接受率。
+   Coding Agent 向用户提供代码补全建议，用户的“接受”或“拒绝”操作构成明确的强化信号。
+2. **即时在线更新**：
 
-对于当前大模型 RLVR 任务中最常见的 rl 算法 PPO 及 GRPO，使用起来分别有如下困难：
-- PPO 基于 Actor-Critic 算法，因此需要一个相较于 policy 模型来讲更强的 critic 模型。这会导致 RL 过程复杂且计算量高。
-- GRPO 通过使用 group 采样的方式，省去了 critic 模型直接计算 advantage。但我们的场景里无法做到多次采样且评估。
+   用户反馈传到 RLinf 的后端系统用于训练该生成模型，模型基于 On-policy 策略实时更新，并同步回线上 Agent，以获取新的交互反馈。
+3. **效果验证与部署**：
 
-Cursor 从 policy-based RL 基础公式做了更简单的简化。假设奖励为 \(J(θ)=Es∼P(s), a∼π(a∣s,θ)[R(s,a)]\)，通过假设 \(R(s,a)\) 和 \(θ\) 无关，那么奖励的梯度为：\(\nablaθ J(θ)=Es∼P(s),a∼π(a∣s,θ)[\nablaθ log π(a∣s,θ)⋅R(s,a)]\)。其中 \(log π(a∣s,θ)\) 可以计算，\(R(s,a)\) 可以直接通过用户反馈的 accepted 与否，因此可以直接获得 \(\nablaθJ(θ)\) 的无偏估计。通过调整更新步长，\(R(s,a)\) 和 \(θ\) 有关对梯度的影响可以被缓解，此时模型可以正常训练。
+   在线训练结束后，通过 **A/B** 测试 评估新模型的接受率是否优于原模型；若效果提升，则统一部署至线上环境。
 
-由于我们没有足够大的使用场景，因此我们通过离线 rl 证明 rl 对补全任务的有效性。我们自己构建了训练集和测试集，使用大模型打分的方式来模拟人类偏好。
+3.1 RLinf-Online 搭建
+~~~~~~~~~~~~~~~~~~~~~
 
-code-fim-v2 是一个包含多种编程语言的代码补全数据集，我们从中挑选出了 python 的补全样本，并进一步过滤掉补全内容较短的样本，最后剩下 4000 条高质量代码补全数据。取其中的 3000 条作为训练集，1000 条作为测试集。数据样本给出待补全代码片段的上文(prefix)和下文(suffix)，模型根据上下文的代码内容生成补全结果。
+下面介绍如何基于RLinf快速搭建该流程：
 
-在离线训练中，为了模拟 cursor online rl 的打分方式，我们并未使用模型补全结果和参考答案的编辑距离作为分数，而是使用 llm as judge 对模型补全的结果进行评分（分数范围 0-10 分）来模拟人类偏好，所有样本的平均评分作为该模型在测试集上的分数。
+（1）RLinf Worker抽象
 
-我们采用 Qwen2.5-Coder-1.5B 模型进行实验。训练过程中，我们采用了较低的学习率 2e-6 和 bf16 数值精度以保证训练的稳定性：由于没有加 kl loss，较高的学习率可能导致模型训练初期遗忘过快；使用 bf16 训练相比 fp16 训练初期 grad norm 更稳定。reward 我们使用的是 llm as judge 的方式，打分 prompt 与测试集评测的打分 prompt 保持一致，打分模型使用 deepseek-v3.1。online rl 我们使用的是 group size=1 的 ppo(同 AReaL 的实现，无 critic model)，离线训练使用 GRPO(group size=8) 快速验证模型在该任务上的训练效果。
+RLinf 框架提供了 Worker 的编程接口，这是 RLinf 构建整个框架的基本组件。Worker 表示一个可执行的组件，大的组件可以是推理实例、训练框架，小的组件可以是数据加载器等。通过继承 Worker 类，可以将一个具体的执行组件进行抽象，并提供和其他 Worker 交互、以及被 RLinf 调度、分配和管理的能力。
 
-代码补全结果打分 prompt
+（2）RLinf Channel通信
+
+RLinf 框架提供了高性能、易用的异步通信抽象 Channel，自适应使用优化过的点对点后端（如 CUDA IPC 和 NCCL），并封装为生产者-消费者队列的通信模式。因此 Worker1 -> Worker2 的通信可以如下实现：
 
 .. code-block:: python
 
-    请你作为代码质量评估专家，对给定的代码补全结果进行质量评分。这份评分将用于强化学习训练中的奖励信号，因此请确保评分客观、一致且有区分度。
+   self.comm_channel = Channel.create("Comm") #创建一个 channel
 
-    评估依据信息
-    <prefix>{prefix}</prefix>
-    <suffix>{suffix}</suffix>
-    <completion>{completion}</completion>
+   Handle1 = self.worker1.rollout(
+       output_channel=self.comm_channel,
+   ) # 执行数据生成
 
-    信息项描述
-    prefix: 代码的前半部分
-    suffix: 代码的后半部分
-    completion: LLM 提供的待评估补全内容（即 Prompt 和 Suffix 之间的部分）。
+   Handle2 = self.worker2.run_inference(
+       input_channel=self.comm_channel,
+   )# 执行inference流程
 
-    评分标准如下，采用 0-10 分制，分为 5 个等级（0, 3, 6, 8, 10）：
-    正确性和功能性（correctness_and_functionality）：
-    0 分：代码完全不能实现预期功能，存在根本性逻辑错误
-    3 分：代码能实现部分功能，但存在严重逻辑缺陷或无法处理常见情况
-    6 分：代码能实现核心功能，但存在一些边缘情况处理不当或 minor 错误
-    8 分：代码能正确实现所有功能，仅存在极少可忽略的问题
-    10 分：代码完美实现所有功能，逻辑严谨，能妥善处理各种边缘情况
+仅需3行代码即可实现 Worker1 -> Worker2 的通信逻辑，大大简化了代码逻辑。
 
-    请基于以上标准对提供的代码补全结果进行评分，并按照以下 XML 格式输出，确保分数为指定的五个等级之一，理由简短具体且有针对性：
-    ```xml
-    <evaluation>
-    <criteria_scores>
-        <correctness_and_functionality>
-        <score>[SCORE]</score>
-        <justification>[简短具体的理由]</justification>
-        </correctness_and_functionality>
-    </criteria_scores>
-    </evaluation>
-    ```
+（3）基于RLinf构建在线强化学习训练流程
 
-如下图所示，模型在训练过程中reward稳步提升，训练结束在测试集上提升效果明显(4.532 -> 6.897)，涨幅超50%，超过同系列32B模型。由此可见对补全模型继续做rl是可行的，并且小模型也展现出了巨大的潜力。
+有了Worker和Channel这两个基本元素，我们便可以搭建在线强化学习的整套训练流程。整体系统架构如下图所示。
+
+.. raw:: html
+
+   <img src="https://github.com/RLinf/misc/raw/main/pic/start-0.jpg" width="800"/>
+
+假设代码补全 Agent 已经作为一个完整的在线服务部署，由 **用户前端（User Frontend）** 与 **服务后端（Service Backend）** 组成。为了让这一线上系统具备在线强化学习（Online RL）能力，我们在其 **plugin** 层 引入了一个独立组件 —— **RLinf Runner** 。与长期运行的后台服务不同，RLinf Runner 并不是一个常驻进程，而是一个可以由线上系统的 **Controller** 按需调用的轻量级模块。我们为 RLinf Runner 设计了与线上 Agent 的交互接口，用于：
+
+1. 获取在线数据，包括请求（request）、响应（response）内容以及用户交互反馈（accept/reject）；
+2. 接收并更新模型权重，从而实现 Agent 策略的实时优化。
+
+在 RLinf Runner 内部，我们将整个强化学习过程分解为三个核心 Worker：
+
+- **Data Receiver**：负责接收并缓存来自线上系统的交互数据；
+- **Compute Reward**：根据用户反馈计算即时奖励信号；
+- **PPO Loss + Actor Trainer**：执行策略优化与模型更新。
+
+这些 Worker 之间的通信通过 RLinf Channel 实现，它提供高性能、异步的数据传递机制，使整个在线训练流程能够以流式方式持续进行。当 Service Backend 的 Controller 启动 RLinf Runner 后，在线强化学习过程便会自动运行：系统从线上服务中接收数据、计算奖励、更新策略模型，并将改进后的模型权重实时回传至服务后端。为保障线上服务的稳定性，在线强化学习可首先在部分愿意参与新模型试验的用户群体中进行部署与验证。
+
+4. 算法设计
+----------
+
+除了模块化的系统设计之外，我们也在 **在线强化学习（Online RL）算法设计** 上进行了深入探索。在 Online RL 场景中，每个请求（request）通常只对应一次响应与一次用户反馈（accept/reject），因此 **GRPO** 不再适用，因为它依赖于对同一输入的多样化响应组来计算相对偏好。为此，我们采用了改进后的 **PPO 算法** ，主要改动包括：去掉 **critic 模型** ，优势估计（advantage estimation）退化为 **蒙特卡洛回报（Monte Carlo return）** 。虽然这种方法可能带来较大的训练方差，但依靠 PPO 的 **clip 机制** 可以有效限制策略更新幅度，防止训练崩溃，从而实现一种 **高效且稳定的简化策略**。在代码补全的 Online RL 训练过程中， **reward 来源于用户反馈信号** （即用户的接受或拒绝操作）。
+
+由于目前缺乏足够规模的真实 Online 使用场景，我们采用 **LLM 模拟用户打分（LLM-as-a-Judge）** 的方式，对模型生成的补全结果进行评分。具体地，我们使用 LLM（DeepSeek-V3.1）对模型生成的补全结果进行 0–10 分打分，平均得分作为模型在测试集上的综合表现指标。
+
+5. 性能一览
+----------
+
+5.1 训练配置
+~~~~~~~~~~~
+
+**数据集构建**
+
+我们选用 **code-fim-v2** 数据集，该数据集包含多种编程语言的代码补全样本。我们从中筛选出 Python 样本，并进一步过滤掉补全内容过短的样本，最终保留约 **4000 条高质量数据**。其中 **3000 条** 用于训练， **1000 条** 用于测试。每个样本包含上文（prefix）与下文（suffix）代码片段，模型需根据上下文生成中间补全内容。
+
+**主要参数**
+
+实验基模型为 **Qwen2.5-Coder-1.5B** 。由于未加入 KL regularization，过高学习率可能导致模型遗忘原有分布，因此我们选择较低学习率(2e-6)以保持稳定收敛。同时，采用bf16 训练精度，相较于 fp16 在训练早期的梯度范数更稳定。
+
+此外，为了快速验证强化学习在该任务上的有效性，我们还采用了 **GRPO（group size = 8）** 进行离线训练对比实验，以评估不同训练范式下模型在代码补全任务上的性能变化。
+
+5.2 实验结果
+~~~~~~~~~~~
+
+如图1所示，可以看到通过在线强化学习，模型性能持续增长。测试集结果如表1所示，Qwen2.5-Coder-1.5B-RLinf在测试集上提升效果明显(4.532 -> 6.897)，涨幅超50%，甚至超过同系列32B模型。这表明通过在线强化学习可以有效提升模型部署性能，并且小模型具有巨大潜力。
 
 .. list-table::
    :widths: 50 50
    :header-rows: 0
    :align: center
 
-   * - .. image:: https://github.com/RLinf/misc/raw/main/pic/coding_online_rl_offline_rewards.png
+   * - .. image:: https://github.com/qurakchin/misc/raw/docs/coding_rl_offline_reward/pic/coding_online_rl_offline_rewards.png
           :width: 100%
-          :alt: 训练reward变化图
      - .. list-table::
           :header-rows: 1
           :align: center
@@ -152,14 +158,10 @@ code-fim-v2 是一个包含多种编程语言的代码补全数据集，我们�
             - 6.545
           * - Qwen2.5-Coder-1.5B-RL
             - 6.897 (+52%)
-   * - 训练reward变化图
-     - 测试集得分（0-10 分）
+   * - 图1 训练reward变化图
+     - 表1 测试集得分（0-10 分）
 
-5. 结语
-------
+6. 未来展望
+----------
 
-我们在 RLinf 上跑通了“在线补全 + 强化学习”的原型闭环：无需引入昂贵的 critic 或额外的 reward 模型，直接将真实用户行为转化为优化信号，并以“服务与训练分离”的形态稳定联动；配合 VSCode/continue 的低摩擦数据采集、Channel 管道与权重在线更新，形成可持续迭代的最小可行路径。
-
-更宏观地看，Online RL 有望成为人机协同类 AI 产品的“持续学习基础设施”：把可观测的用户交互转化为可优化目标，在真实环境中形成快速的反馈—更新闭环。Cursor 的实践（接受率约 +28% 提升）与我们的离线验证共同表明：反馈驱动、在线优化在代码智能场景切实有效。
-
-顺应这一趋势，RLinf 将持续演进为面向 Online RL 的通用底座，同时我们将把该原型系统逐步拓展到更丰富的编辑器交互与任务形式，持续优化采样与更新策略，在真实产品中验证可持续的价值与边界。
+RLinf-online是团队在智能体在线优化方案的初步探索，当前版本仅采用人类代理的形式进行性能模拟，但其结果已经表明在线强化学习的无限潜力。团队正将该流程上线生产环境，在实际业务中进行测试。同时，RLinf团队期待与大家合作，共同探索大模型时代下的强化学习边界！
