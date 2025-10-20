@@ -49,6 +49,8 @@ dependencies = [
     "gsutil",
     "ruff",
     "pre-commit",
+    "liger_kernel",
+    "uvloop==0.21.0",
 
     # Logging
     "swanlab",
