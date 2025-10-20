@@ -1,6 +1,6 @@
 defaults:
-  - env/train: libero_object
-  - env/eval: libero_object
+  - env/train: libero_10
+  - env/eval: libero_10
   - override hydra/job_logging: stdout
 
 hydra:
@@ -38,7 +38,7 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 8
-  max_episode_steps: 240
+  max_episode_steps: 480
   use_ordered_reset_state_ids: False
   reward_coef: 1.0
   n_chunk_steps: 48
@@ -48,7 +48,6 @@ algorithm:
   reward_type: chunk_level
   logprob_type: chunk_level
   entropy_type: token_level
-
   update_epoch: 4
   adv_type: embodied_grpo
   loss_type: embodied_grpo
@@ -123,12 +122,12 @@ actor:
   model:
     model_name: "openpi"
     precision: null
-    num_action_chunks: 5 # interface for the env
+    num_action_chunks: 10 # interface for the env
     action_dim: 7
     is_lora: False
     use_wrist_image: True
     use_proprio: True
-    num_steps: 4
+    num_steps: 5
     sharding_strategy: "no_shard"
     # openpi specific parameters
     openpi:
@@ -139,7 +138,9 @@ actor:
       action_env_dim: ${actor.model.action_dim}
       noise_method: "flow_sde" 
       add_value_head: False
-      detach_critic_input: False
+      pi05: True
+      value_after_vlm: False
+      value_vlm_mode: "mean_token"
 
   optim:
     lr: 5.0e-6

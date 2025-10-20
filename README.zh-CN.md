@@ -30,7 +30,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 
 
 ## 最新动态
-- [2025/10] 🔥 Pi0的强化学习微调已经上线! 文档：[π₀模型强化学习训练](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/pi0.html)
+- [2025/10] 🔥 Pi0和Pi0.5的强化学习微调已经上线! 文档：[π₀和π₀.₅模型强化学习训练](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/pi0.html)
 - [2025/10] 🔥 RLinf 正式支持在线强化学习！文档：[coding_online_rl](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/coding_online_rl.html)，同时发布文章 [《首个开源的Agent在线强化学习框架RLinf-Online！让你的Agent今天比昨天更聪明》](https://mp.weixin.qq.com/s/jmohmDokuWLhQHFueSHZIQ)。
 - [2025/10] 🔥 RLinf算法技术报告 [《RLinf-VLA：一个统一且高效的VLA+RL训练框架》](https://arxiv.org/abs/2510.06710) 已正式发布。
 - [2025/09] 🔥 [示例库](https://rlinf.readthedocs.io/en/latest/rst_source/examples/index.html) 已更新，用户可以在其中找到多种可直接使用的示例！
@@ -77,6 +77,10 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 ## 主要成果
 ### 具身智能
 
+- RLinf 同时支持 PPO 与 GRPO 算法，为视觉-语言-动作（Vision-Language-Action, VLA）模型提供最先进的训练能力。
+- 该框架与主流具身智能基准测试（如 ManiSkill3 与 LIBERO）无缝集成，并在多样化的评测指标上均取得了优异表现。
+
+#### OpenVLA 和 OpenVLA-OFT 结果
 
 <div align="center">
 <table border="0">
@@ -222,6 +226,8 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 </table>
 </div>
 
+#### &pi;<sub>0</sub> 和 &pi;<sub>0.5</sub> 结果
+
 <div align="center">
 <table style="text-align:center; width:80%; margin:0 auto;">
   <tr>
@@ -332,9 +338,6 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 </table>
 </div>
 
-
-- RLinf 同时支持 PPO 与 GRPO 算法，为视觉-语言-动作（Vision-Language-Action, VLA）模型提供最先进的训练能力。
-- 该框架与主流具身智能基准测试（如 ManiSkill3 与 LIBERO）无缝集成，并在多样化的评测指标上均取得了优异表现。
 
 
 ### 数学推理

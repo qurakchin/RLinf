@@ -30,7 +30,7 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
 
 
 ## What's NEW!
-- [2025/10] 🔥 RLinf supports reinforcement learning fine-tuning for Pi 0! Doc: [RL on π₀ Models](https://rlinf.readthedocs.io/en/latest/rst_source/examples/pi0.html) 
+- [2025/10] 🔥 RLinf supports reinforcement learning fine-tuning for Pi 0 and Pi0.5! Doc: [RL on π₀ and π₀.₅ Models](https://rlinf.readthedocs.io/en/latest/rst_source/examples/pi0.html) 
 - [2025/10] 🔥 RLinf now officially supports online reinforcement learning! Doc: [coding_online_rl](https://rlinf.readthedocs.io/en/latest/rst_source/examples/coding_online_rl.html), Blog post: [The first open-source agent online RL framework RLinf-Online](https://mp.weixin.qq.com/s/jmohmDokuWLhQHFueSHZIQ).
 - [2025/10] 🔥 The RLinf Algorithm Technical Report [RLinf-VLA: A Unified and Efficient Framework for VLA+RL Training](https://arxiv.org/abs/2510.06710) is released.
 - [2025/09] 🔥 [Example Gallery](https://rlinf.readthedocs.io/en/latest/rst_source/examples/index.html) is updated, users can find various off-the-shelf examples!
@@ -76,6 +76,10 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
 ## Main Results
 ### Embodied Intelligence
 
+- RLinf supports both PPO and GRPO algorithms, enabling state-of-the-art training for Vision-Language-Action models.
+- The framework provides seamless integration with mainstream embodied intelligence benchmarks, including ManiSkill3 and LIBERO, and achieves strong performance across diverse evaluation metrics.
+
+#### OpenVLA and OpenVLA-OFT Results
 
 <div align="center">
 <table border="0">
@@ -223,6 +227,8 @@ and exhibits greater stability.
 </table>
 </div>
 
+#### &pi;<sub>0</sub> and &pi;<sub>0.5</sub>  Results
+
 <div align="center">
 <table style="text-align:center; width:80%; margin:0 auto;">
   <tr>
@@ -332,10 +338,6 @@ and exhibits greater stability.
   </tr>
 </table>
 </div>
-
-
-- RLinf supports both PPO and GRPO algorithms, enabling state-of-the-art training for Vision-Language-Action models.
-- The framework provides seamless integration with mainstream embodied intelligence benchmarks, including ManiSkill3 and LIBERO, and achieves strong performance across diverse evaluation metrics.
 
 
 ### Math Reasoning
