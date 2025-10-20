@@ -90,7 +90,7 @@ RLinf 框架提供了高性能、易用的异步通信抽象 Channel，自适应
 
 .. raw:: html
 
-   <img src="https://github.com/RLinf/misc/raw/main/pic/start-0.jpg" width="800"/>
+   <img src="https://github.com/RLinf/misc/raw/main/pic/coding_online_rl_arch.png" width="800"/>
 
 假设代码补全 Agent 已经作为一个完整的在线服务部署，由 **用户前端（User Frontend）** 与 **服务后端（Service Backend）** 组成。为了让这一线上系统具备在线强化学习（Online RL）能力，我们在其 **plugin** 层 引入了一个独立组件 —— **RLinf Runner** 。与长期运行的后台服务不同，RLinf Runner 并不是一个常驻进程，而是一个可以由线上系统的 **Controller** 按需调用的轻量级模块。我们为 RLinf Runner 设计了与线上 Agent 的交互接口，用于：
 
