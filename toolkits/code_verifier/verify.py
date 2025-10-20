@@ -21,7 +21,6 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-
 DEFAULT_REWARD: Final[float] = 0.4
 
 
@@ -223,6 +222,7 @@ def send_reward_request(
             "raw_response": None,
             "error": error_msg,
         }
+
 
 def process_single_request(args: tuple) -> Dict[str, Any]:
     raw_prompt, response, reference = args

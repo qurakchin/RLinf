@@ -20,6 +20,7 @@ from toolkits.code_verifier.verify import (
     fim_llm_as_judge_verify_call,
 )
 
+
 class CodeRewardOffline:
     def __init__(self, config: DictConfig):
         self.scale = config.get("reward_scale", 1.0)
