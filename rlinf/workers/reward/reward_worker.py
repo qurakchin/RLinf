@@ -93,7 +93,7 @@ class RewardWorker(Worker):
             rollout_result.response_ids, skip_special_tokens=True
         )
 
-        if hasattr(self.cfg.reward, "use_prompt") and self.cfg.reward.use_prompt:
+        if getattr(self.cfg.reward, "use_prompt", False):
             prompts = self.tokenizer.batch_decode(
                 rollout_result.prompt_ids, skip_special_tokens=True
             )
