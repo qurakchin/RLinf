@@ -19,18 +19,18 @@ import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
 from rlinf.config import validate_cfg
-from rlinf.runners.coding_online_rl_runner import CodingOnlineRLRunner
+from rlinf.data.datasets import create_rl_dataset
+from rlinf.data.tokenizers import hf_tokenizer
+from rlinf.runners.reasoning_runner import ReasoningRunner
 from rlinf.scheduler import Cluster
-from rlinf.scheduler.placement import PackedPlacementStrategy
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
 from rlinf.utils.utils import output_redirector
-from rlinf.workers.actor.megatron_actor_worker import MegatronActor
+from rlinf.workers.actor import get_actor_worker
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-from rlinf.workers.rollout.server.online_router_worker import OnlineRouterWorker
-from rlinf.workers.rollout.server.server_rollout_worker import ServerRolloutWorker
+from rlinf.workers.reward.reward_worker import RewardWorker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
 
-"""Script to start PPO training"""
+"""Script to start GRPO training"""
 mp.set_start_method("spawn", force=True)
 
 
@@ -42,20 +42,6 @@ def main(cfg) -> None:
 
     cluster = Cluster(num_nodes=cfg.cluster.num_nodes)
     component_placement = ModelParallelComponentPlacement(cfg, cluster)
-
-    singleton_placement_strategy = PackedPlacementStrategy(
-        start_accelerator_id=0, end_accelerator_id=0
-    )
-    online_router = OnlineRouterWorker.create_group(cfg, component_placement).launch(
-        cluster=cluster,
-        name="OnlineRouterWorker",
-        placement_strategy=singleton_placement_strategy,
-    )
-    server_rollout = ServerRolloutWorker.create_group(cfg).launch(
-        cluster=cluster,
-        name="ServerRolloutWorker",
-        placement_strategy=singleton_placement_strategy,
-    )
 
     rollout_worker_cls = get_rollout_backend_worker(cfg, component_placement)
 
@@ -82,20 +68,33 @@ def main(cfg) -> None:
             placement_strategy=inference_placement_strategy,
         )
 
-    # PPO Actor group
+    # Reward group
+    reward_placement_strategy = component_placement.get_strategy("reward")
+    reward_group = RewardWorker.create_group(cfg, component_placement).launch(
+        cluster,
+        name=cfg.reward.group_name,
+        placement_strategy=reward_placement_strategy,
+    )
+
+    # GRPO Actor group
+    actor_worker_cls = get_actor_worker(cfg)
     actor_placement_strategy = component_placement.get_strategy("actor")
-    actor_group = MegatronActor.create_group(cfg, component_placement).launch(
+    actor_group = actor_worker_cls.create_group(cfg, component_placement).launch(
         cluster, name=cfg.actor.group_name, placement_strategy=actor_placement_strategy
     )
 
-    runner = CodingOnlineRLRunner(
+    tokenizer = hf_tokenizer(cfg.actor.tokenizer.tokenizer_model)
+    train_ds, val_ds = create_rl_dataset(cfg, tokenizer)
+
+    runner = ReasoningRunner(
         cfg=cfg,
         placement=component_placement,
+        train_dataset=train_ds,
+        val_dataset=val_ds,
         rollout=rollout_group,
         inference=inference_group,
         actor=actor_group,
-        online_router=online_router,
-        server_rollout=server_rollout,
+        reward=reward_group,
     )
 
     runner.init_workers()
