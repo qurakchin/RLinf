@@ -99,6 +99,8 @@ Then, start the container using the pulled image:
 
   2. Do not override the `/root` and `/opt` directories in the container (with `-v` or `--volume` of `docker run`), as they contain important asset files and environments. If your platform requires mounting `/root`, run `link_assets` in the container after starting it to restore the asset links in the `/root` directory.
 
+  3. Avoid changing the `$HOME` environment variable (e.g., `docker run -e HOME=/new_home`), which should be `/root` by default. ManiSkill and other tools rely on this path to find the assets. If `$HOME` is changed before running scripts in the docker image, make sure to relink the assets to the new `$HOME` by executing `link_assets`.
+
 .. code-block:: bash
 
    docker run -it --gpus all \
@@ -125,6 +127,10 @@ To switch to the desired venv, use the built-in script `switch_env`:
    # source switch_env openvla
    # source switch_env openvla-oft
    # source switch_env openpi
+
+.. note::
+
+  Both the `link_assets` and `switch_env` scripts are built-in utilities in the Docker image provided by us. You can find them in `/usr/local/bin`.
 
 .. tip::
 
