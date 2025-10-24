@@ -15,7 +15,7 @@
 import asyncio
 import copy
 import dataclasses
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from omegaconf import DictConfig
@@ -357,15 +357,31 @@ class AsyncSGLangWorker(SGLangWorker):
         self._engine.shutdown()
         self.log_info(f"SGLang worker {self._rank} shutdown complete.")
 
-    async def agenerate(self, prompt: str, stop: Optional[List[str]] = None):
+    async def agenerate(self, prompt_ids: List[int]=None, stop: Optional[List[str]] = None):
         sampling_params = self._sampling_params
         if stop is not None:
             sampling_params = copy.deepcopy(sampling_params)
             sampling_params["stop"] = stop
 
         result = await self._engine.async_generate(
-            prompt=prompt,
+            input_ids=prompt_ids,
             sampling_params=sampling_params,
             return_logprob=self._return_logprobs,
         )
-        return result
+        result_dict = {
+            "output_ids": result["output_ids"],
+            "finish_reason": result["meta_info"]["finish_reason"]["type"],
+        }
+        if self._return_logprobs:
+            result_dict["logprobs"] = [item[0] for item in result["meta_info"]["output_token_logprobs"]]
+
+        return result_dict
+
+    async def rollout(self, input_channel: Channel, output_channel: Channel):
+        async def generate_and_send(channel_key: str, prompt_ids: List[int]):
+            result_dict = await self.agenerate(prompt_ids=prompt_ids)
+            await output_channel.put(result_dict, key=channel_key, async_op=True).async_wait()
+
+        while True:
+            rollout_request = await input_channel.get(async_op=True).async_wait()
+            asyncio.create_task(generate_and_send(rollout_request['channel_key'], rollout_request['prompt_ids']))

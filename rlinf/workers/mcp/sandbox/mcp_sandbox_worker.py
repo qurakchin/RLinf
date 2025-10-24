@@ -30,6 +30,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from rlinf.data.MCP_io_struct import MCPRequest, MCPRequestType, MCPResponse, MCPSessionState
+from rlinf.workers.mcp.tool_worker import ToolWorker
+from rlinf.data.tool_call.tool_io_struct import ToolResponse
 
 
 class PythonSandboxSession:
@@ -317,9 +319,9 @@ class PythonSandboxSession:
         return self.execution_history.copy()
 
 
-class MCPPythonSandboxWorker(Worker):
+class MCPPythonSandboxWorker(ToolWorker):
     """MCP Python Sandbox Worker for executing Python code in isolated environment."""
-    
+
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
@@ -331,21 +333,21 @@ class MCPPythonSandboxWorker(Worker):
         
         # Configuration
         self.default_timeout = cfg.get('mcp', {}).get('default_timeout', 30)
-    
+
     @property
     def session_lock(self):
         """Lazy initialization of session lock."""
         if self._session_lock is None:
             self._session_lock = threading.RLock()
         return self._session_lock
-    
+
     @property
     def logger(self):
         """Lazy initialization of logger."""
         if self._logger is None:
             self._logger = logging.getLogger("MCPPythonSandboxWorker")
         return self._logger
-    
+
     def init_worker(self, input_channel: Channel, output_channel: Channel):
         """Initialize the worker with communication channels."""
         self.input_channel = input_channel
@@ -355,13 +357,10 @@ class MCPPythonSandboxWorker(Worker):
         # Initialize components
         self.sessions = {}
         
-        # Start async request processor
-        self._start_request_processor()
-        
         self.log_info("MCP Python Sandbox Worker initialized")
         return self
-    
-    def _start_request_processor(self):
+
+    def start_server(self):
         """Start the request processor task."""
         try:
             loop = asyncio.get_running_loop()
@@ -369,7 +368,7 @@ class MCPPythonSandboxWorker(Worker):
         except RuntimeError:
             # No event loop running, will be created later
             self.request_processor_task = None
-    
+
     async def _process_requests(self):
         """Process incoming requests asynchronously."""
         self.log_info("Starting async request processor")
@@ -378,17 +377,30 @@ class MCPPythonSandboxWorker(Worker):
             try:
                 # Get request from input channel
                 self.logger.info("[DEBUG] Waiting for request from input_channel...")
-                request_work = await self.input_channel.get(async_op=True).async_wait()
-                self.logger.info(f"[DEBUG] Got request: {request_work.request_type if hasattr(request_work, 'request_type') else type(request_work)}")
+                rollout_request = await self.input_channel.get(async_op=True).async_wait()
+                channel_key, tool_args = rollout_request['channel_key'], rollout_request['tool_args']
+                request_work = MCPRequest(
+                    request_id=str(uuid.uuid4()),
+                    request_type=MCPRequestType.CALL_TOOL,
+                    tool_name="run_python_code",
+                    tool_arguments=tool_args,
+                    timeout=self.default_timeout,
+                    metadata={"session_id": channel_key},
+                )
+                # self.logger.info(f"[DEBUG] Got request: {request_work.request_type if hasattr(request_work, 'request_type') else type(request_work)}")
                 
                 # Process request
                 result = await self._handle_request(request_work)
                 self.logger.info(f"[DEBUG] Request processed, result success: {result.success if hasattr(result, 'success') else 'N/A'}")
+                self.logger.info(f"[DEBUG] Request result is: {result}")
                 
                 # Send result to output channel
-                self.output_channel.put(result, async_op=True)
+                # self.output_channel.put(result, async_op=True)
+                result_dict = ToolResponse(text=str(result.result))
+
+                self.output_channel.put(result_dict, key=channel_key, async_op=True)
                 self.logger.info("[DEBUG] Result sent to output_channel")
-                
+
             except Exception as e:
                 if "QueueEmpty" not in str(e):
                     self.logger.error(f"Error processing request: {e}")
