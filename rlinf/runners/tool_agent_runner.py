@@ -13,32 +13,22 @@
 # limitations under the License.
 
 import logging
-import os
 import typing
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
-import pandas as pd
-import torch
 from omegaconf.dictconfig import DictConfig
-from torch.utils.data import Dataset, RandomSampler, SequentialSampler
-from rlinf.workers.agent_loop.agent_loop import AgentLoopWorkerBase
-from rlinf.runners.reasoning_runner import ReasoningRunner
-from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
-from rlinf.workers.mcp.tool_worker import ToolWorker
-from torchdata.stateful_dataloader import StatefulDataLoader
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from rlinf.data.io_struct import RolloutRequest
+from rlinf.runners.reasoning_runner import ReasoningRunner
 from rlinf.scheduler import Channel
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.data_iter_utils import split_list
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.utils.runner_utils import check_progress, local_mkdir_safe
-from rlinf.utils.timers import Timer
+from rlinf.utils.runner_utils import check_progress
 from rlinf.workers.actor.megatron_actor_worker import MegatronActor
+from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
+from rlinf.workers.mcp.tool_worker import ToolWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
 
 if typing.TYPE_CHECKING:
@@ -62,7 +52,7 @@ class ToolAgentRunner(ReasoningRunner):
         actor: MegatronActor,
         reward: RewardWorker,
         agent_loop: ToolAgentLoopWorker,
-        tool_workers: dict[str, ToolWorker]={},
+        tool_workers: dict[str, ToolWorker] = {},
     ):
         super().__init__(
             cfg,
@@ -82,12 +72,19 @@ class ToolAgentRunner(ReasoningRunner):
         self.tool_input_channels = {
             name: Channel.create(f"Tool-{name}") for name in tool_workers.keys()
         }
-        self.tool_output_channel = Channel.create(f"ToolOutput")
+        self.tool_output_channel = Channel.create("ToolOutput")
 
     def init_workers(self):
-        self.agent_loop.init_worker(self.generate_input_channel, self.generate_output_channel, self.tool_input_channels, self.tool_output_channel).wait()
+        self.agent_loop.init_worker(
+            self.generate_input_channel,
+            self.generate_output_channel,
+            self.tool_input_channels,
+            self.tool_output_channel,
+        ).wait()
         for name, worker in self.tool_workers.items():
-            worker.init_worker(self.tool_input_channels[name], self.tool_output_channel).wait()
+            worker.init_worker(
+                self.tool_input_channels[name], self.tool_output_channel
+            ).wait()
 
         super().init_workers()
 
@@ -105,7 +102,9 @@ class ToolAgentRunner(ReasoningRunner):
         )
 
         self.run_timer.start_time()
-        self.rollout.rollout(self.generate_input_channel, self.generate_output_channel)
+        self.rollout.rollout_serverless(
+            self.generate_input_channel, self.generate_output_channel
+        )
         for tool_worker in self.tool_workers.values():
             tool_worker.start_server()
         for _ in epoch_iter:

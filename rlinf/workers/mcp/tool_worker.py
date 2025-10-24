@@ -12,21 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.scheduler import Worker, Channel
+from rlinf.scheduler import Channel, Worker
 
 
 class ToolWorker(Worker):
-
     def init_worker(self, input_channel: Channel, output_channel: Channel):
         """Initialize the worker with communication channels."""
         self.input_channel = input_channel
         self.output_channel = output_channel
 
-
     def start_server(self):
         raise NotImplementedError()
 
-
     def stop_server(self):
         raise NotImplementedError()
-

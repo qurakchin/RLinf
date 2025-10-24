@@ -30,6 +30,7 @@ from rlinf.utils.utils import output_redirector
 from rlinf.workers.actor import get_actor_worker
 from rlinf.workers.agent.tool_worker import ToolWorkerInfo
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
+from rlinf.workers.mcp.fake_tool_worker import FakeToolWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
 
