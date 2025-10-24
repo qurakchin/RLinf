@@ -555,9 +555,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         self.stage_num = cfg.rollout.pipeline_stage_num
 
         self.channel = self.connect_channel(cfg.actor.channel.name)
-        self.channel.create_queue(
-            cfg.actor.channel.queue_name, maxsize=cfg.actor.channel.queue_size
-        )
 
     def init_worker(self):
         self.setup_model_and_optimizer()
@@ -602,7 +599,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         for _ in range(split_num):
             recv_list.append(
                 await self.channel.get(
-                    queue_name=self._replay_buffer_name, async_op=True
+                    key=self._replay_buffer_name, async_op=True
                 ).async_wait()
             )
 

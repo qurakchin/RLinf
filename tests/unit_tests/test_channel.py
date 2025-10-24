@@ -55,14 +55,10 @@ class ProducerWorker(Worker):
         weight: int,
         maxsize: int,
         async_op: bool,
-        queue_name: Optional[str] = None,
+        key: Optional[str] = None,
     ):
-        if queue_name:
-            channel.create_queue(queue_name, maxsize=maxsize)
-        if queue_name:
-            put_work = channel.put(
-                item, weight, queue_name=queue_name, async_op=async_op
-            )
+        if key:
+            put_work = channel.put(item, weight, key=key, async_op=async_op)
         else:
             put_work = channel.put(item, weight, async_op=async_op)
         if async_op:
@@ -92,11 +88,9 @@ class ProducerWorker(Worker):
 class ConsumerWorker(Worker):
     """Worker responsible for connecting to channels and getting items."""
 
-    def get_item(
-        self, channel: Channel, async_op: bool, queue_name: Optional[str] = None
-    ):
-        if queue_name:
-            result = channel.get(queue_name=queue_name, async_op=async_op)
+    def get_item(self, channel: Channel, async_op: bool, key: Optional[str] = None):
+        if key:
+            result = channel.get(key=key, async_op=async_op)
         else:
             result = channel.get(async_op=async_op)
         if async_op:
@@ -327,12 +321,12 @@ class TestChannel:
         producer, consumer = worker_groups
 
         # Put items in different queues
-        producer.put_item(channel, "item1", 1, 10, False, queue_name="queue1").wait()
-        producer.put_item(channel, "item2", 2, 10, False, queue_name="queue2").wait()
+        producer.put_item(channel, "item1", 1, 10, False, key="queue1").wait()
+        producer.put_item(channel, "item2", 2, 10, False, key="queue2").wait()
 
         # Get items from different queues
-        item1 = consumer.get_item(channel, False, queue_name="queue1").wait()[0]
-        item2 = consumer.get_item(channel, False, queue_name="queue2").wait()[0]
+        item1 = consumer.get_item(channel, False, key="queue1").wait()[0]
+        item2 = consumer.get_item(channel, False, key="queue2").wait()[0]
 
         assert item1 == "item1"
         assert item2 == "item2"

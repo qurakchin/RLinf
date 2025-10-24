@@ -28,7 +28,7 @@ from ..worker import Worker, WorkerGroup
 if TYPE_CHECKING:
     from .channel_worker import LocalChannel
 
-DEFAULT_QUEUE_NAME = "default_queue"
+DEFAULT_KEY = "default_queue"
 
 
 class Channel:
@@ -242,67 +242,53 @@ class Channel:
         """Check if the channel is a local channel."""
         return self._local_channel is not None
 
-    def create_queue(self, queue_name: str, maxsize: int = 0):
-        """Create a new queue in the channel. No effect if a queue with the same name already exists.
-
-        Args:
-            queue_name (str): The name of the queue to create.
-            maxsize (int): The maximum size of the queue. Defaults to 0 (unbounded).
-
-        """
-        if self._local_channel is not None:
-            return self._local_channel.create_queue(queue_name, maxsize)
-        return ray.get(
-            self._channel_worker_actor.create_queue.remote(queue_name, maxsize)
-        )
-
-    def qsize(self, queue_name: str = DEFAULT_QUEUE_NAME) -> int:
+    def qsize(self, key: Any = DEFAULT_KEY) -> int:
         """Get the size of the channel queue.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): check the queue associated with the key.
 
         Returns:
             int: The number of items in the channel queue.
 
         """
         if self._local_channel is not None:
-            return self._local_channel.qsize(queue_name)
-        return ray.get(self._channel_worker_actor.qsize.remote(queue_name))
+            return self._local_channel.qsize(key)
+        return ray.get(self._channel_worker_actor.qsize.remote(key))
 
-    def empty(self, queue_name: str = DEFAULT_QUEUE_NAME) -> bool:
+    def empty(self, key: Any = DEFAULT_KEY) -> bool:
         """Check if the channel queue is empty.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key to check the queue emptiness for.
 
         Returns:
             bool: True if the channel queue is empty, False otherwise.
 
         """
         if self._local_channel is not None:
-            return self._local_channel.empty(queue_name)
-        return ray.get(self._channel_worker_actor.empty.remote(queue_name))
+            return self._local_channel.empty(key)
+        return ray.get(self._channel_worker_actor.empty.remote(key))
 
-    def full(self, queue_name: str = DEFAULT_QUEUE_NAME) -> bool:
+    def full(self, key: Any = DEFAULT_KEY) -> bool:
         """Check if the channel queue is full.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key to check the queue fullness for.
 
         Returns:
             bool: True if the channel queue is full, False otherwise.
 
         """
         if self._local_channel is not None:
-            return self._local_channel.full(queue_name)
-        return ray.get(self._channel_worker_actor.full.remote(queue_name))
+            return self._local_channel.full(key)
+        return ray.get(self._channel_worker_actor.full.remote(key))
 
     def put(
         self,
         item: Any,
         weight: int = 0,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: Any = DEFAULT_KEY,
         async_op: bool = False,
     ) -> Optional[AsyncWork]:
         """Put an item into the channel queue.
@@ -310,13 +296,15 @@ class Channel:
         Args:
             item (Any): The item to put into the channel queue.
             weight (int): The priority weight of the item. Defaults to 0.
-            queue_name (str): The name of the queue to put the item into.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will put the item in the queue associated with that key.
+            If the queue associated with the key does not exist, it will be created.
             async_op (bool): Whether to perform the operation asynchronously.
 
         """
         if self._local_channel is not None:
             assert async_op is False, "Local channel does not support async put."
-            self._local_channel.put(item, weight, queue_name)
+            self._local_channel.put(item, weight, key)
             return
 
         # First run async put to avoid send blocking put
@@ -326,7 +314,7 @@ class Channel:
                 self._channel_worker_actor.put.remote(
                     src_addr=self._current_worker.worker_address,
                     weight=weight,
-                    queue_name=queue_name,
+                    key=key,
                 )
             )
             self._current_worker.send(item, self._channel_name, 0, async_op=True)
@@ -339,7 +327,7 @@ class Channel:
             # Outside a worker, use ray comm
             put_work = AsyncChannelWork(
                 self._channel_worker_actor.put_via_ray.remote(
-                    item=item, weight=weight, queue_name=queue_name
+                    item=item, weight=weight, key=key
                 )
             )
             if async_op:
@@ -347,22 +335,22 @@ class Channel:
             else:
                 put_work.wait()
 
-    def put_nowait(
-        self, item: Any, weight: int = 0, queue_name: str = DEFAULT_QUEUE_NAME
-    ):
+    def put_nowait(self, item: Any, weight: int = 0, key: Any = DEFAULT_KEY):
         """Put an item into the channel queue without waiting. Raises asyncio.QueueFull if the queue is full.
 
         Args:
             item (Any): The item to put into the channel queue.
             weight (int): The priority weight of the item. Defaults to 0.
-            queue_name (str): The name of the queue to put the item into.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will put the item in the queue associated with that key.
+            If the queue associated with the key does not exist, it will be created.
 
         Raises:
             asyncio.QueueFull: If the queue is full.
 
         """
         if self._local_channel is not None:
-            self._local_channel.put(item, weight, queue_name, nowait=True)
+            self._local_channel.put(item, weight, key, nowait=True)
             return
 
         if self._current_worker is not None:
@@ -370,7 +358,7 @@ class Channel:
                 self._channel_worker_actor.put.remote(
                     src_addr=self._current_worker.worker_address,
                     weight=weight,
-                    queue_name=queue_name,
+                    key=key,
                     nowait=True,
                 )
             )
@@ -379,18 +367,17 @@ class Channel:
         else:
             put_work = AsyncChannelWork(
                 self._channel_worker_actor.put_via_ray.remote(
-                    item=item, weight=weight, queue_name=queue_name, nowait=True
+                    item=item, weight=weight, key=key, nowait=True
                 )
             )
             put_work.wait()
 
-    def get(
-        self, queue_name: str = DEFAULT_QUEUE_NAME, async_op: bool = False
-    ) -> AsyncWork | Any:
+    def get(self, key: Any = DEFAULT_KEY, async_op: bool = False) -> AsyncWork | Any:
         """Get an item from the channel queue.
 
         Args:
-            queue_name (str): The name of the queue to get the item from.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
             async_op (bool): Whether to perform the operation asynchronously.
 
         Returns:
@@ -399,7 +386,7 @@ class Channel:
         """
         if self._local_channel is not None:
             assert async_op is False, "Local channel does not support async get."
-            return self._local_channel.get(queue_name)
+            return self._local_channel.get(key)
 
         if self._current_worker is not None:
             # Inside a worker, use send/recv
@@ -407,7 +394,7 @@ class Channel:
             self._channel_worker_actor.get.remote(
                 self._current_worker.worker_address,
                 query_id=query_id,
-                queue_name=queue_name,
+                key=key,
             )
             result = self._current_worker.recv(self._channel_name, 0, async_op=async_op)
             if async_op:
@@ -419,18 +406,19 @@ class Channel:
         else:
             # Outside a worker, use ray comm
             async_work = AsyncChannelWork(
-                self._channel_worker_actor.get_via_ray.remote(queue_name=queue_name)
+                self._channel_worker_actor.get_via_ray.remote(key=key)
             )
             if async_op:
                 return async_work
             else:
                 return async_work.wait()
 
-    def get_nowait(self, queue_name: str = DEFAULT_QUEUE_NAME) -> Any:
+    def get_nowait(self, key: Any = DEFAULT_KEY) -> Any:
         """Get an item from the channel queue without waiting. Raises asyncio.QueueEmpty if the queue is empty.
 
         Args:
-            queue_name (str): The name of the queue to get the item from.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
 
         Returns:
             Any: The item retrieved from the channel queue.
@@ -440,30 +428,28 @@ class Channel:
 
         """
         if self._local_channel is not None:
-            return self._local_channel.get(queue_name, nowait=True)
+            return self._local_channel.get(key, nowait=True)
 
         if self._current_worker is not None:
             query_id = uuid.uuid4().int
             self._channel_worker_actor.get.remote(
                 self._current_worker.worker_address,
                 query_id=query_id,
-                queue_name=queue_name,
+                key=key,
                 nowait=True,
             )
             _, data = self._current_worker.recv(self._channel_name, 0)
             return data
         else:
             async_work = AsyncChannelWork(
-                self._channel_worker_actor.get_via_ray.remote(
-                    queue_name=queue_name, nowait=True
-                )
+                self._channel_worker_actor.get_via_ray.remote(key=key, nowait=True)
             )
             return async_work.wait()
 
     def get_batch(
         self,
         target_weight: int = 0,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: Any = DEFAULT_KEY,
         async_op: bool = False,
     ) -> AsyncWork | List[Any]:
         """Get a batch of items from the channel queue based on the set batch weight.
@@ -472,7 +458,8 @@ class Channel:
 
         Args:
             target_weight (int): The target weight for the batch.
-            queue_name (str): The name of the queue to get the batch from.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
             async_op (bool): Whether to perform the operation asynchronously.
 
         Returns:
@@ -481,7 +468,7 @@ class Channel:
         """
         if self._local_channel is not None:
             assert async_op is False, "Local channel does not support async get_batch."
-            return self._local_channel.get_batch(target_weight, queue_name)
+            return self._local_channel.get_batch(target_weight, key)
 
         if self._current_worker is not None:
             query_id = uuid.uuid4().int
@@ -489,7 +476,7 @@ class Channel:
                 self._current_worker.worker_address,
                 query_id=query_id,
                 target_weight=target_weight,
-                queue_name=queue_name,
+                key=key,
             )
             result = self._current_worker.recv(self._channel_name, 0, async_op=async_op)
             if async_op:
@@ -501,7 +488,7 @@ class Channel:
         else:
             async_work = AsyncChannelWork(
                 self._channel_worker_actor.get_batch_via_ray.remote(
-                    target_weight=target_weight, queue_name=queue_name
+                    target_weight=target_weight, key=key
                 )
             )
             if async_op:
@@ -509,12 +496,17 @@ class Channel:
             else:
                 return async_work.wait()
 
-    def __str__(self, queue_name: str = DEFAULT_QUEUE_NAME) -> str:
-        """Get a all the items in the channel queue as a string."""
+    def __str__(self, key: Any = DEFAULT_KEY) -> str:
+        """Get a all the items in the channel queue as a string.
+
+        Args:
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
+        """
         if self._local_channel is not None:
-            return str(self._local_channel.get_all(queue_name))
+            return str(self._local_channel.get_all(key))
         async_work = AsyncChannelWork(
-            self._channel_worker_actor.get_all.remote(queue_name=queue_name)
+            self._channel_worker_actor.get_all.remote(key=key)
         )
         items = async_work.wait()
         return str(items)

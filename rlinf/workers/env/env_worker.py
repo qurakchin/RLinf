@@ -67,11 +67,6 @@ class EnvWorker(Worker):
             self.channel = self.create_channel(cfg.env.channel.name)
         else:
             self.channel = self.connect_channel(cfg.env.channel.name)
-        for i in range(self.gather_num):
-            self.channel.create_queue(
-                f"{self._obs_queue_name}_{i + self._rank * self.gather_num}",
-                maxsize=cfg.env.channel.queue_size,
-            )
 
     def init_worker(self):
         enable_offload = self.cfg.env.enable_offload
@@ -269,7 +264,7 @@ class EnvWorker(Worker):
         for gather_id in range(self.gather_num):
             chunk_action.append(
                 await self.channel.get(
-                    queue_name=f"{self._action_queue_name}_{gather_id + self._rank * self.gather_num}",
+                    key=f"{self._action_queue_name}_{gather_id + self._rank * self.gather_num}",
                     async_op=True,
                 ).async_wait()
             )
@@ -323,7 +318,7 @@ class EnvWorker(Worker):
             env_batch_i = self.split_env_batch(env_batch, gather_id, mode)
             await self.channel.put(
                 item=env_batch_i,
-                queue_name=f"{self._obs_queue_name}_{gather_id + self._rank * self.gather_num}",
+                key=f"{self._obs_queue_name}_{gather_id + self._rank * self.gather_num}",
                 async_op=True,
             ).async_wait()
 

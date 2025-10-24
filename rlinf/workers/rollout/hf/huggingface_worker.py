@@ -41,10 +41,6 @@ class MultiStepRolloutWorker(Worker):
 
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
         self.channel = self.connect_channel(cfg.rollout.channel.name)
-        for i in range(self._component_placement.get_world_size("rollout")):
-            self.channel.create_queue(
-                f"{self._action_queue_name}_{i}", maxsize=cfg.rollout.channel.queue_size
-            )
 
     def init_worker(self):
         self.hf_model = get_model(self.cfg.rollout.model_dir, self.cfg.actor.model)
@@ -201,14 +197,14 @@ class MultiStepRolloutWorker(Worker):
 
     async def recv_env_output(self):
         env_output = await self.channel.get(
-            queue_name=f"{self._obs_queue_name}_{self._rank}", async_op=True
+            key=f"{self._obs_queue_name}_{self._rank}", async_op=True
         ).async_wait()
         return env_output
 
     async def send_chunk_actions(self, chunk_actions):
         await self.channel.put(
             item=chunk_actions,
-            queue_name=f"{self._action_queue_name}_{self._rank}",
+            key=f"{self._action_queue_name}_{self._rank}",
             async_op=True,
         ).async_wait()
 
@@ -221,7 +217,7 @@ class MultiStepRolloutWorker(Worker):
         for i in range(split_num):
             await self.channel.put(
                 item=splited_rollout_result[i],
-                queue_name=self._replay_buffer_name,
+                key=self._replay_buffer_name,
                 async_op=True,
             ).async_wait()
 
