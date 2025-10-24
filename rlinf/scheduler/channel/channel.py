@@ -32,7 +32,25 @@ DEFAULT_KEY = "default_queue"
 
 
 class Channel:
-    """A load balancing channel for inter-worker communication.
+    """A FIFO queue-like channel for inter-worker communication.
+
+    **Creation**: Channel can be created both inside and outside of worker contexts.
+    The recommended practice is to create channels outside of worker contexts using `Channel.create()`, and then pass them into workers as needed.
+    You can also create channels inside worker contexts or connect to existing channels, using `self.create_channel()` or `self.connect_channel()`.
+
+    **Interface**: Similar as the `asyncio.Queue`, the `Channel` provides interfaces like `put`, `get`, `put_no_wait`, and `get_no_wait`,
+    as well as query interfaces like `qsize`, `empty`, and `full`.
+    The semantics of these interfaces are identical to those of `asyncio.Queue`.
+
+    **Features**:
+
+    1. **Async operation**: Channel supports both synchronous and asynchronous `put` and `get` operations, similar to Worker's `send` and `recv` APIs. Both operations accept arbitrary data item as long as it's serializable. The default behavior is synchronous, and async operations can be enabled by setting the `async_op` flag. This async can be used not only in asyncio context with `await channel.get(async_op=True).async_wait()`, but also in non-asyncio contexts by generating a communication handle that can be waited later, like async torch.distributed.send().
+
+    2. **Key-based routing**: Channel allows specifying a `key` for each data item, which can be used to identify and route messages. For example, if you wish a specific data to be get and processed by a specific worker, you can assign a unique key to that data item when putting it into the channel. The target worker can then use this key to retrieve the specific data item.This is useful in multi-turn scenarios in agent and embodied RL, where a data is processed by a fixed set of workers.
+
+    3. **Weight and batch processing**: Channel also supports assigning weights to individual data items, allowing for more fine-grained control over how messages are processed. A `get_batch` method can be used to retrieve a batch of messages which respects the assigned weights.
+
+    4. **Debugging**: Channel allows you to print a Channel's internal data by directly print the Channel object.
 
     Example::
 
@@ -46,16 +64,13 @@ class Channel:
         ...     PackedPlacementStrategy,
         ... )
         >>>
-        >>> class TestWorker(Worker):
+        >>> class Producer(Worker):
         ...     def __init__(self):
         ...         super().__init__()
         ...
-        ...     def hello(self):
+        ...     def produce(self, channel: Channel):
         ...         # Synchronous put of common object
-        ...         channel = self.create_channel(
-        ...             channel_name="test_channel", maxsize=10
-        ...         )
-        ...         channel.put("Hello from TestWorker")
+        ...         channel.put("Hello from Producer")
         ...
         ...         # Synchronous put of tensor
         ...         tensor = torch.ones(1, device=torch.cuda.current_device())
@@ -63,11 +78,11 @@ class Channel:
         ...
         ...         # Asynchronous put of common object
         ...         async_work = channel.put(
-        ...             "Hello from TestWorker asynchronously", async_op=True
+        ...             "Hello from Producer asynchronously", async_op=True
         ...         )
         ...         async_work.wait()
         ...
-        ...         # Asynchronous put of tensor using asyncio
+        ...         # Asynchronous put using asyncio
         ...         async_work = channel.put(tensor, async_op=True)
         ...
         ...         async def wait_async():
@@ -79,15 +94,11 @@ class Channel:
         ...         channel.put("Hello with weight", weight=1)
         ...         channel.put(tensor, weight=2)
         >>>
-        >>> class TestWorker2(Worker):
+        >>> class Consumer(Worker):
         ...     def __init__(self):
         ...         super().__init__()
         ...
-        ...     def hello(self):
-        ...         channel = self.connect_channel(
-        ...             channel_name="test_channel",
-        ...         )
-        ...
+        ...     def consume(self, channel: Channel):
         ...         tensor = channel.get()
         ...
         ...         async_work = channel.get(async_op=True)
@@ -104,20 +115,18 @@ class Channel:
         ...         batch = channel.get_batch(target_weight=3)
         >>>
         >>> cluster = Cluster(num_nodes=1)
-        >>> placement1 = PackedPlacementStrategy(
+        >>> channel = Channel.create(name="channel")
+        >>> placement = PackedPlacementStrategy(
         ...     start_accelerator_id=0, end_accelerator_id=0
         ... )
-        >>> worker_group1 = TestWorker.create_group().launch(
-        ...     cluster, name="test", placement_strategy=placement1
+        >>> producer = Producer.create_group().launch(
+        ...     cluster, name="test", placement_strategy=placement
         ... )
-        >>> placement2 = PackedPlacementStrategy(
-        ...     start_accelerator_id=1, end_accelerator_id=1
+        >>> consumer = Consumer.create_group().launch(
+        ...     cluster, name="test2", placement_strategy=placement
         ... )
-        >>> worker_group2 = TestWorker2.create_group().launch(
-        ...     cluster, name="test2", placement_strategy=placement2
-        ... )
-        >>> r1 = worker_group1.hello()
-        >>> r2 = worker_group2.hello()
+        >>> r1 = producer.produce(channel)
+        >>> r2 = consumer.consume(channel)
         >>> res = r1.wait()
         >>> res = r2.wait()
 
