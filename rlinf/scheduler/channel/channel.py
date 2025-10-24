@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -447,7 +448,9 @@ class Channel:
                 key=key,
                 nowait=True,
             )
-            _, data = self._current_worker.recv(self._channel_name, 0)
+            query_id, data = self._current_worker.recv(self._channel_name, 0)
+            if query_id == asyncio.QueueEmpty:
+                raise asyncio.QueueEmpty
             return data
         else:
             async_work = AsyncChannelWork(

@@ -364,7 +364,11 @@ class ChannelWorker(Worker):
         """
         self.create_queue(key, self.maxsize())
         if nowait:
-            weighted_item: WeightedItem = self._queue_map[key].get_nowait()
+            try:
+                weighted_item: WeightedItem = self._queue_map[key].get_nowait()
+            except asyncio.QueueEmpty:
+                query_id = asyncio.QueueEmpty
+                weighted_item = WeightedItem(weight=0, item=None)
         else:
             weighted_item: WeightedItem = await self._queue_map[key].get()
         self.send(

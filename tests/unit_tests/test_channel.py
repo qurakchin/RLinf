@@ -13,6 +13,7 @@
 # limitations under the License.
 
 # ruff: noqa: D103
+import asyncio
 from typing import Any, Optional
 
 import pytest
@@ -73,6 +74,39 @@ class ProducerWorker(Worker):
             await put_work.async_wait()
         return True
 
+    async def put_get_ood(self, channel: Channel):
+        channel.put(key="q1", item="Hello")
+        handle2 = channel.get(key="q2", async_op=True)
+        handle1 = channel.get(key="q1", async_op=True)
+        channel.put(key="q2", item="World")
+        data1 = await handle1.async_wait()
+        data2 = await handle2.async_wait()
+        return data1, data2
+
+    def put_nowait(self, channel: Channel, item: Any):
+        channel.put_nowait(item, key="nowait")
+
+    async def stress(self, channel: Channel, num_items: int):
+        data = []
+        for i in range(num_items):
+            channel.put(item=i, key="stress_key", async_op=True)
+
+        for i in range(num_items):
+            data.append(await channel.get(async_op=True, key="stress_key").async_wait())
+
+        return data
+
+    async def stress_multiple_queues(self, channel: Channel, num_items: int):
+        works = []
+        for i in range(num_items):
+            channel.put(item=i, key=f"stress_key{i}", async_op=True)
+
+        for i in range(num_items):
+            works.append(channel.get(async_op=True, key=f"stress_key{i}"))
+
+        works = [work.async_wait() for work in works]
+        return await asyncio.gather(*works)
+
     def create_with_affinity(self, channel_name: str):
         channel = self.create_channel(
             channel_name=channel_name,
@@ -114,6 +148,13 @@ class ConsumerWorker(Worker):
         if result:
             return await result.async_wait()
         return None
+
+    def get_nowait(self, channel: Channel):
+        try:
+            data = channel.get_nowait(key="nowait")
+        except asyncio.QueueEmpty:
+            data = None
+        return data
 
     def get_qsize(self, channel: Channel):
         return channel.qsize()
@@ -330,6 +371,40 @@ class TestChannel:
 
         assert item1 == "item1"
         assert item2 == "item2"
+
+    def test_channel_multiple_queues_order(self, worker_groups, channel):
+        """Tests the order of items in multiple queues."""
+        producer: ProducerWorker = worker_groups[0]
+
+        # Put items in different queues
+        item1, item2 = producer.put_get_ood(channel).wait()[0]
+
+        assert item1 == "Hello"
+        assert item2 == "World"
+
+    def test_channel_nowait(self, worker_groups, channel):
+        """Tests the channel under heavy load."""
+        producer: ProducerWorker = worker_groups[0]
+        consumer: ConsumerWorker = worker_groups[1]
+
+        data = consumer.get_nowait(channel).wait()[0]
+        assert data is None
+
+        producer.put_nowait(channel, "item_100")
+        data = consumer.get_nowait(channel).wait()[0]
+
+        assert data == "item_100"
+
+    def test_stress(self, worker_groups, channel):
+        """Tests the channel under heavy load."""
+        producer: ProducerWorker = worker_groups[0]
+        num_items = 100
+
+        # data = producer.stress(channel, num_items).wait()[0]
+        # assert data == list(range(num_items))
+
+        data = producer.stress_multiple_queues(channel, num_items).wait()[0]
+        assert data == list(range(num_items))
 
     def _assert_equal(self, received: Any, expected: Any):
         """Helper to compare various data types."""

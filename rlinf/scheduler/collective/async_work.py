@@ -284,7 +284,7 @@ class AsyncChannelWork(AsyncWork):
         """
         if isinstance(self._func_result, AsyncWork):
             while not self._data_future.done():
-                await asyncio.sleep(0)  # Yield control to the event loop
+                await asyncio.sleep(0.01)  # Yield control to the event loop
             with AsyncChannelWork.store_lock:
                 AsyncChannelWork.channel_data_store.pop(self._query_id, None)
             return self._data_future.value()
