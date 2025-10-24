@@ -324,6 +324,7 @@ class ChannelWorker(Worker):
     async def get(
         self,
         dst_addr: WorkerAddress,
+        query_id: int,
         queue_name: str = DEFAULT_QUEUE_NAME,
         nowait: bool = False,
     ) -> Any:
@@ -331,6 +332,7 @@ class ChannelWorker(Worker):
 
         Args:
             dst_addr (WorkerAddress): The address of the destination worker.
+            query_id (int): The ID of this get query.
             queue_name (str): The name of the queue to get the item from. Defaults to DEFAULT_QUEUE_NAME.
             nowait (bool): If True, directly raise asyncio.QueueEmpty if the queue is empty. Defaults to False.
 
@@ -340,7 +342,7 @@ class ChannelWorker(Worker):
         else:
             weighted_item: WeightedItem = await self._queue_map[queue_name].get()
         self.send(
-            weighted_item.item,
+            (query_id, weighted_item.item),
             dst_addr.root_group_name,
             dst_addr.rank_path,
             async_op=True,
@@ -365,6 +367,7 @@ class ChannelWorker(Worker):
     async def get_batch(
         self,
         dst_addr: WorkerAddress,
+        query_id: int,
         target_weight: int,
         queue_name: str = DEFAULT_QUEUE_NAME,
     ) -> List[Any]:
@@ -372,6 +375,7 @@ class ChannelWorker(Worker):
 
         Args:
             dst_addr (WorkerAddress): The address of the destination worker.
+            query_id (int): The ID of this get query.
             target_weight (int): The target weight for the batch. The batch will contain items until the total weight reaches this value.
             queue_name (str): The name of the queue to get the batch from. Defaults to DEFAULT_QUEUE_NAME.
 
@@ -388,7 +392,12 @@ class ChannelWorker(Worker):
             if current_weight >= target_weight:
                 break
 
-        self.send(batch, dst_addr.root_group_name, dst_addr.rank_path, async_op=True)
+        self.send(
+            (query_id, batch),
+            dst_addr.root_group_name,
+            dst_addr.rank_path,
+            async_op=True,
+        )
 
     async def get_batch_via_ray(
         self, target_weight: int, queue_name: str = DEFAULT_QUEUE_NAME

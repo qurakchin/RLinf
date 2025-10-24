@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import time
+import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import ray
@@ -320,6 +321,7 @@ class Channel:
 
         # First run async put to avoid send blocking put
         if self._current_worker is not None:
+            # Inside a worker, use send/recv
             put_work = AsyncChannelWork(
                 self._channel_worker_actor.put.remote(
                     src_addr=self._current_worker.worker_address,
@@ -334,6 +336,7 @@ class Channel:
             else:
                 put_work.wait()
         else:
+            # Outside a worker, use ray comm
             put_work = AsyncChannelWork(
                 self._channel_worker_actor.put_via_ray.remote(
                     item=item, weight=weight, queue_name=queue_name
@@ -399,11 +402,22 @@ class Channel:
             return self._local_channel.get(queue_name)
 
         if self._current_worker is not None:
+            # Inside a worker, use send/recv
+            query_id = uuid.uuid4().int
             self._channel_worker_actor.get.remote(
-                self._current_worker.worker_address, queue_name=queue_name
+                self._current_worker.worker_address,
+                query_id=query_id,
+                queue_name=queue_name,
             )
-            return self._current_worker.recv(self._channel_name, 0, async_op=async_op)
+            result = self._current_worker.recv(self._channel_name, 0, async_op=async_op)
+            if async_op:
+                return AsyncChannelWork(result, query_id)
+            else:
+                # query_id, data
+                _, data = result
+                return data
         else:
+            # Outside a worker, use ray comm
             async_work = AsyncChannelWork(
                 self._channel_worker_actor.get_via_ray.remote(queue_name=queue_name)
             )
@@ -429,10 +443,15 @@ class Channel:
             return self._local_channel.get(queue_name, nowait=True)
 
         if self._current_worker is not None:
+            query_id = uuid.uuid4().int
             self._channel_worker_actor.get.remote(
-                self._current_worker.worker_address, queue_name=queue_name, nowait=True
+                self._current_worker.worker_address,
+                query_id=query_id,
+                queue_name=queue_name,
+                nowait=True,
             )
-            return self._current_worker.recv(self._channel_name)
+            _, data = self._current_worker.recv(self._channel_name, 0)
+            return data
         else:
             async_work = AsyncChannelWork(
                 self._channel_worker_actor.get_via_ray.remote(
@@ -465,10 +484,20 @@ class Channel:
             return self._local_channel.get_batch(target_weight, queue_name)
 
         if self._current_worker is not None:
+            query_id = uuid.uuid4().int
             self._channel_worker_actor.get_batch.remote(
-                self._current_worker.worker_address, target_weight, queue_name
+                self._current_worker.worker_address,
+                query_id=query_id,
+                target_weight=target_weight,
+                queue_name=queue_name,
             )
-            return self._current_worker.recv(self._channel_name, 0, async_op=async_op)
+            result = self._current_worker.recv(self._channel_name, 0, async_op=async_op)
+            if async_op:
+                return AsyncChannelWork(result, query_id)
+            else:
+                # query_id, data
+                _, data = result
+                return data
         else:
             async_work = AsyncChannelWork(
                 self._channel_worker_actor.get_batch_via_ray.remote(

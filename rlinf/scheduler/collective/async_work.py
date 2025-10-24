@@ -13,8 +13,9 @@
 # limitations under the License.
 
 import asyncio
+import threading
 import time
-from typing import Any, Callable, List, Optional, overload
+from typing import Any, Callable, Dict, List, Optional, overload
 
 import ray
 import torch.distributed as dist
@@ -233,14 +234,46 @@ class AsyncCollWork(AsyncWork):
 class AsyncChannelWork(AsyncWork):
     """Asynchronous work for channel operations."""
 
-    def __init__(self, func_result: ray.ObjectRef):
-        """Initialize the AsyncChannelWork with a Ray function result.
+    channel_data_store: Dict[int, Future] = {}
+    store_lock = threading.Lock()  # Protect store access
+
+    def __init__(
+        self, func_result: ray.ObjectRef | AsyncWork, query_id: Optional[int] = None
+    ):
+        """Initialize the AsyncChannelWork with a Ray function result or an AsyncWork.
+
+        When wrapping an AsyncWork, a query_id must be provided to identify the data get query.
+        This is because the received data of this recv call may be from another get,
+        as the async task execution order at the channel worker side is non-deterministic.
+        And so we need to associate the data with an identifier and store it for later retrieval.
 
         Args:
             func_result (ray.ObjectRef): The Ray function result to wrap.
+            query_id (Optional[int]): The query ID to associate with the work.
 
         """
         self._func_result = func_result
+        if isinstance(func_result, AsyncWork):
+            # The func_result's value is not necessarily the data of the get query associated with the query_id
+            # Only when the query_id's Future is set is the data available
+            assert query_id is not None, (
+                "query_id must be provided when wrapping AsyncWork"
+            )
+            self._query_id = query_id
+            with AsyncChannelWork.store_lock:
+                if query_id not in AsyncChannelWork.channel_data_store:
+                    AsyncChannelWork.channel_data_store[query_id] = Future()
+                self._data_future = AsyncChannelWork.channel_data_store[query_id]
+            self._func_result.then(self._store_channel_data)
+
+    def _store_channel_data(self):
+        """Store channel data in the channel data store."""
+        query_id, data = self._func_result.wait()
+        with AsyncChannelWork.store_lock:
+            if query_id not in AsyncChannelWork.channel_data_store:
+                AsyncChannelWork.channel_data_store[query_id] = Future()
+            data_future = AsyncChannelWork.channel_data_store[query_id]
+        data_future.set_result(data)
 
     async def async_wait(self):
         """Async wait for the work to complete.
@@ -249,6 +282,12 @@ class AsyncChannelWork(AsyncWork):
             Any: The result of the work if applicable, otherwise None.
 
         """
+        if isinstance(self._func_result, AsyncWork):
+            while not self._data_future.done():
+                await asyncio.sleep(0)  # Yield control to the event loop
+            with AsyncChannelWork.store_lock:
+                AsyncChannelWork.channel_data_store.pop(self._query_id, None)
+            return self._data_future.value()
         return await self._func_result
 
     def wait(self):
@@ -258,4 +297,9 @@ class AsyncChannelWork(AsyncWork):
             Any: The result of the work if applicable, otherwise None.
 
         """
+        if isinstance(self._func_result, AsyncWork):
+            self._data_future.wait()
+            with AsyncChannelWork.store_lock:
+                AsyncChannelWork.channel_data_store.pop(self._query_id, None)
+            return self._data_future.value()
         return ray.get(self._func_result)
