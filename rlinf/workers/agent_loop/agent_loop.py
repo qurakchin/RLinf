@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import copy
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -31,6 +32,8 @@ from rlinf.data.io_struct import (
     RolloutRequest,
     RolloutResult,
 )
+from rlinf.data.tool_call.tool_io_struct import ToolRequest, ToolResponse
+from rlinf.data.tool_call.tool_parser import FakeToolParser, ToolParser
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("RLINF_LOGGING_LEVEL", "WARN"))
@@ -78,60 +81,142 @@ class AgentLoopWorkerBase(Worker):
         self.generate_output_channel = generate_output_channel
 
     async def agenerate(self, prompt_ids: list[int]=None):
-        print(f'zcy_dbg: agent_loop.agenerate: 1')
         channel_key = uuid4().hex
         await self.generate_input_channel.put({'channel_key': channel_key, 'prompt_ids': prompt_ids}, async_op=True).async_wait()
-        print(f'zcy_dbg: agent_loop.agenerate: 2')
         result = await self.generate_output_channel.get(channel_key, async_op=True).async_wait()
-        print(f'zcy_dbg: agent_loop.agenerate: 3')
         return result
 
     async def run_agentloop_rollout(self, input_channel: Channel, output_channel: Channel):
         """
         Run the agent loop for multiple queries.
         """
-        print(f'zcy_dbg: run_agentloop_rollout: 1')
         with self.worker_timer():
             rollout_request: RolloutRequest = input_channel.get()
 
             send_output_tasks = []
             for input_ids in rollout_request.input_ids:
-                print(f'zcy_dbg: run_agentloop_rollout: 2')
                 rollout_tasks = []
+                # grpo group_size
                 for _ in range(rollout_request.n):
                     task = asyncio.create_task(
                         self.run_one_query(input_ids)
                     )
                     rollout_tasks.append(task)
+
                 task_results = await asyncio.gather(*rollout_tasks)
 
-                print(f'zcy_dbg: run_agentloop_rollout: 3')
-                # Clip to model limits to avoid mask/position size mismatch
-                max_prompt_len = int(self.cfg.data.max_prompt_length)
-                max_total_len = int(self.cfg.actor.model.encoder_seq_length)
-                max_resp_len = max(1, max_total_len - max_prompt_len)
+                rollout_result = self._get_rollout_result(rollout_request, task_results)
 
-                prompt_ids = [r.prompt_ids[:max_prompt_len] for r in task_results]
-                response_ids = [r.response_ids[:max_resp_len] for r in task_results]
-                prompt_lengths = [len(p) for p in prompt_ids]
-                response_lengths = [len(o) for o in response_ids]
-                # response_mask = [r.response_mask[:max_resp_len] for r in task_results]
-                is_end = [True for _ in task_results]
-                answers=[y for x in [[a for _ in range(rollout_request.n)] for a in rollout_request.answers] for y in x]
-                rollout_obj = RolloutResult(
-                    num_sequence=len(task_results),
-                    group_size=rollout_request.n,
-                    prompt_lengths=prompt_lengths,
-                    prompt_ids=prompt_ids,
-                    response_lengths=response_lengths,
-                    response_ids=response_ids,
-                    is_end=is_end,
-                    answers=answers,
-                    # response_mask=response_mask,
-                )
-                send_output_tasks.append(output_channel.put(rollout_obj, async_op=True).async_wait())
+                send_output_tasks.append(output_channel.put(rollout_result, async_op=True).async_wait())
 
             await asyncio.gather(*send_output_tasks)
 
+    def _get_rollout_result(self, rollout_request: RolloutRequest, task_results: list[AgentLoopOutput]) -> RolloutResult:
+        # Clip to model limits to avoid mask/position size mismatch
+        max_prompt_len = int(self.cfg.data.max_prompt_length)
+        max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+        max_resp_len = max(1, max_total_len - max_prompt_len)
+
+        prompt_ids = [r.prompt_ids[:max_prompt_len] for r in task_results]
+        response_ids = [r.response_ids[:max_resp_len] for r in task_results]
+        prompt_lengths = [len(p) for p in prompt_ids]
+        response_lengths = [len(o) for o in response_ids]
+        # response_mask = [r.response_mask[:max_resp_len] for r in task_results]
+        is_end = [True for _ in task_results]
+        answers=[y for x in [[a for _ in range(rollout_request.n)] for a in rollout_request.answers] for y in x]
+        return RolloutResult(
+            num_sequence=len(task_results),
+            group_size=rollout_request.n,
+            prompt_lengths=prompt_lengths,
+            prompt_ids=prompt_ids,
+            response_lengths=response_lengths,
+            response_ids=response_ids,
+            is_end=is_end,
+            answers=answers,
+            # response_mask=response_mask,
+        )
+
     async def run_one_query(self, prompt_ids: list[int], **kwargs) -> AgentLoopOutput:
         raise NotImplementedError("Subclasses must implement this method")
+
+class ToolAgentLoopWorker(AgentLoopWorkerBase):
+    """Simple tool agent loop that can interact with tools.
+    """
+
+    def __init__(
+        self, 
+        cfg: DictConfig, 
+        placement: ModelParallelComponentPlacement,
+    ):
+        super().__init__(cfg, placement)
+
+        # Configuration
+
+        # Initialize tool parser
+        self.tool_parser: ToolParser = FakeToolParser(cfg, self._logger)
+
+    def init_worker(
+        self,
+        generate_input_channel,
+        generate_output_channel,
+        tool_worker_input_channels: dict[str, Channel],
+        tool_worker_output_channel: Channel,
+    ):
+        super().init_worker(generate_input_channel, generate_output_channel)
+        self.tool_worker_input_channels = tool_worker_input_channels
+        self.tool_worker_output_channel = tool_worker_output_channel
+
+    async def atool_call(self, tool_request: ToolRequest) -> ToolResponse:
+        tool_name, tool_args = tool_request.name, tool_request.arguments
+        tool_input_channel = self.tool_worker_input_channels[tool_name]
+        channel_key = uuid4().hex
+        await tool_input_channel.put({'channel_key': channel_key, 'tool_args': tool_args}, async_op=True).async_wait()
+        return await self.tool_worker_output_channel.get(channel_key, async_op=True).async_wait()
+
+    async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
+        orig_prompt_ids = copy.deepcopy(prompt_ids)
+        for _ in range(5):
+            # Generate response from LLM
+            max_prompt_len = int(self.cfg.data.get("max_prompt_length", 1024))
+            max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+            max_resp_len = max(1, max_total_len - max_prompt_len)
+
+            if len(prompt_ids) > max_prompt_len:
+                prompt_ids = prompt_ids[-max_prompt_len:]
+
+            generate_result = await self.agenerate(prompt_ids)
+            response_ids = generate_result['output_ids']
+            if len(response_ids) > max_resp_len:
+                response_ids = response_ids[:max_resp_len]
+            response_text = self.tokenizer.decode(response_ids)
+
+            prompt_ids += response_ids
+
+            # Extract tool calls from response
+            _, tool_requests = await self.tool_parser.extract_tool_calls(response_text)
+
+            # Execute tools in parallel with history propagation
+            tasks = []
+            for tool_request in tool_requests:
+                tasks.append(self.atool_call(tool_request))
+            tool_responses: list[ToolResponse] = await asyncio.gather(*tasks)
+
+            # Convert tool responses to messages and tokenize
+            tool_messages = []
+            for tool_response in tool_responses:
+                message = {"role": "tool", "content": tool_response.text}
+                tool_messages.append(message)
+
+            # Tokenize tool responses
+            tool_response_ids = self.tokenizer.apply_chat_template(
+                tool_messages, add_generation_prompt=True, tokenize=True,
+            )
+            prompt_ids += tool_response_ids
+
+        # Separate prompt and response
+        response_ids = prompt_ids[-len(orig_prompt_ids):]
+
+        return AgentLoopOutput(
+            prompt_ids=prompt_ids,
+            response_ids=response_ids,
+        )

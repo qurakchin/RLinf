@@ -155,8 +155,8 @@ data:
   shuffle: True
   validation_shuffle: True
   seed: 1234
-  train_data_paths: ["/mnt/public/wangxiangyuan/dataset/rstar2/train.jsonl"]
-  val_data_paths: ["/mnt/public/wangxiangyuan/dataset/rstar2/train.jsonl"]
+  train_data_paths: ["/path/to/train.jsonl"]
+  val_data_paths: ["/path/to/val.jsonl"]
 
 # Tools configuration for AgentLoop
 tools:
@@ -166,7 +166,6 @@ tools:
     batch_size: 4
     concurrency: 2
     batch_timeout_seconds: 30.0
-  rstar2: null
 
 actor:
   group_name: "ActorGroup"

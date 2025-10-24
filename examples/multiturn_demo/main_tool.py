@@ -30,9 +30,8 @@ from rlinf.workers.actor import get_actor_worker
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
 from rlinf.workers.reward.reward_worker import RewardWorker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
-from rlinf.workers.agent_loop.tool_agent_loop import ToolAgentLoopWorker
+from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
 from rlinf.workers.mcp.fake_tool_worker import FakeToolWorker
-from rlinf.workers.mcp.sandbox.mcp_sandbox_worker import MCPPythonSandboxWorker
 
 """Script to start GRPO training"""
 mp.set_start_method("spawn", force=True)
@@ -47,8 +46,8 @@ def main(cfg) -> None:
     cluster = Cluster(num_nodes=cfg.cluster.num_nodes)
     component_placement = ModelParallelComponentPlacement(cfg, cluster)
 
-    # AgentLoop group. TODO: read placement from config
-    assert cfg.cluster.agentloop_placement_num == component_placement.rollout_dp_size, 'agentloop worker num should be equal to rollout dp size'
+    # AgentLoop group. TODO: fix worker size limit
+    assert cfg.cluster.agentloop_placement_num == component_placement.rollout_dp_size, 'agentloop worker num now should be equal to rollout dp size'
     agentloop_placement_strategy = NodePlacementStrategy([0]*cfg.cluster.agentloop_placement_num)
     agentloop_group = ToolAgentLoopWorker.create_group(cfg, component_placement).launch(
         cluster,
@@ -110,11 +109,11 @@ def main(cfg) -> None:
         placement=component_placement,
         train_dataset=train_ds,
         val_dataset=val_ds,
-        generate=rollout_group,
-        agent_loop=agentloop_group,
+        rollout=rollout_group,
         inference=inference_group,
         actor=actor_group,
         reward=reward_group,
+        agent_loop=agentloop_group,
         tool_workers=tool_workers,
     )
 

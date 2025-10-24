@@ -44,7 +44,6 @@ class FakeToolWorker(ToolWorker):
 
     async def _process_requests(self):
         async def generate_and_send(channel_key: str, tool_args: dict):
-            print(f'zcy_dbg: fake_tool.generate_and_send: 1, {channel_key}, {tool_args}')
             result = ToolResponse(text="fake_tool_response")
             await self.output_channel.put(result, key=channel_key, async_op=True).async_wait()
 
