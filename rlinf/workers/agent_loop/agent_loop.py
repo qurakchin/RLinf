@@ -98,7 +98,7 @@ class AgentLoopWorkerBase(Worker):
             rollout_request: RolloutRequest = input_channel.get()
 
             send_output_tasks = []
-            for input_ids in rollout_request.input_ids:
+            for input_ids, answers in zip(rollout_request.input_ids, rollout_request.answers):
                 rollout_tasks = []
                 # grpo group_size
                 for _ in range(rollout_request.n):
@@ -107,7 +107,7 @@ class AgentLoopWorkerBase(Worker):
 
                 task_results = await asyncio.gather(*rollout_tasks)
 
-                rollout_result = self._get_rollout_result(rollout_request, task_results)
+                rollout_result = self._get_rollout_result(task_results, answers)
 
                 send_output_tasks.append(
                     output_channel.put(rollout_result, async_op=True).async_wait()
@@ -116,7 +116,7 @@ class AgentLoopWorkerBase(Worker):
             await asyncio.gather(*send_output_tasks)
 
     def _get_rollout_result(
-        self, rollout_request: RolloutRequest, task_results: list[AgentLoopOutput]
+        self, task_results: list[AgentLoopOutput], answers
     ) -> RolloutResult:
         # Clip to model limits to avoid mask/position size mismatch
         max_prompt_len = int(self.cfg.data.max_prompt_length)
@@ -129,16 +129,10 @@ class AgentLoopWorkerBase(Worker):
         response_lengths = [len(o) for o in response_ids]
         # response_mask = [r.response_mask[:max_resp_len] for r in task_results]
         is_end = [True for _ in task_results]
-        answers = [
-            y
-            for x in [
-                [a for _ in range(rollout_request.n)] for a in rollout_request.answers
-            ]
-            for y in x
-        ]
+        answers = [answers] * len(task_results)
         return RolloutResult(
             num_sequence=len(task_results),
-            group_size=rollout_request.n,
+            group_size=len(task_results),
             prompt_lengths=prompt_lengths,
             prompt_ids=prompt_ids,
             response_lengths=response_lengths,
