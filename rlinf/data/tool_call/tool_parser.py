@@ -15,12 +15,13 @@
 import json
 import logging
 import random
+
 import regex as re
+
 from .tool_io_struct import ToolRequest, ToolResponse
 
 
 class ToolParser:
-
     def __init__(self, cfg, logger: logging.Logger) -> None:
         self.cfg = cfg
         self.logger = logger
@@ -49,11 +50,15 @@ class HermesToolParser(ToolParser):
 
         self.keep_match_error_as_response = True
         # self.keep_match_error = cfg.get("keep_match_error", False)
-        self.keep_match_error_as_response_text = "Failed to decode tool call: {exception}"
-
+        self.keep_match_error_as_response_text = (
+            "Failed to decode tool call: {exception}"
+        )
 
     async def extract_tool_calls(self, response_text) -> tuple[str, list[ToolRequest]]:
-        if self.tool_call_start_token not in response_text or self.tool_call_end_token not in response_text:
+        if (
+            self.tool_call_start_token not in response_text
+            or self.tool_call_end_token not in response_text
+        ):
             return response_text, []
 
         matches = self.tool_call_regex.findall(response_text)
@@ -66,7 +71,13 @@ class HermesToolParser(ToolParser):
             except Exception as exception:
                 self.logger.error(f"Failed to decode tool call: {exception}")
                 if self.keep_match_error_as_response:
-                    function_calls.append(ToolResponse(text=self.keep_match_error_as_response_text.format(exception=exception)))
+                    function_calls.append(
+                        ToolResponse(
+                            text=self.keep_match_error_as_response_text.format(
+                                exception=exception
+                            )
+                        )
+                    )
 
         # remaining text exclude tool call tokens
         content = self.tool_call_regex.sub("", response_text)
@@ -80,8 +91,8 @@ class FakeToolParser(ToolParser):
 
     async def extract_tool_calls(self, response_text) -> tuple[str, list[ToolRequest]]:
         function_calls = [
-            [ToolRequest(name='tool1', arguments={'arg1': 'value1'})],
-            [ToolRequest(name='tool1', arguments={'arg2': 'value2'})],
+            [ToolRequest(name="tool1", arguments={"arg1": "value1"})],
+            [ToolRequest(name="tool1", arguments={"arg2": "value2"})],
         ]
         return_function_calls = random.choice(function_calls)
 

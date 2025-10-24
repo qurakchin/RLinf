@@ -22,16 +22,15 @@ from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.runners.tool_agent_runner import ToolAgentRunner
-from rlinf.scheduler import Cluster
+from rlinf.scheduler import Cluster, NodePlacementStrategy
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
-from rlinf.scheduler import NodePlacementStrategy
 from rlinf.utils.utils import output_redirector
 from rlinf.workers.actor import get_actor_worker
+from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
+from rlinf.workers.mcp.fake_tool_worker import FakeToolWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
-from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
-from rlinf.workers.mcp.fake_tool_worker import FakeToolWorker
 
 """Script to start GRPO training"""
 mp.set_start_method("spawn", force=True)
@@ -47,8 +46,12 @@ def main(cfg) -> None:
     component_placement = ModelParallelComponentPlacement(cfg, cluster)
 
     # AgentLoop group. TODO: fix worker size limit
-    assert cfg.cluster.agentloop_placement_num == component_placement.rollout_dp_size, 'agentloop worker num now should be equal to rollout dp size'
-    agentloop_placement_strategy = NodePlacementStrategy([0]*cfg.cluster.agentloop_placement_num)
+    assert cfg.cluster.agentloop_placement_num == component_placement.rollout_dp_size, (
+        "agentloop worker num now should be equal to rollout dp size"
+    )
+    agentloop_placement_strategy = NodePlacementStrategy(
+        [0] * cfg.cluster.agentloop_placement_num
+    )
     agentloop_group = ToolAgentLoopWorker.create_group(cfg, component_placement).launch(
         cluster,
         name=cfg.agentloop.group_name,
@@ -101,7 +104,9 @@ def main(cfg) -> None:
     # Tool workers group
     singleton_tool_placement = NodePlacementStrategy([0])
     tool_workers = {
-        'tool1': FakeToolWorker.create_group(cfg).launch(cluster, name="Tool1", placement_strategy=singleton_tool_placement),
+        "tool1": FakeToolWorker.create_group(cfg).launch(
+            cluster, name="Tool1", placement_strategy=singleton_tool_placement
+        ),
     }
 
     runner = ToolAgentRunner(

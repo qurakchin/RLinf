@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 from enum import Enum
+from typing import Any, Dict, Optional
+
 
 class MCPRequestType(Enum):
     """MCP request types."""
+
     LIST_TOOLS = "list_tools"
     CALL_TOOL = "call_tool"
     LIST_RESOURCES = "list_resources"
@@ -15,6 +17,7 @@ class MCPRequestType(Enum):
 @dataclass
 class MCPRequest:
     """MCP request structure for channel communication."""
+
     request_id: str
     request_type: MCPRequestType
     tool_name: Optional[str] = None
@@ -29,6 +32,7 @@ class MCPRequest:
 @dataclass
 class MCPResponse:
     """MCP response structure for channel communication."""
+
     request_id: str
     success: bool
     result: Optional[Any] = None
@@ -39,6 +43,7 @@ class MCPResponse:
 
 class MCPSessionState(Enum):
     """MCP session states."""
+
     INITIALIZING = "initializing"
     CONNECTED = "connected"
     FAILED = "failed"
