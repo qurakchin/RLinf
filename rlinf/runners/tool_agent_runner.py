@@ -52,7 +52,7 @@ class ToolAgentRunner(ReasoningRunner):
         actor: MegatronActor,
         reward: RewardWorker,
         agent_loop: ToolAgentLoopWorker,
-        tool_workers: dict[str, ToolWorker] = {},
+        tool_workers: dict[ToolWorker, dict] = [],
     ):
         super().__init__(
             cfg,
@@ -69,22 +69,36 @@ class ToolAgentRunner(ReasoningRunner):
         self.tool_workers = tool_workers
         self.generate_input_channel = Channel.create("GenerateInput")
         self.generate_output_channel = Channel.create("GenerateOutput")
-        self.tool_input_channels = {
-            name: Channel.create(f"Tool-{name}") for name in tool_workers.keys()
-        }
+        self.tool_input_channels = [Channel.create(f"Tool-{worker.worker_group_name}") for worker in self.tool_workers]
         self.tool_output_channel = Channel.create("ToolOutput")
 
     def init_workers(self):
+        for worker, input_channel in zip(self.tool_workers, self.tool_input_channels):
+            worker.init_worker(
+                input_channel, self.tool_output_channel
+            ).wait()
+        tool_has_session = []
+        tool_input_channel_dict = {}
+        for (worker, worker_info), input_channel in zip(self.tool_workers.items(), self.tool_input_channels):
+            tool_names = worker_info['tool_names']
+            has_session = worker_info['has_session']
+            if isinstance(tool_names, list):
+                if has_session:
+                    tool_has_session.extend(tool_names)
+                for tool_name in tool_names:
+                    tool_input_channel_dict[tool_name] = input_channel
+            elif isinstance(tool_names, str):
+                if has_session:
+                    tool_has_session.append(tool_names)
+                tool_input_channel_dict[tool_names] = input_channel
+
         self.agent_loop.init_worker(
             self.generate_input_channel,
             self.generate_output_channel,
-            self.tool_input_channels,
+            tool_input_channel_dict,
             self.tool_output_channel,
+            tool_has_session,
         ).wait()
-        for name, worker in self.tool_workers.items():
-            worker.init_worker(
-                self.tool_input_channels[name], self.tool_output_channel
-            ).wait()
 
         super().init_workers()
 
@@ -105,7 +119,7 @@ class ToolAgentRunner(ReasoningRunner):
         self.rollout.rollout_serverless(
             self.generate_input_channel, self.generate_output_channel
         )
-        for tool_worker in self.tool_workers.values():
+        for tool_worker in self.tool_workers:
             tool_worker.start_server()
         for _ in epoch_iter:
             for batch in self.train_dataloader:
@@ -227,4 +241,6 @@ class ToolAgentRunner(ReasoningRunner):
                 global_pbar.set_postfix(logging_metrics)
                 global_pbar.update(1)
 
+        for tool_worker in self.tool_workers:
+            tool_worker.stop_server()
         self.metric_logger.finish()

@@ -380,16 +380,16 @@ class AsyncSGLangWorker(SGLangWorker):
         return result_dict
 
     async def rollout_serverless(self, input_channel: Channel, output_channel: Channel):
-        async def generate_and_send(channel_key: str, prompt_ids: List[int]):
+        async def generate_and_send(session_id: str, prompt_ids: List[int]):
             result_dict = await self.agenerate(prompt_ids=prompt_ids)
             await output_channel.put(
-                result_dict, key=channel_key, async_op=True
+                result_dict, key=session_id, async_op=True
             ).async_wait()
 
         while True:
             rollout_request = await input_channel.get(async_op=True).async_wait()
             asyncio.create_task(
                 generate_and_send(
-                    rollout_request["channel_key"], rollout_request["prompt_ids"]
+                    rollout_request["session_id"], rollout_request["prompt_ids"]
                 )
             )

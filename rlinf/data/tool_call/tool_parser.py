@@ -15,6 +15,7 @@
 import json
 import logging
 import random
+import time
 
 import regex as re
 
@@ -93,6 +94,8 @@ class FakeToolParser(ToolParser):
         function_calls = [
             [ToolRequest(name="tool1", arguments={"arg1": "value1"})],
             [ToolRequest(name="tool1", arguments={"arg2": "value2"})],
+            [ToolRequest(name="write_file", arguments={"path": "/projects/test/mcp_written.txt", "content": f"Written by mcp at {time.strftime('%Y-%m-%d %H:%M:%S')}"})],
+            [ToolRequest(name="list_directory", arguments={"path": "/projects/test"})],
         ]
         return_function_calls = random.choice(function_calls)
 

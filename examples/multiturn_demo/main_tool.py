@@ -31,6 +31,7 @@ from rlinf.workers.inference.megatron_inference_worker import MegatronInference
 from rlinf.workers.mcp.fake_tool_worker import FakeToolWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
+from multiturn_demo.tools.mcp_filesystem_worker import MCPFilesystemClientWorker
 
 """Script to start GRPO training"""
 mp.set_start_method("spawn", force=True)
@@ -104,11 +105,13 @@ def main(cfg) -> None:
     # Tool workers group
     singleton_tool_placement = NodePlacementStrategy([0])
     tool_workers = {
-        "tool1": FakeToolWorker.create_group(cfg).launch(
+        FakeToolWorker.create_group(cfg).launch(
             cluster, name="Tool1", placement_strategy=singleton_tool_placement
-        ),
+        ): {"tool_names": "tool1", "has_session": False},
+        MCPFilesystemClientWorker.create_group(cfg).launch(
+            cluster, name="MCPFilesystemClient", placement_strategy=singleton_tool_placement
+        ): {"tool_names": ["write_file", "list_directory"], "has_session": True},
     }
-
     runner = ToolAgentRunner(
         cfg=cfg,
         placement=component_placement,
