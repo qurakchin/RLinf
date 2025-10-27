@@ -641,6 +641,16 @@ def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
             f"runner.seq_length ({cfg.runner.seq_length}) must be greater than data.max_prompt_length ({cfg.data.max_prompt_length})"
         )
 
+        # add configs for importance sampling fix
+        cfg.algorithm.recompute_logprobs = (
+            cfg.algorithm.recompute_logprobs
+            or cfg.algorithm.get("importance_sampling_fix", False)
+        )
+
+        cfg.rollout.return_logprobs = cfg.rollout.return_logprobs or cfg.algorithm.get(
+            "importance_sampling_fix", False
+        )
+
         cfg.rollout = validate_rollout_cfg(cfg.rollout)
     return cfg
 
@@ -658,10 +668,7 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
     elif cfg.runner.task_type == "coding_online_rl":
         cfg = validate_coding_online_rl_cfg(cfg)
 
-    if (
-        cfg.algorithm.adv_type == "embodied_grpo"
-        or cfg.algorithm.adv_type == "math_grpo"
-    ):
+    if cfg.algorithm.adv_type in ("grpo", "reinpp_baseline"):
         assert cfg.algorithm.group_size > 1
 
     assert cfg.actor.training_backend in SUPPORTED_TRAINING_BACKENDS, (
