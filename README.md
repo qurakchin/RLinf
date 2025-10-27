@@ -506,16 +506,19 @@ and exhibits greater stability.
 - [ ] Support for world model   
 - [ ] Support for real-world RL embodied intelligence
 
-## Build Status
+# CI Test Status
+RLinf has comprehensive CI tests for both the core components (via unit tests) and end-to-end RL training workflows of embodied, agent, and reasoning scenarios.
+Below is the summary of the CI test status of the main branch:
 
-| Type             | Status |
-| :--------------: | :----: |
-| Reasoning RL-MATH | [![Build Status](https://github.com/RLinf/RLinf/actions/workflows/math_e2e.yml/badge.svg)](https://github.com/RLinf/RLinf/actions/workflows/math_e2e.yml) |
-| Embodied RL-VLA   | [![Build Status](https://github.com/RLinf/RLinf/actions/workflows/embodied_e2e.yml/badge.svg)](https://github.com/RLinf/RLinf/actions/workflows/embodied_e2e.yml) |
-
+| Test Name | Status |
+| -------- | ------ |
+| unit-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/unit-tests.yml?branch=main&label=Status"> |
+| agent-reason-e2e-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/agent-e2e-tests.yml?branch=main&label=Status"> |
+| embodied-e2e-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/embodied-e2e-tests.yml?branch=main&label=Status"> |
+| scheduler-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/scheduler-tests.yml?branch=main&label=Status"> |
 
 ## Contribution Guidelines
-We welcome contributions to RLinf. Please read [contribution guide](https://rlinf.readthedocs.io/en/latest/index.html#contribution-guidelines) before taking action. Thank the following contributors and welcome more developers to join us on this open source project.
+We welcome contributions to RLinf. Please read [contribution guide](https://github.com/RLinf/RLinf?tab=contributing-ov-file#contributing-to-rlinf) before taking action. Thank the following contributors and welcome more developers to join us on this open source project.
 
 <a href="https://github.com/RLinf/RLinf/graphs/contributors"><img src="https://contrib.rocks/image?repo=RLinf/RLinf&max=240&columns=18" /></a>
 
