@@ -111,7 +111,6 @@ class MegatronActor(MegatronModelManager, Worker):
         self.average_response_len = self.response_len
 
         # Algo configurations
-        self.recompute_logprobs = self.cfg.algorithm.recompute_logprobs
         self.calculate_entropy = self.cfg.algorithm.calculate_entropy
         self.calculate_entropy_loss = (
             self.cfg.algorithm.entropy_bonus > 0 and self.calculate_entropy
@@ -383,10 +382,10 @@ class MegatronActor(MegatronModelManager, Worker):
                     ref_logprobs = batch["ref_logprobs"]
 
                 if self.cfg.algorithm.get("importance_sampling_fix", False):
-                    inference_prev_logprobs = prev_logprobs
-                    training_prev_logprobs = batch["megatron_prev_logprobs"]
+                    rollout_prev_logprobs = prev_logprobs
+                    recompute_prev_logprobs = batch["recompute_prev_logprobs"]
                     advantages = advantages * torch.clamp(
-                        (training_prev_logprobs - inference_prev_logprobs).exp(),
+                        (recompute_prev_logprobs - rollout_prev_logprobs).exp(),
                         min=self.cfg.algorithm.importance_sampling_clip,
                     )
 
@@ -871,9 +870,11 @@ class MegatronActor(MegatronModelManager, Worker):
             with self.worker_timer():
                 prev_logprobs = self.inference_step(batch)
 
-                if self.cfg.algorithm.get("importance_sampling_fix", False):
-                    rollout_result.megatron_prev_logprobs = prev_logprobs.cpu()
+                if rollout_result.rollout_logprobs is not None:
+                    # Rollout has returned logprobs, store the recomputed logprobs in recompute_prev_logprobs
+                    rollout_result.recompute_prev_logprobs = prev_logprobs.cpu()
                 else:
+                    # Otherwise, store the logprobs in prev_logprobs (the final logprobs used for training)
                     rollout_result.prev_logprobs = prev_logprobs.cpu()
 
             # Ref logprobs

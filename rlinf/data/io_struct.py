@@ -305,11 +305,16 @@ class RolloutResult:
     image_data: Optional[Union[List[List[bytes]], List[List[str]]]] = None
     multi_modal_inputs: Optional[List[dict]] = None
     # Inference
-    # Only set when recompute_logprobs is False
+    # Logprobs returned by rollout engines
     rollout_logprobs: Optional[List[List[float]]] = None
+    # Logprobs recomputed by inference when rollout has returned logprobs
+    recompute_prev_logprobs: Optional[torch.Tensor] = None
+    # The final prev_logprobs used for training
+    # When rollout has returned logprobs, this is rollout_logprobs
+    # Otherwise, this is the logprobs recomputed by inference
     prev_logprobs: Optional[torch.Tensor] = None
+    # Reference logprobs for comparison
     ref_logprobs: Optional[torch.Tensor] = None
-    megatron_prev_logprobs: Optional[torch.Tensor] = None
 
     @property
     def batch_size(self):
@@ -564,9 +569,9 @@ class RolloutResult:
                 merged_result.ref_logprobs = merge_tensor(
                     merged_result.ref_logprobs, res.ref_logprobs
                 )
-            if res.megatron_prev_logprobs is not None:
-                merged_result.megatron_prev_logprobs = merge_tensor(
-                    merged_result.megatron_prev_logprobs, res.megatron_prev_logprobs
+            if res.recompute_prev_logprobs is not None:
+                merged_result.recompute_prev_logprobs = merge_tensor(
+                    merged_result.recompute_prev_logprobs, res.recompute_prev_logprobs
                 )
         return merged_result
 
@@ -846,8 +851,8 @@ class RolloutResult:
         if self.ref_logprobs is not None:
             batch["ref_logprobs"] = self.ref_logprobs.cuda()
 
-        if self.megatron_prev_logprobs is not None:
-            batch["megatron_prev_logprobs"] = self.megatron_prev_logprobs.cuda()
+        if self.recompute_prev_logprobs is not None:
+            batch["recompute_prev_logprobs"] = self.recompute_prev_logprobs.cuda()
 
         if self.rewards is not None:
             batch["rewards"] = self.rewards.cuda()

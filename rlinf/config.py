@@ -145,7 +145,7 @@ def activation_to_func(
     return activation_func
 
 
-def validate_rollout_cfg(cfg):
+def validate_rollout_cfg(cfg, algorithm_cfg):
     def validate_sglang_cfg(cfg):
         assert cfg is not None, (
             "sglang config must be specified if rollout_backend is sglang."
@@ -179,6 +179,9 @@ def validate_rollout_cfg(cfg):
         cfg.rollout_backend = cfg.get("rollout_backend", "sglang")
         assert cfg.rollout_backend in SUPPORTED_ROLLOUT_BACKENDS, (
             f"rollout_backend must be one of {SUPPORTED_ROLLOUT_BACKENDS}."
+        )
+        cfg.return_logprobs = cfg.return_logprobs or algorithm_cfg.get(
+            "importance_sampling_fix", False
         )
         cfg.sglang = validate_sglang_cfg(cfg.sglang)
         cfg.vllm = validate_vllm_cfg(cfg.vllm)
@@ -574,9 +577,14 @@ def validate_reasoning_cfg(cfg: DictConfig) -> DictConfig:
         f"Model {cfg.rollout.model_arch} is not supported"
     )
 
-    assert cfg.algorithm.recompute_logprobs != cfg.rollout.return_logprobs, (
-        "Exactly one of `algorithm.recompute_logprobs` or `rollout.return_logprobs` must be True to compute `prev_logprobs`."
+    assert cfg.algorithm.recompute_logprobs or cfg.rollout.return_logprobs, (
+        "One of `algorithm.recompute_logprobs` or `rollout.return_logprobs` must be True to compute `prev_logprobs`."
     )
+
+    if cfg.algorithm.recompute_logprobs and cfg.rollout.return_logprobs:
+        assert cfg.algorithm.get("importance_sampling_fix", False), (
+            "Importance sampling fix must be enabled if both `algorithm.recompute_logprobs` and `rollout.return_logprobs` are True."
+        )
 
     with open_dict(cfg):
         cfg.algorithm.training_batch_size_per_gpu = cfg.algorithm.get(
@@ -596,7 +604,13 @@ def validate_reasoning_cfg(cfg: DictConfig) -> DictConfig:
             f"runner.seq_length ({cfg.runner.seq_length}) must be greater than data.max_prompt_length ({cfg.data.max_prompt_length})"
         )
 
-        cfg.rollout = validate_rollout_cfg(cfg.rollout)
+        # add configs for importance sampling fix
+        cfg.algorithm.recompute_logprobs = (
+            cfg.algorithm.recompute_logprobs
+            or cfg.algorithm.get("importance_sampling_fix", False)
+        )
+
+        cfg.rollout = validate_rollout_cfg(cfg.rollout, cfg.algorithm)
     return cfg
 
 
@@ -605,9 +619,14 @@ def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
         f"Model {cfg.rollout.model_arch} is not supported"
     )
 
-    assert cfg.algorithm.recompute_logprobs != cfg.rollout.return_logprobs, (
-        "Exactly one of `algorithm.recompute_logprobs` or `rollout.return_logprobs` must be True to compute `prev_logprobs`."
+    assert cfg.algorithm.recompute_logprobs or cfg.rollout.return_logprobs, (
+        "One of `algorithm.recompute_logprobs` or `rollout.return_logprobs` must be True to compute `prev_logprobs`."
     )
+
+    if cfg.algorithm.recompute_logprobs and cfg.rollout.return_logprobs:
+        assert cfg.algorithm.get("importance_sampling_fix", False), (
+            "Importance sampling fix must be enabled if both `algorithm.recompute_logprobs` and `rollout.return_logprobs` are True."
+        )
 
     assert cfg.algorithm.recompute_logprobs, (
         "Online coding task must use recompute_logprobs"
@@ -647,11 +666,7 @@ def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
             or cfg.algorithm.get("importance_sampling_fix", False)
         )
 
-        cfg.rollout.return_logprobs = cfg.rollout.return_logprobs or cfg.algorithm.get(
-            "importance_sampling_fix", False
-        )
-
-        cfg.rollout = validate_rollout_cfg(cfg.rollout)
+        cfg.rollout = validate_rollout_cfg(cfg.rollout, cfg.algorithm)
     return cfg
 
 
