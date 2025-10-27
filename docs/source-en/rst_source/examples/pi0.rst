@@ -1,5 +1,5 @@
 Reinforcement Learning on π\ :sub:`0`\  and π\ :sub:`0.5`\  Models
-===================================================
+======================================================================================================
 
 This example provides a complete guide to fine-tuning the 
 π\ :sub:`0`\  and π\ :sub:`0.5`\  algorithms with reinforcement learning in the **LIBERO** environment
@@ -139,6 +139,7 @@ Alternatively, you can also use ModelScope to download the model from https://ww
 - If you want to train **object, goal, or spatial** task on π\ :sub:`0`\  model, please use the `RLinf-Pi0-SFT-Spatial-Object-Goal` model.
 - If you want to train the **Long** task on π\ :sub:`0`\  model, please use the `RLinf-Pi0-SFT-Long` model.
 - If you want to train tasks on π\ :sub:`0.5`\  model, please use the `RLinf-Pi05-SFT` model.
+
 After downloading, please make sure to specify the model path correctly in your configuration yaml file.
 
 Running Scripts

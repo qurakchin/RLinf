@@ -26,7 +26,7 @@ runner:
   max_steps: -1
 
   val_check_interval: 1
-  save_interval: 10
+  save_interval: -1
 
   seq_length: 2560
 

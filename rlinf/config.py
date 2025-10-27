@@ -209,7 +209,7 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
             else:
                 # mrope
                 cfg.model.seq_len_interpolation_factor = None
-        cfg.model.override_vocab_size = hf_config.vocab_size
+        cfg.model.padded_vocab_size = hf_config.vocab_size
         cfg.model.max_position_embeddings = hf_config.max_position_embeddings
         cfg.model.rotary_base = hf_config.rope_theta
         cfg.model.share_embeddings_and_output_weights = getattr(
@@ -454,7 +454,7 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.model.masked_softmax_fusion = cfg.model.get("masked_softmax_fusion", True)
         cfg.model.persist_layer_norm = cfg.model.get("persist_layer_norm", True)
 
-        cfg.model.override_vocab_size = cfg.model.get("override_vocab_size", None)
+        cfg.model.padded_vocab_size = cfg.model.get("padded_vocab_size", None)
         cfg.model.use_cpu_initialization = cfg.model.get(
             "use_cpu_initialization", False
         )
@@ -519,6 +519,19 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
                 )
             assert cfg.lr_sched.start_weight_decay is not None
             assert cfg.lr_sched.end_weight_decay is not None
+
+        # TODO. Following args are needed for AUTO mode now, but will be removed in the future.
+        cfg.megatron.transformer_impl = getattr(
+            cfg.megatron, "transformer_impl", "transformer_engine"
+        )
+        cfg.megatron.swiglu = cfg.model.activation in ["swiglu", "fast-swiglu"]
+        cfg.megatron.untie_embeddings_and_output_weights = (
+            not cfg.model.share_embeddings_and_output_weights
+        )
+        # In RLinf, padded_vocab_size is set to hf_config.vocab_size, so make_vocab_size_divisible_by=1
+        cfg.megatron.make_vocab_size_divisible_by = 1
+        if cfg.model.normalization == "rmsnorm":
+            cfg.megatron.normalization = "RMSNorm"
 
     return cfg
 
@@ -693,6 +706,14 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
     if cfg.actor.training_backend == "megatron":
         cfg.actor = validate_megatron_cfg(cfg.actor)
         cfg.actor = validate_model_cfg_by_hf_config(cfg.actor, cfg.rollout.model_dir)
+        # TODO. Need actually pad padded_vocab_size.
+        assert (
+            cfg.actor.model.padded_vocab_size
+            % cfg.actor.model.tensor_model_parallel_size
+            == 0
+        ), (
+            f"padded_vocab_size ({cfg.actor.model.padded_vocab_size}) must be divisible by tensor_model_parallel_size ({cfg.actor.model.tensor_model_parallel_size})"
+        )
     elif cfg.actor.training_backend == "fsdp":
         cfg.actor = validate_fsdp_cfg(cfg.actor)
 
