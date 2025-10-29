@@ -18,8 +18,8 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from multiturn_demo.agent_loop.tool_agent_loop import ToolAgentLoopWorker
-from multiturn_demo.tools.fake_tool_worker import FakeToolWorker
+from multiturn_demo.agent_loop.mcp_agent_loop import MCPAgentLoopWorker
+from multiturn_demo.tools.mcp_filesystem_worker import MCPFilesystemClientWorker
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
@@ -53,7 +53,7 @@ def main(cfg) -> None:
     agentloop_placement_strategy = NodePlacementStrategy(
         [0] * cfg.cluster.agentloop_placement_num
     )
-    agentloop_group = ToolAgentLoopWorker.create_group(cfg, component_placement).launch(
+    agentloop_group = MCPAgentLoopWorker.create_group(cfg, component_placement).launch(
         cluster,
         name=cfg.agentloop.group_name,
         placement_strategy=agentloop_placement_strategy,
@@ -105,9 +105,16 @@ def main(cfg) -> None:
     # Tool workers group
     singleton_tool_placement = NodePlacementStrategy([0])
     tool_workers = {
-        FakeToolWorker.create_group(cfg).launch(
-            cluster, name="FakeTool", placement_strategy=singleton_tool_placement
-        ): ToolWorkerInfo(tool_names=["fake_tool"], has_session=False),
+        # FakeToolWorker.create_group(cfg).launch(
+        #     cluster, name="Tool1", placement_strategy=singleton_tool_placement
+        # ): ToolWorkerInfo(tool_names=["tool1"], has_session=False),
+        MCPFilesystemClientWorker.create_group(cfg).launch(
+            cluster,
+            name="MCPFilesystemClient",
+            placement_strategy=singleton_tool_placement,
+        ): ToolWorkerInfo(
+            tool_names=["write_file", "list_directory"], has_session=True
+        ),
     }
 
     runner = AgentRunner(

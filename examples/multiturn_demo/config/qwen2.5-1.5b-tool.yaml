@@ -160,12 +160,7 @@ data:
 
 # Tools configuration for AgentLoop
 tools:
-  code_judge:
-    host_addr: "localhost"
-    host_port: 8088
-    batch_size: 4
-    concurrency: 2
-    batch_timeout_seconds: 30.0
+  mcp_file_system: null
 
 actor:
   group_name: "ActorGroup"
