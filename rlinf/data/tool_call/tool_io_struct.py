@@ -12,7 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Any, Literal
+
 from pydantic import BaseModel
+
+
+class ToolChannelRequest(BaseModel):
+    """Request to a tool channel."""
+
+    # session_id is REQUIRED. also used as the response channel key
+    session_id: str
+    request_type: Literal["session_start", "session_end", "execute"]
+    tool_name: str | None = None
+    tool_args: dict | None = None
+
+
+class ToolChannelResponse(BaseModel):
+    """Response from a tool channel."""
+
+    success: bool
+
+    # execute result if success is True, otherwise failure message
+    result: Any | None = None
+    session_state: Any | None = None
+    meta_info: dict | None = None
 
 
 class ToolRequest(BaseModel):
