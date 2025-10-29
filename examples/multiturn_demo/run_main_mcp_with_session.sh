@@ -17,4 +17,4 @@ else
     CONFIG_NAME=$1
 fi
 
-python ${REPO_PATH}/examples/multiturn_demo/main_tool.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
+python ${REPO_PATH}/examples/multiturn_demo/main_mcp_with_session.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME

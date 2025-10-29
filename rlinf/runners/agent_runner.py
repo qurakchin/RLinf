@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import logging
 import typing
 from typing import Optional, Union
@@ -26,9 +27,9 @@ from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.utils.runner_utils import check_progress
 from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
+from rlinf.workers.agent.agent_loop import AgentLoopWorkerBase
+from rlinf.workers.agent.tool_worker import ToolWorker, ToolWorkerInfo
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-from rlinf.workers.mcp.tool_worker import ToolWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
 
 if typing.TYPE_CHECKING:
@@ -38,7 +39,7 @@ if typing.TYPE_CHECKING:
 logging.getLogger().setLevel(logging.INFO)
 
 
-class ToolAgentRunner(ReasoningRunner):
+class AgentRunner(ReasoningRunner):
     """Runner for agent task RL training."""
 
     def __init__(
@@ -51,8 +52,8 @@ class ToolAgentRunner(ReasoningRunner):
         inference: Optional[MegatronInference],
         actor: MegatronActor,
         reward: RewardWorker,
-        agent_loop: ToolAgentLoopWorker,
-        tool_workers: dict[str, ToolWorker] = {},
+        agent_loop: AgentLoopWorkerBase,
+        tool_workers: dict[ToolWorker, ToolWorkerInfo] = {},
     ):
         super().__init__(
             cfg,
@@ -64,27 +65,53 @@ class ToolAgentRunner(ReasoningRunner):
             actor,
             reward,
         )
-
+        all_tool_calls = list(
+            itertools.chain(
+                *(worker_info.tool_names for worker_info in tool_workers.values())
+            )
+        )
+        all_tool_worker_group_names = [
+            worker.worker_group_name for worker in tool_workers
+        ]
+        assert len(set(all_tool_worker_group_names)) == len(
+            all_tool_worker_group_names
+        ), (
+            f"AgentRunner: tool workers must be unique. all tool_worker_group_names are {all_tool_worker_group_names}"
+        )
+        assert len(set(all_tool_calls)) == len(all_tool_calls), (
+            f"AgentRunner: tool_calls must be unique. all tool_calls are {all_tool_calls}"
+        )
         self.agent_loop = agent_loop
         self.tool_workers = tool_workers
         self.generate_input_channel = Channel.create("GenerateInput")
         self.generate_output_channel = Channel.create("GenerateOutput")
-        self.tool_input_channels = {
-            name: Channel.create(f"Tool-{name}") for name in tool_workers.keys()
-        }
+        self.tool_channel_info = {}
+        self.tool_name_map = {}
+        for worker, worker_info in self.tool_workers.items():
+            self.tool_channel_info[worker.worker_group_name] = {
+                "tool_calls": worker_info.tool_names,
+                "has_session": worker_info.has_session,
+                "input_channel": Channel.create(f"Tool-{worker.worker_group_name}"),
+            }
+            for tool_name in worker_info.tool_names:
+                self.tool_name_map[tool_name] = worker.worker_group_name
+
         self.tool_output_channel = Channel.create("ToolOutput")
 
     def init_workers(self):
+        for worker in self.tool_workers:
+            input_channel = self.tool_channel_info[worker.worker_group_name][
+                "input_channel"
+            ]
+            worker.init_worker(input_channel, self.tool_output_channel).wait()
+
         self.agent_loop.init_worker(
             self.generate_input_channel,
             self.generate_output_channel,
-            self.tool_input_channels,
+            self.tool_channel_info,
+            self.tool_name_map,
             self.tool_output_channel,
         ).wait()
-        for name, worker in self.tool_workers.items():
-            worker.init_worker(
-                self.tool_input_channels[name], self.tool_output_channel
-            ).wait()
 
         super().init_workers()
 
@@ -105,7 +132,7 @@ class ToolAgentRunner(ReasoningRunner):
         self.rollout.rollout_serverless(
             self.generate_input_channel, self.generate_output_channel
         )
-        for tool_worker in self.tool_workers.values():
+        for tool_worker in self.tool_workers:
             tool_worker.start_server()
         for _ in epoch_iter:
             for batch in self.train_dataloader:
@@ -227,4 +254,6 @@ class ToolAgentRunner(ReasoningRunner):
                 global_pbar.set_postfix(logging_metrics)
                 global_pbar.update(1)
 
+        for tool_worker in self.tool_workers:
+            tool_worker.stop_server()
         self.metric_logger.finish()

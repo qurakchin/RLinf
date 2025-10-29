@@ -17,9 +17,9 @@ import asyncio
 
 from omegaconf import DictConfig
 
-from rlinf.data.tool_call.tool_io_struct import ToolResponse
+from rlinf.data.tool_call.tool_io_struct import ToolChannelRequest, ToolChannelResponse
 from rlinf.scheduler import Channel
-from rlinf.workers.mcp.tool_worker import ToolWorker
+from rlinf.workers.agent.tool_worker import ToolWorker
 
 
 class FakeToolWorker(ToolWorker):
@@ -42,16 +42,23 @@ class FakeToolWorker(ToolWorker):
             self.request_processor_task.cancel()
 
     async def _process_requests(self):
-        async def generate_and_send(channel_key: str, tool_args: dict):
-            result = ToolResponse(text="fake_tool_response")
+        async def generate_and_send(session_id: str, tool_args: dict):
+            response = ToolChannelResponse(
+                success=True,
+                result="fake_tool_response",
+            )
             await self.output_channel.put(
-                result, key=channel_key, async_op=True
+                response, key=session_id, async_op=True
             ).async_wait()
+            self.logger.info("FakeToolWorker._process_requests: sent response")
 
         while True:
-            rollout_request = await self.input_channel.get(async_op=True).async_wait()
+            request: ToolChannelRequest = await self.input_channel.get(
+                async_op=True
+            ).async_wait()
+            self.logger.info("FakeToolWorker._process_requests: got request")
+            assert request.request_type == "execute"
+            assert request.tool_name == "fake_tool"
             asyncio.create_task(
-                generate_and_send(
-                    rollout_request["channel_key"], rollout_request["tool_args"]
-                )
+                generate_and_send(request.session_id, request.tool_args)
             )
