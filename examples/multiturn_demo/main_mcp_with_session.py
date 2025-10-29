@@ -70,7 +70,6 @@ def main(cfg) -> None:
         cluster,
         name=cfg.agentloop.group_name,
         placement_strategy=agentloop_placement_strategy,
-    )
 
     # Inference group
     inference_group = None
@@ -86,8 +85,6 @@ def main(cfg) -> None:
             name=cfg.inference.group_name,
             placement_strategy=inference_placement_strategy,
         )
-
-    # Reward group
     reward_placement_strategy = component_placement.get_strategy("reward")
     reward_group = RewardWorker.create_group(cfg, component_placement).launch(
         cluster,
