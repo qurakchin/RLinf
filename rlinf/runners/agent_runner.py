@@ -129,7 +129,7 @@ class AgentRunner(ReasoningRunner):
         )
 
         self.run_timer.start_time()
-        self.rollout.rollout_serverless(
+        self.rollout.rollout_serverless_prepare(
             self.generate_input_channel, self.generate_output_channel
         )
         for tool_worker in self.tool_workers:
@@ -142,6 +142,8 @@ class AgentRunner(ReasoningRunner):
 
                     with self.timer("sync_weights"):
                         self._sync_weights()
+
+                    generate_handle: Handle = self.rollout.rollout_serverless_start()
 
                     # Rollout
                     rollout_handle: Handle = self.agent_loop.run_agentloop_rollout(
@@ -179,6 +181,8 @@ class AgentRunner(ReasoningRunner):
                     )
 
                     metrics = actor_handle.wait()
+                    self.rollout.rollout_serverless_stop().wait()
+                    generate_handle.wait()
                     actor_rollout_metrics = metrics[0][0]
                     actor_training_metrics = metrics[0][1]
                     self.global_steps += 1

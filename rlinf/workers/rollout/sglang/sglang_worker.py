@@ -34,6 +34,7 @@ from rlinf.workers.rollout.sglang import Engine, io_struct
 from rlinf.workers.rollout.utils import (
     print_sglang_outputs,
 )
+from rlinf.scheduler.collective.async_channel_iter import AsyncChannelIter
 
 
 class SGLangWorker(Worker):
@@ -379,17 +380,28 @@ class AsyncSGLangWorker(SGLangWorker):
 
         return result_dict
 
-    async def rollout_serverless(self, input_channel: Channel, output_channel: Channel):
-        async def generate_and_send(channel_key: str, prompt_ids: List[int]):
-            result_dict = await self.agenerate(prompt_ids=prompt_ids)
-            await output_channel.put(
-                result_dict, key=channel_key, async_op=True
-            ).async_wait()
+    async def rollout_serverless_prepare(self, input_channel: Channel, output_channel: Channel):
+        self.input_channel_iter = AsyncChannelIter(input_channel)
+        self.output_channel = output_channel
 
-        while True:
-            rollout_request = await input_channel.get(async_op=True).async_wait()
-            asyncio.create_task(
-                generate_and_send(
+    async def generate_and_send(self, channel_key: str, prompt_ids: List[int]):
+        result_dict = await self.agenerate(prompt_ids=prompt_ids)
+        await self.output_channel.put(
+            result_dict, key=channel_key, async_op=True
+        ).async_wait()
+
+    async def rollout_serverless_start(self):
+        self.input_channel_iter.set_exit_flag(False)
+        output_handles = []
+        async for rollout_request in self.input_channel_iter:
+            output_handles.append(asyncio.create_task(
+                self.generate_and_send(
                     rollout_request["channel_key"], rollout_request["prompt_ids"]
                 )
-            )
+            ))
+        await asyncio.gather(*output_handles)
+
+    async def rollout_serverless_stop(self):
+        # wait 0.1s to ensure rollout_serverless_start is called
+        await asyncio.sleep(0.1)
+        self.input_channel_iter.set_exit_flag()

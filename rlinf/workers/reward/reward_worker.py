@@ -30,6 +30,12 @@ class RewardWorker(Worker):
         self.cfg = cfg
         self.component_placement = placement
         self.tokenizer = hf_tokenizer(cfg.reward.tokenizer.tokenizer_model)
+        assert (
+            self.cfg.data.rollout_batch_size
+            * self.cfg.algorithm.get("group_size", 1)
+            % self._world_size
+            == 0
+        )
         self.total_batch_size_per_dp = (
             self.cfg.data.rollout_batch_size
             * self.cfg.algorithm.get("group_size", 1)
