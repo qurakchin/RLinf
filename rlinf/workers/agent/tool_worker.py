@@ -12,14 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pydantic import BaseModel
-
+from dataclasses import dataclass
 from rlinf.scheduler import Channel, Worker
 
-
-class ToolWorkerInfo(BaseModel):
+@dataclass
+class ToolWorkerInfo:
     tool_names: list[str]
     has_session: bool
+
+
+@dataclass
+class ToolChannelInfo:
+    tool_names: list[str]
+    has_session: bool
+    input_channel: Channel
 
 
 class ToolWorker(Worker):

@@ -28,7 +28,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from omegaconf import DictConfig
 
-from rlinf.data.tool_call.mcp_io_struct import (
+from rlinf.data.tool_call.tool_io_struct import (
     MCPRequest,
     MCPRequestType,
     MCPResponse,

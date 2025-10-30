@@ -19,7 +19,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from omegaconf import DictConfig
-from pydantic import BaseModel
+from dataclasses import dataclass, field
 from transformers import AutoTokenizer
 
 from rlinf.data.io_struct import (
@@ -28,12 +28,10 @@ from rlinf.data.io_struct import (
 )
 from rlinf.scheduler import Channel, Worker
 from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf.workers.agent.tool_worker import ToolChannelInfo
 
-logger = logging.getLogger(__file__)
-logger.setLevel(os.getenv("RLINF_LOGGING_LEVEL", "WARN"))
-
-
-class AgentLoopOutput(BaseModel):
+@dataclass
+class AgentLoopOutput:
     """Agent loop output."""
 
     """Prompt token ids."""
@@ -51,7 +49,7 @@ class AgentLoopOutput(BaseModel):
     """Number of chat turns, including user, assistant, tool."""
     num_turns: int = 0
     """Extra fields for dynamic addition."""
-    extra_fields: dict[str, Any] = {}
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
 
 class AgentLoopWorkerBase(Worker):
@@ -73,15 +71,17 @@ class AgentLoopWorkerBase(Worker):
 
     def init_worker(
         self,
-        generate_input_channel,
-        generate_output_channel,
-        tool_channel_info,
-        tool_name_map,
+        generate_input_channel: Channel,
+        generate_output_channel: Channel,
+        tool_channel_info_map: dict[str, ToolChannelInfo],
+        tool_name_map: dict[str, str],
         tool_worker_output_channel: Channel,
     ):
         self.generate_input_channel = generate_input_channel
         self.generate_output_channel = generate_output_channel
-        self.tool_channel_info = tool_channel_info
+        # tool worker name to tool channel info.
+        self.tool_channel_info_map = tool_channel_info_map
+        # tool name to tool worker. a tool worker may have multiple tools.
         self.tool_name_map = tool_name_map
         self.tool_worker_output_channel = tool_worker_output_channel
 
