@@ -13,13 +13,11 @@
 # limitations under the License.
 
 import asyncio
-import logging
-import os
+from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import uuid4
 
 from omegaconf import DictConfig
-from dataclasses import dataclass, field
 from transformers import AutoTokenizer
 
 from rlinf.data.io_struct import (
@@ -29,6 +27,7 @@ from rlinf.data.io_struct import (
 from rlinf.scheduler import Channel, Worker
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.agent.tool_worker import ToolChannelInfo
+
 
 @dataclass
 class AgentLoopOutput:
@@ -52,11 +51,11 @@ class AgentLoopOutput:
     extra_fields: dict[str, Any] = field(default_factory=dict)
 
 
-class AgentLoopWorkerBase(Worker):
-    """Simple tool agent loop that can interact with tools.
+class AgentLoopWorker(Worker):
+    """
+    Abstract agent loop worker.
 
-    重构为普通类：不再继承 Worker，也不使用 WorkerGroup/Channel。
-    通过注入的 rollout 直接调用 agenerate，输入/输出均为 token ids。
+    Subclasses must implement the run_one_query method.
     """
 
     def __init__(
@@ -85,7 +84,7 @@ class AgentLoopWorkerBase(Worker):
         self.tool_name_map = tool_name_map
         self.tool_worker_output_channel = tool_worker_output_channel
 
-    async def agenerate(self, prompt_ids: list[int]):
+    async def generate(self, prompt_ids: list[int]):
         channel_key = uuid4().hex
         await self.generate_input_channel.put(
             {"channel_key": channel_key, "prompt_ids": prompt_ids}, async_op=True
@@ -95,7 +94,13 @@ class AgentLoopWorkerBase(Worker):
         ).async_wait()
         return result
 
-    async def run_agentloop_rollout_group(self, input_ids: list[int], answers: list[Any], group_size: int, output_channel: Channel):
+    async def run_agentloop_rollout_group(
+        self,
+        input_ids: list[int],
+        answers: list[Any],
+        group_size: int,
+        output_channel: Channel,
+    ):
         """
         Run the agent loop for a group of queries.
         """
@@ -122,15 +127,22 @@ class AgentLoopWorkerBase(Worker):
             for input_ids, answers in zip(
                 rollout_request.input_ids, rollout_request.answers
             ):
-                send_output_tasks.append(asyncio.create_task(
-                    self.run_agentloop_rollout_group(input_ids, answers, rollout_request.n, output_channel),
-                ))
+                send_output_tasks.append(
+                    asyncio.create_task(
+                        self.run_agentloop_rollout_group(
+                            input_ids, answers, rollout_request.n, output_channel
+                        ),
+                    )
+                )
 
             await asyncio.gather(*send_output_tasks)
 
     def get_rollout_result(
         self, task_results: list[AgentLoopOutput], answers
     ) -> RolloutResult:
+        """
+        Collect group task results into a RolloutResult.
+        """
         # Clip to model limits to avoid mask/position size mismatch
         max_prompt_len = int(self.cfg.data.max_prompt_length)
         max_total_len = int(self.cfg.actor.model.encoder_seq_length)

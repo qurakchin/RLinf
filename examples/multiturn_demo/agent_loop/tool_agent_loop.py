@@ -28,10 +28,10 @@ from rlinf.data.tool_call.tool_io_struct import (
 )
 from rlinf.scheduler import Channel
 from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.workers.agent.agent_loop import AgentLoopOutput, AgentLoopWorkerBase
+from rlinf.workers.agent.agent_loop import AgentLoopOutput, AgentLoopWorker
 
 
-class ToolAgentLoopWorker(AgentLoopWorkerBase):
+class ToolAgentLoopWorker(AgentLoopWorker):
     """Simple tool agent loop that can interact with tools."""
 
     def __init__(
@@ -61,7 +61,7 @@ class ToolAgentLoopWorker(AgentLoopWorkerBase):
         ).async_wait()
         return await output_channel.get(session_id, async_op=True).async_wait()
 
-    async def atool_call(self, tool_request: ToolRequest) -> ToolResponse:
+    async def tool_call(self, tool_request: ToolRequest) -> ToolResponse:
         tool_name, tool_args = tool_request.name, tool_request.arguments
         tool_channel_info = self.tool_channel_info_map[self.tool_name_map[tool_name]]
         channel_response = await self.state_less_tool_call_with_channel(
@@ -94,6 +94,7 @@ class ToolAgentLoopWorker(AgentLoopWorkerBase):
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
         orig_prompt_ids = copy.deepcopy(prompt_ids)
+        # 5 is a magic number in this demo.
         for _ in range(5):
             # Generate response from LLM
             max_prompt_len = int(self.cfg.data.get("max_prompt_length", 1024))
@@ -103,7 +104,7 @@ class ToolAgentLoopWorker(AgentLoopWorkerBase):
             if len(prompt_ids) > max_prompt_len:
                 prompt_ids = prompt_ids[-max_prompt_len:]
 
-            generate_result = await self.agenerate(prompt_ids)
+            generate_result = await self.generate(prompt_ids)
             response_ids = generate_result["output_ids"]
             if len(response_ids) > max_resp_len:
                 response_ids = response_ids[:max_resp_len]
@@ -117,7 +118,7 @@ class ToolAgentLoopWorker(AgentLoopWorkerBase):
             # Execute tools in parallel with history propagation
             tasks = []
             for tool_request in tool_requests:
-                tasks.append(self.atool_call(tool_request))
+                tasks.append(self.tool_call(tool_request))
             tool_responses: list[ToolResponse] = await asyncio.gather(*tasks)
 
             # Convert tool responses to messages and tokenize

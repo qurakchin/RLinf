@@ -13,7 +13,9 @@
 # limitations under the License.
 
 from dataclasses import dataclass
+
 from rlinf.scheduler import Channel, Worker
+
 
 @dataclass
 class ToolWorkerInfo:
