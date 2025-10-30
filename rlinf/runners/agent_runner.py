@@ -27,8 +27,8 @@ from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.utils.runner_utils import check_progress
 from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-from rlinf.workers.agent.agent_loop import AgentLoopWorkerBase
-from rlinf.workers.agent.tool_worker import ToolWorker, ToolWorkerInfo, ToolChannelInfo
+from rlinf.workers.agent.agent_loop import AgentLoopWorker
+from rlinf.workers.agent.tool_worker import ToolChannelInfo, ToolWorker, ToolWorkerInfo
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
 from rlinf.workers.reward.reward_worker import RewardWorker
 
@@ -52,7 +52,7 @@ class AgentRunner(ReasoningRunner):
         inference: Optional[MegatronInference],
         actor: MegatronActor,
         reward: RewardWorker,
-        agent_loop: AgentLoopWorkerBase,
+        agent_loop: AgentLoopWorker,
         tool_workers: dict[ToolWorker, ToolWorkerInfo] = {},
     ):
         super().__init__(
@@ -103,7 +103,9 @@ class AgentRunner(ReasoningRunner):
     def init_workers(self):
         """init tool workers and agent loop worker."""
         for worker in self.tool_workers:
-            input_channel = self.tool_channel_info_map[worker.worker_group_name].input_channel
+            input_channel = self.tool_channel_info_map[
+                worker.worker_group_name
+            ].input_channel
             worker.init_worker(input_channel, self.tool_output_channel).wait()
 
         self.agent_loop.init_worker(
