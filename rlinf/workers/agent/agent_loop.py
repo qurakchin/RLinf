@@ -95,6 +95,20 @@ class AgentLoopWorkerBase(Worker):
         ).async_wait()
         return result
 
+    async def run_agentloop_rollout_group(self, input_ids: list[int], answers: list[Any], group_size: int, output_channel: Channel):
+        """
+        Run the agent loop for a group of queries.
+        """
+        rollout_tasks = []
+        # grpo group_size
+        for _ in range(group_size):
+            task = asyncio.create_task(self.run_one_query(input_ids))
+            rollout_tasks.append(task)
+
+        task_results = await asyncio.gather(*rollout_tasks)
+        rollout_result = self.get_rollout_result(task_results, answers)
+        await output_channel.put(rollout_result, async_op=True).async_wait()
+
     async def run_agentloop_rollout(
         self, input_channel: Channel, output_channel: Channel
     ):
@@ -108,23 +122,13 @@ class AgentLoopWorkerBase(Worker):
             for input_ids, answers in zip(
                 rollout_request.input_ids, rollout_request.answers
             ):
-                rollout_tasks = []
-                # grpo group_size
-                for _ in range(rollout_request.n):
-                    task = asyncio.create_task(self.run_one_query(input_ids))
-                    rollout_tasks.append(task)
-
-                task_results = await asyncio.gather(*rollout_tasks)
-
-                rollout_result = self._get_rollout_result(task_results, answers)
-
-                send_output_tasks.append(
-                    output_channel.put(rollout_result, async_op=True).async_wait()
-                )
+                send_output_tasks.append(asyncio.create_task(
+                    self.run_agentloop_rollout_group(input_ids, answers, rollout_request.n, output_channel),
+                ))
 
             await asyncio.gather(*send_output_tasks)
 
-    def _get_rollout_result(
+    def get_rollout_result(
         self, task_results: list[AgentLoopOutput], answers
     ) -> RolloutResult:
         # Clip to model limits to avoid mask/position size mismatch
