@@ -12,11 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Literal
-from dataclasses import dataclass
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 
 class MCPRequestType(Enum):
@@ -99,6 +97,7 @@ class ToolChannelResponse:
     result: Any | None = None
     session_state: Any | None = None
     meta_info: dict | None = None
+
 
 @dataclass
 class ToolRequest:

@@ -33,8 +33,9 @@ from rlinf.data.tool_call.tool_io_struct import (
     MCPRequestType,
     MCPResponse,
     MCPSessionState,
+    ToolChannelRequest,
+    ToolChannelResponse,
 )
-from rlinf.data.tool_call.tool_io_struct import ToolChannelRequest, ToolChannelResponse
 from rlinf.scheduler import Channel
 from rlinf.workers.agent.tool_worker import ToolWorker
 
