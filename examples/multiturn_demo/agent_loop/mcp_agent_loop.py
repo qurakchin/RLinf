@@ -20,6 +20,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from dataclasses import dataclass, field
 from omegaconf import DictConfig
 
 from rlinf.data.tool_call.tool_io_struct import (
@@ -31,6 +32,9 @@ from rlinf.data.tool_call.tool_io_struct import (
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.agent.agent_loop import AgentLoopOutput, AgentLoopWorkerBase
 
+@dataclass
+class GenerateContext:
+    tool_session_ids: dict[str, str] = field(default_factory=dict)
 
 class MCPAgentLoopWorker(AgentLoopWorkerBase):
     """Simple tool agent loop that can interact with tools."""
@@ -43,29 +47,25 @@ class MCPAgentLoopWorker(AgentLoopWorkerBase):
         super().__init__(cfg, placement)
 
     def generate_context_create(self) -> dict[str, Any]:
-        return {
-            "tool_session_ids": {},
-        }
+        return GenerateContext()
 
-    async def generate_context_release(self, generate_context) -> dict[str, Any]:
-        for tool_worker_name, session_id in generate_context[
-            "tool_session_ids"
-        ].items():
-            if self.tool_channel_info[tool_worker_name]["has_session"]:
+    async def generate_context_release(self, generate_context: GenerateContext) -> dict[str, Any]:
+        for tool_worker_name, session_id in generate_context.tool_session_ids.items():
+            if self.tool_channel_info_map[tool_worker_name].has_session:
                 # tool need session
                 await self.tool_session_release(tool_worker_name, session_id)
 
-    async def tool_session_get(self, generate_context, tool_name: str) -> Any:
+    async def tool_session_get(self, generate_context: GenerateContext, tool_name: str) -> Any:
         tool_worker_name = self.tool_name_map[tool_name]
-        tool_channel_info = self.tool_channel_info[tool_worker_name]
-        if tool_worker_name in generate_context["tool_session_ids"]:
-            return generate_context["tool_session_ids"][tool_worker_name]
+        tool_channel_info = self.tool_channel_info_map[tool_worker_name]
+        if tool_worker_name in generate_context.tool_session_ids:
+            return generate_context.tool_session_ids[tool_worker_name]
         session_id = uuid4().hex
-        generate_context["tool_session_ids"][tool_worker_name] = session_id
-        if tool_channel_info["has_session"]:
+        generate_context.tool_session_ids[tool_worker_name] = session_id
+        if tool_channel_info.has_session:
             # tool need session
             await (
-                tool_channel_info["input_channel"]
+                tool_channel_info.input_channel
                 .put(
                     ToolChannelRequest(
                         session_id=session_id, request_type="session_start"
@@ -81,9 +81,9 @@ class MCPAgentLoopWorker(AgentLoopWorkerBase):
         return session_id
 
     async def tool_session_release(self, tool_worker_name, session_id) -> str | dict:
-        tool_channel_info = self.tool_channel_info[tool_worker_name]
+        tool_channel_info = self.tool_channel_info_map[tool_worker_name]
         await (
-            tool_channel_info["input_channel"]
+            tool_channel_info.input_channel
             .put(
                 ToolChannelRequest(session_id=session_id, request_type="session_end"),
                 async_op=True,
@@ -96,11 +96,11 @@ class MCPAgentLoopWorker(AgentLoopWorkerBase):
         assert response.success
 
     async def atool_call(
-        self, generate_context, tool_request: ToolRequest
+        self, generate_context: GenerateContext, tool_request: ToolRequest
     ) -> ToolResponse:
         tool_name, tool_args = tool_request.name, tool_request.arguments
-        tool_channel_info = self.tool_channel_info[self.tool_name_map[tool_name]]
-        tool_input_channel = tool_channel_info["input_channel"]
+        tool_channel_info = self.tool_channel_info_map[self.tool_name_map[tool_name]]
+        tool_input_channel = tool_channel_info.input_channel
         session_id = await self.tool_session_get(generate_context, tool_name)
         await tool_input_channel.put(
             ToolChannelRequest(
@@ -148,7 +148,7 @@ class MCPAgentLoopWorker(AgentLoopWorkerBase):
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
         orig_prompt_ids = copy.deepcopy(prompt_ids)
-        generate_context: dict[str, Any] = self.generate_context_create()
+        generate_context: GenerateContext = self.generate_context_create()
         try:
             for _ in range(5):
                 # Generate response from LLM

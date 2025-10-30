@@ -13,12 +13,71 @@
 # limitations under the License.
 
 from typing import Any, Literal
+from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, Optional
 
-from pydantic import BaseModel
+
+class MCPRequestType(Enum):
+    """MCP request types."""
+
+    LIST_TOOLS = "list_tools"
+    CALL_TOOL = "call_tool"
+    LIST_RESOURCES = "list_resources"
+    READ_RESOURCE = "read_resource"
+    LIST_PROMPTS = "list_prompts"
+    GET_PROMPT = "get_prompt"
 
 
-class ToolChannelRequest(BaseModel):
-    """Request to a tool channel."""
+class MCPSessionState(Enum):
+    """MCP session states."""
+
+    INITIALIZING = "initializing"
+    CONNECTED = "connected"
+    FAILED = "failed"
+    TERMINATED = "terminated"
+
+
+@dataclass
+class MCPRequest:
+    """
+    MCP request structure.
+    Used between MCP client(mcp tool worker) and MCP server.
+    """
+
+    request_id: str
+    request_type: MCPRequestType
+    tool_name: Optional[str] = None
+    tool_arguments: Optional[Dict[str, Any]] = None
+    resource_uri: Optional[str] = None
+    prompt_name: Optional[str] = None
+    prompt_arguments: Optional[Dict[str, Any]] = None
+    timeout: int = 30
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MCPResponse:
+    """
+    MCP response structure.
+    Used between MCP client(mcp tool worker) and MCP server.
+    """
+
+    request_id: str
+    success: bool
+    result: Optional[Any] = None
+    error_message: Optional[str] = None
+    execution_time: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ToolChannelRequest:
+    """
+    Request to a tool channel.
+    Used between agent loop worker and tool worker.
+    """
 
     # session_id is REQUIRED. also used as the response channel key
     session_id: str
@@ -27,8 +86,12 @@ class ToolChannelRequest(BaseModel):
     tool_args: dict | None = None
 
 
-class ToolChannelResponse(BaseModel):
-    """Response from a tool channel."""
+@dataclass
+class ToolChannelResponse:
+    """
+    Response from a tool channel.
+    Used between agent loop worker and tool worker.
+    """
 
     success: bool
 
@@ -37,9 +100,12 @@ class ToolChannelResponse(BaseModel):
     session_state: Any | None = None
     meta_info: dict | None = None
 
-
-class ToolRequest(BaseModel):
-    """The name of the function to call."""
+@dataclass
+class ToolRequest:
+    """
+    The name of the function to call.
+    Used within agent loop worker.
+    """
 
     name: str
 
@@ -47,7 +113,11 @@ class ToolRequest(BaseModel):
     arguments: dict
 
 
-class ToolResponse(BaseModel):
-    """The response from a tool execution."""
+@dataclass
+class ToolResponse:
+    """
+    The response from a tool execution.
+    Used within agent loop worker.
+    """
 
     text: str
