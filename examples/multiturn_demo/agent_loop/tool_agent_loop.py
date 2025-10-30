@@ -63,9 +63,9 @@ class ToolAgentLoopWorker(AgentLoopWorkerBase):
 
     async def atool_call(self, tool_request: ToolRequest) -> ToolResponse:
         tool_name, tool_args = tool_request.name, tool_request.arguments
-        tool_channel_info = self.tool_channel_info[self.tool_name_map[tool_name]]
+        tool_channel_info = self.tool_channel_info_map[self.tool_name_map[tool_name]]
         channel_response = await self.state_less_tool_call_with_channel(
-            tool_channel_info["input_channel"],
+            tool_channel_info.input_channel,
             self.tool_worker_output_channel,
             tool_name,
             tool_args,
