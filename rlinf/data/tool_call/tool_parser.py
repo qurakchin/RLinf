@@ -97,3 +97,34 @@ class FakeToolParser(ToolParser):
         return_function_calls = random.choice(function_calls)
 
         return response_text, return_function_calls
+
+class SearchR1ToolParser(ToolParser):
+    def __init__(self, cfg, logger) -> None:
+        super().__init__(cfg, logger)
+
+        self.tool_call_start_token: str = "<search>"
+        self.tool_call_end_token: str = "</search>"
+        self.tool_call_regex = re.compile(r"<search>(.*?)</search>", re.DOTALL)
+
+        self.keep_match_error_as_response = True
+        # self.keep_match_error = cfg.get("keep_match_error", False)
+        self.keep_match_error_as_response_text = (
+            "Failed to decode tool call: {exception}"
+        )
+
+    async def extract_tool_calls(self, response_text) -> tuple[str, list[ToolRequest]]:
+        if (
+            self.tool_call_start_token not in response_text
+            or self.tool_call_end_token not in response_text
+        ):
+            return response_text, []
+        matches = self.tool_call_regex.findall(response_text)
+        function_calls = []
+        if matches:
+            match = matches[-1].strip()
+            function_calls.append(ToolRequest(name='search', arguments={"keyword":match}))
+
+        # remaining text exclude tool call tokens
+        content = self.tool_call_regex.sub("", response_text)
+
+        return content, function_calls
