@@ -258,7 +258,18 @@ class RolloutResult:
         prompt_start = prompt_start.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
         if response_mask is not None:
-            attention_mask = torch.cat([(torch.arange(max_prompt_len).unsqueeze(0).expand(response_mask.size(0), -1) >= prompt_start), response_mask], dim=1).bool()
+            attention_mask = torch.cat(
+                [
+                    (
+                        torch.arange(max_prompt_len)
+                        .unsqueeze(0)
+                        .expand(response_mask.size(0), -1)
+                        >= prompt_start
+                    ),
+                    response_mask,
+                ],
+                dim=1,
+            ).bool()
         else:
             attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
 
@@ -748,7 +759,6 @@ class RolloutResult:
             )
         else:
             response_mask = None
-
 
         attention_mask, position_ids = self._get_attention_masks_and_position_ids(
             prompt_lengths=prompt_lengths,
