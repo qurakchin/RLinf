@@ -101,6 +101,7 @@ agentloop:
   max_tool_response_length: 500
   tool_response_truncate_side: "right"
   response_length: 2048
+  print_outputs: True # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
 
 rollout:
   group_name: "RolloutGroup"
