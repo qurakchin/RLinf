@@ -148,6 +148,7 @@ class MCPAgentLoopWorker(AgentLoopWorker):
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         generate_context: GenerateContext = self.generate_context_create()
         trace_prints = []
+        response_mask = []
         try:
             # 5 is a magic number in this demo.
             for _ in range(5):
@@ -166,6 +167,7 @@ class MCPAgentLoopWorker(AgentLoopWorker):
                 response_text = self.tokenizer.decode(response_ids)
 
                 prompt_ids += response_ids
+                response_mask += [1] * len(response_ids)  # 1 for LLM generated tokens
 
                 # Extract tool calls from response
                 _, tool_requests = await self.extract_tool_calls(response_text)
@@ -189,6 +191,7 @@ class MCPAgentLoopWorker(AgentLoopWorker):
                     tokenize=True,
                 )
                 prompt_ids += tool_response_ids
+                response_mask += [0] * len(tool_response_ids)  # 0 for tool response tokens
                 if self.print_outputs:
                     # add anything you want to print
                     trace_prints.append({"generate": response_text, "tool_resp": tool_messages})
@@ -200,6 +203,7 @@ class MCPAgentLoopWorker(AgentLoopWorker):
                 prompt_ids=orig_prompt_ids,
                 prompt_text=self.tokenizer.decode(orig_prompt_ids),
                 response_ids=response_ids,
+                response_mask=response_mask,
                 trace_prints=trace_prints,
             )
         finally:

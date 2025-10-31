@@ -105,7 +105,7 @@ class AgentLoopWorker(Worker):
     ):
         print_texts = [f"{green('Prompt')}         : {prompt_texts!r}",]
         for trace_print in trace_prints:
-            print_texts.append(f"{green('Generated text')} : {trace_print!r}")
+            print_texts.append(f"{green('Trace print')}    : {trace_print!r}")
         print(*print_texts, sep="\n")
 
     async def run_agentloop_rollout_group(
@@ -158,8 +158,9 @@ class AgentLoopWorker(Worker):
         Collect group task results into a RolloutResult.
         """
         if self.print_outputs:
-            for task_result in task_results and len(task_result.trace_prints) > 0:
-                self.print_agent_outputs(task_result.prompt_text, task_result.trace_prints)
+            for task_result in task_results:
+                if len(task_result.trace_prints) > 0:
+                    self.print_agent_outputs(task_result.prompt_text, task_result.trace_prints)
         # Clip to model limits to avoid mask/position size mismatch
         max_prompt_len = int(self.cfg.data.max_prompt_length)
         max_total_len = int(self.cfg.actor.model.encoder_seq_length)
@@ -169,7 +170,7 @@ class AgentLoopWorker(Worker):
         response_ids = [r.response_ids[:max_resp_len] for r in task_results]
         prompt_lengths = [len(p) for p in prompt_ids]
         response_lengths = [len(o) for o in response_ids]
-        # response_mask = [r.response_mask[:max_resp_len] for r in task_results]
+        response_mask = [r.response_mask[:max_resp_len] for r in task_results]
         is_end = [True for _ in task_results]
         answers = [answers] * len(task_results)
         return RolloutResult(
@@ -181,7 +182,7 @@ class AgentLoopWorker(Worker):
             response_ids=response_ids,
             is_end=is_end,
             answers=answers,
-            # response_mask=response_mask,
+            response_mask=response_mask,
         )
 
     async def run_one_query(self, prompt_ids: list[int], **kwargs) -> AgentLoopOutput:
