@@ -767,7 +767,6 @@ class RolloutResult:
         else:
             response_mask = None
 
-
         attention_mask, position_ids = self._get_attention_masks_and_position_ids(
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,
