@@ -18,17 +18,18 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
+from multiturn_demo.agent_loop.tool_agent_loop import ToolAgentLoopWorker
+from multiturn_demo.tools.fake_tool_worker import FakeToolWorker
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
-from rlinf.runners.tool_agent_runner import ToolAgentRunner
+from rlinf.runners.agent_runner import AgentRunner
 from rlinf.scheduler import Cluster, NodePlacementStrategy
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
 from rlinf.utils.utils import output_redirector
 from rlinf.workers.actor import get_actor_worker
-from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
+from rlinf.workers.agent.tool_worker import ToolWorkerInfo
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-from rlinf.workers.mcp.fake_tool_worker import FakeToolWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
 
@@ -104,12 +105,12 @@ def main(cfg) -> None:
     # Tool workers group
     singleton_tool_placement = NodePlacementStrategy([0])
     tool_workers = {
-        "tool1": FakeToolWorker.create_group(cfg).launch(
-            cluster, name="Tool1", placement_strategy=singleton_tool_placement
-        ),
+        FakeToolWorker.create_group(cfg).launch(
+            cluster, name="FakeTool", placement_strategy=singleton_tool_placement
+        ): ToolWorkerInfo(tool_names=["fake_tool"], has_session=False),
     }
 
-    runner = ToolAgentRunner(
+    runner = AgentRunner(
         cfg=cfg,
         placement=component_placement,
         train_dataset=train_ds,

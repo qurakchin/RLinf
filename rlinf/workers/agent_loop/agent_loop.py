@@ -182,7 +182,23 @@ class ToolAgentLoopWorker(AgentLoopWorkerBase):
         return await self.tool_worker_output_channel.get(
             channel_key, async_op=True
         ).async_wait()
+        
+    async def extract_tool_calls(self, response_text) -> tuple[str, list[ToolRequest]]:
+        if (
+            self.tool_call_start_token not in response_text
+            or self.tool_call_end_token not in response_text
+        ):
+            return response_text, []
+        matches = self.tool_call_regex.findall(response_text)
+        function_calls = []
+        if matches:
+            match = matches[-1].strip()
+            function_calls.append(ToolRequest(name='search', arguments={"keyword":match}))
 
+        # remaining text exclude tool call tokens
+        content = self.tool_call_regex.sub("", response_text)
+
+        return content, function_calls
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         for _ in range(5):

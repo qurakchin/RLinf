@@ -18,6 +18,8 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
+from multiturn_demo.agent_loop.searchr1_agent_loop import Searchr1ToolAgentLoopWorker
+from multiturn_demo.tools.search_tool_worker import SearchToolWorker
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
@@ -26,9 +28,8 @@ from rlinf.scheduler import Cluster, NodePlacementStrategy
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
 from rlinf.utils.utils import output_redirector
 from rlinf.workers.actor import get_actor_worker
-from rlinf.workers.agent_loop.searchr1_agent_loop import Searchr1ToolAgentLoopWorker
+from rlinf.workers.agent.tool_worker import ToolWorkerInfo
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-from rlinf.workers.mcp.search_tool_worker import SearchToolWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
 
@@ -104,9 +105,9 @@ def main(cfg) -> None:
     # Tool workers group
     singleton_tool_placement = NodePlacementStrategy([0])
     tool_workers = {
-        "search": SearchToolWorker.create_group(cfg).launch(
+        SearchToolWorker.create_group(cfg).launch(
             cluster, name="search", placement_strategy=singleton_tool_placement
-        ),
+        ): ToolWorkerInfo(tool_names=["search"], has_session=False),
     }
 
     runner = Searchr1ToolAgentRunner(
