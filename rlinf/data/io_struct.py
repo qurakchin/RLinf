@@ -204,18 +204,19 @@ class RolloutResult:
 
     num_sequence: int
     group_size: int
-    prompt_lengths: list[int]
-    prompt_ids: list[list[int]]
-    response_lengths: list[int]
-    response_ids: list[list[int]]
-    is_end: list[bool]
-    rewards: Optional[list[float] | torch.Tensor] = None
-    advantages: Optional[list[float] | torch.Tensor] = None
-    prompt_texts: Optional[list[str]] = None
-    response_texts: Optional[list[str]] = None
-    answers: Optional[list[str | dict]] = None
-    image_data: Optional[Union[list[list[bytes]], list[list[str]]]] = None
-    multi_modal_inputs: Optional[list[dict]] = None
+    prompt_lengths: List[int]
+    prompt_ids: List[List[int]]
+    response_lengths: List[int]
+    response_ids: List[List[int]]
+    is_end: List[bool]
+    rewards: Optional[List[float] | torch.Tensor] = None
+    advantages: Optional[List[float] | torch.Tensor] = None
+    prompt_texts: Optional[List[str]] = None
+    response_texts: Optional[List[str]] = None
+    answers: Optional[List[str | dict]] = None
+    image_data: Optional[Union[List[List[bytes]], List[List[str]]]] = None
+    multi_modal_inputs: Optional[List[dict]] = None
+    response_mask: Optional[List[List[int]]] = None
     # Inference
     # Logprobs returned by rollout engines
     rollout_logprobs: Optional[list[list[float]]] = None
@@ -236,6 +237,7 @@ class RolloutResult:
     def _get_attention_masks_and_position_ids(
         prompt_lengths: torch.Tensor,
         response_lengths: torch.Tensor,
+        response_mask: torch.Tensor | None,
         max_prompt_len: int,
         total_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -255,8 +257,10 @@ class RolloutResult:
         # Broadcast [B, total_len]
         prompt_start = prompt_start.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
-
-        attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
+        if response_mask is not None:
+            attention_mask = torch.cat([(torch.arange(max_prompt_len).unsqueeze(0).expand(response_mask.size(0), -1) >= prompt_start), response_mask], dim=1).bool()
+        else:
+            attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
 
         # =========================
         # Position IDs
@@ -736,9 +740,20 @@ class RolloutResult:
         response_lengths = torch.tensor(self.response_lengths)
         is_end = torch.tensor(self.is_end, dtype=torch.bool)
 
+        if self.response_mask is not None:
+            response_mask = batch_pad_to_fixed_len(
+                [torch.as_tensor(ids, dtype=torch.long) for ids in self.response_mask],
+                max_batch_len=max_response_len,
+                pad_token=pad_token,
+            )
+        else:
+            response_mask = None
+
+
         attention_mask, position_ids = self._get_attention_masks_and_position_ids(
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,
+            response_mask=response_mask,
             max_prompt_len=data_seq_length,
             total_len=training_seq_length,
         )
