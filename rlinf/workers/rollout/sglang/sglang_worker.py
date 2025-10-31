@@ -15,7 +15,7 @@
 import asyncio
 import copy
 import dataclasses
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import ReleaseMemoryOccupationReqInput

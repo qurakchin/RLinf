@@ -103,7 +103,9 @@ class AgentLoopWorker(Worker):
         prompt_texts: str,
         trace_prints: list[Any],
     ):
-        print_texts = [f"{green('Prompt')}         : {prompt_texts!r}",]
+        print_texts = [
+            f"{green('Prompt')}         : {prompt_texts!r}",
+        ]
         for trace_print in trace_prints:
             print_texts.append(f"{green('Trace print')}    : {trace_print!r}")
         print(*print_texts, sep="\n")
@@ -160,7 +162,9 @@ class AgentLoopWorker(Worker):
         if self.print_outputs:
             for task_result in task_results:
                 if len(task_result.trace_prints) > 0:
-                    self.print_agent_outputs(task_result.prompt_text, task_result.trace_prints)
+                    self.print_agent_outputs(
+                        task_result.prompt_text, task_result.trace_prints
+                    )
         # Clip to model limits to avoid mask/position size mismatch
         max_prompt_len = int(self.cfg.data.max_prompt_length)
         max_total_len = int(self.cfg.actor.model.encoder_seq_length)

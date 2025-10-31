@@ -191,10 +191,14 @@ class MCPAgentLoopWorker(AgentLoopWorker):
                     tokenize=True,
                 )
                 prompt_ids += tool_response_ids
-                response_mask += [0] * len(tool_response_ids)  # 0 for tool response tokens
+                response_mask += [0] * len(
+                    tool_response_ids
+                )  # 0 for tool response tokens
                 if self.print_outputs:
                     # add anything you want to print
-                    trace_prints.append({"generate": response_text, "tool_resp": tool_messages})
+                    trace_prints.append(
+                        {"generate": response_text, "tool_resp": tool_messages}
+                    )
 
             # Separate prompt and response
             response_ids = prompt_ids[-len(orig_prompt_ids) :]
