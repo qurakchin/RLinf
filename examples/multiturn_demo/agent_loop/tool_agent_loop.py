@@ -94,6 +94,7 @@ class ToolAgentLoopWorker(AgentLoopWorker):
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
         orig_prompt_ids = copy.deepcopy(prompt_ids)
+        trace_prints = []
         # 5 is a magic number in this demo.
         for _ in range(5):
             # Generate response from LLM
@@ -134,11 +135,16 @@ class ToolAgentLoopWorker(AgentLoopWorker):
                 tokenize=True,
             )
             prompt_ids += tool_response_ids
+            if self.print_outputs:
+                # add anything you want to print
+                trace_prints.append({"generate": response_text, "tool_resp": tool_messages})
 
         # Separate prompt and response
         response_ids = prompt_ids[-len(orig_prompt_ids) :]
 
         return AgentLoopOutput(
-            prompt_ids=prompt_ids,
+            prompt_ids=orig_prompt_ids,
+            prompt_text=self.tokenizer.decode(orig_prompt_ids),
             response_ids=response_ids,
+            trace_prints=trace_prints,
         )

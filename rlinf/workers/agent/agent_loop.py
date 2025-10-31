@@ -27,6 +27,7 @@ from rlinf.data.io_struct import (
 from rlinf.scheduler import Channel, Worker
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.agent.tool_worker import ToolChannelInfo
+from rlinf.workers.rollout.utils import green
 
 
 @dataclass
@@ -47,6 +48,8 @@ class AgentLoopOutput:
     response_logprobs: Optional[list[float]] = None
     """Number of chat turns, including user, assistant, tool."""
     num_turns: int = 0
+    """Debug information to print."""
+    trace_prints: list[Any] = field(default_factory=list)
     """Extra fields for dynamic addition."""
     extra_fields: dict[str, Any] = field(default_factory=dict)
 
@@ -65,6 +68,7 @@ class AgentLoopWorker(Worker):
     ):
         super().__init__()
         self.cfg = cfg
+        self.print_outputs = cfg.agentloop.print_outputs
 
         self.tokenizer = AutoTokenizer.from_pretrained(cfg.rollout.model_dir)
 
@@ -93,6 +97,16 @@ class AgentLoopWorker(Worker):
             channel_key, async_op=True
         ).async_wait()
         return result
+
+    def print_agent_outputs(
+        self,
+        prompt_texts: str,
+        trace_prints: list[Any],
+    ):
+        print_texts = [f"{green('Prompt')}         : {prompt_texts!r}",]
+        for trace_print in trace_prints:
+            print_texts.append(f"{green('Generated text')} : {trace_print!r}")
+        print(*print_texts, sep="\n")
 
     async def run_agentloop_rollout_group(
         self,
@@ -143,6 +157,9 @@ class AgentLoopWorker(Worker):
         """
         Collect group task results into a RolloutResult.
         """
+        if self.print_outputs:
+            for task_result in task_results and len(task_result.trace_prints) > 0:
+                self.print_agent_outputs(task_result.prompt_text, task_result.trace_prints)
         # Clip to model limits to avoid mask/position size mismatch
         max_prompt_len = int(self.cfg.data.max_prompt_length)
         max_total_len = int(self.cfg.actor.model.encoder_seq_length)
