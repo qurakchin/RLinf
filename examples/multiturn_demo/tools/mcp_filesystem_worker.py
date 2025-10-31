@@ -377,7 +377,7 @@ class MCPFilesystemClientWorker(ToolWorker):
                 "mount_dir": f"/projects/{request.session_id}",
             },
         )
-        result = await self._handle_request(request_work)
+        result = await self._process_mcp_request(request_work)
         response = ToolChannelResponse(
             success=True,
             result=result.result,
@@ -413,29 +413,6 @@ class MCPFilesystemClientWorker(ToolWorker):
                 if "QueueEmpty" not in str(e):
                     self.logger.error(f"Error processing request: {e}")
                 await asyncio.sleep(0.1)
-
-    async def _handle_request(self, request: Any) -> MCPResponse:
-        """Handle different types of MCP requests."""
-        try:
-            if isinstance(request, MCPRequest):
-                # Direct MCP request
-                return await self._process_mcp_request(request)
-            elif isinstance(request, dict):
-                # Dictionary request - convert to MCPRequest
-                mcp_request = self._dict_to_mcp_request(request)
-                return await self._process_mcp_request(mcp_request)
-            else:
-                return MCPResponse(
-                    request_id=str(uuid.uuid4()),
-                    success=False,
-                    error_message=f"Unsupported request type: {type(request)}",
-                )
-
-        except Exception as e:
-            self.logger.error(f"Error handling request: {e}")
-            return MCPResponse(
-                request_id=str(uuid.uuid4()), success=False, error_message=str(e)
-            )
 
     async def _cleanup_all_sessions(self):
         """Async helper to cleanup all sessions using gather."""
