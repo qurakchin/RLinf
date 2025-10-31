@@ -95,6 +95,7 @@ class ToolAgentLoopWorker(AgentLoopWorker):
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         trace_prints = []
+        response_mask = []
         # 5 is a magic number in this demo.
         for _ in range(5):
             # Generate response from LLM
@@ -112,6 +113,7 @@ class ToolAgentLoopWorker(AgentLoopWorker):
             response_text = self.tokenizer.decode(response_ids)
 
             prompt_ids += response_ids
+            response_mask += [1] * len(response_ids)  # 1 for LLM generated tokens
 
             # Extract tool calls from response
             _, tool_requests = await self.extract_tool_calls(response_text)
@@ -135,6 +137,7 @@ class ToolAgentLoopWorker(AgentLoopWorker):
                 tokenize=True,
             )
             prompt_ids += tool_response_ids
+            response_mask += [0] * len(tool_response_ids)  # 0 for tool response tokens
             if self.print_outputs:
                 # add anything you want to print
                 trace_prints.append({"generate": response_text, "tool_resp": tool_messages})
@@ -146,5 +149,6 @@ class ToolAgentLoopWorker(AgentLoopWorker):
             prompt_ids=orig_prompt_ids,
             prompt_text=self.tokenizer.decode(orig_prompt_ids),
             response_ids=response_ids,
+            response_mask=response_mask,
             trace_prints=trace_prints,
         )
