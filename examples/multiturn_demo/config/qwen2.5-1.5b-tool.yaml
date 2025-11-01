@@ -35,7 +35,7 @@ runner:
   max_tokens_per_mbs: 7096
 
   resume_dir: null
-  experiment_name: multiturn_demo-grpo-1.5b
+  experiment_name: multiturn_demo-grpo-1.5b-fixlossmask
   output_dir: /path/to/logs
 
 algorithm:
@@ -81,6 +81,7 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
+    stop_token_ids: [151666, 151643, 151645]
 
 inference:
   model_arch: ${rollout.model_arch}
