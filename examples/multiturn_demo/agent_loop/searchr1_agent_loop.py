@@ -149,7 +149,7 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
                 trace_prints.append({"generate": response_text, "tool_resp": tool_messages})
 
         # Separate prompt and response
-        response_ids = prompt_ids[-len(orig_prompt_ids) :]
+        response_ids = prompt_ids[len(orig_prompt_ids) :]
 
         return AgentLoopOutput(
             prompt_ids=orig_prompt_ids,
