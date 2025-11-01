@@ -27,7 +27,7 @@ from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.utils.runner_utils import check_progress
 from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-from rlinf.workers.agent_loop.searchr1_agent_loop import Searchr1ToolAgentLoopWorker
+from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
 from rlinf.workers.agent.tool_worker import ToolChannelInfo, ToolWorker, ToolWorkerInfo
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
 
@@ -53,7 +53,7 @@ class Searchr1ToolAgentRunner(ReasoningRunner):
         inference: Optional[MegatronInference],
         actor: MegatronActor,
         reward: RewardWorker,
-        agent_loop: Searchr1ToolAgentLoopWorker,
+        agent_loop: ToolAgentLoopWorker,
         tool_workers: dict[ToolWorker, ToolWorkerInfo] = {},
     ):
         super().__init__(

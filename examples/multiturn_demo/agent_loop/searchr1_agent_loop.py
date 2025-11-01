@@ -16,6 +16,7 @@ import asyncio
 import copy
 import json
 import random
+import re
 from uuid import uuid4
 
 from omegaconf import DictConfig
@@ -40,6 +41,9 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         placement: ModelParallelComponentPlacement,
     ):
         super().__init__(cfg, placement)
+        self.tool_call_start_token: str = "<search>"
+        self.tool_call_end_token: str = "</search>"
+        self.tool_call_regex = re.compile(r"<search>(.*?)</search>", re.DOTALL)
 
     async def state_less_tool_call_with_channel(
         self,
