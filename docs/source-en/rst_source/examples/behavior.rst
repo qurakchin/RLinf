@@ -1,5 +1,5 @@
-Reinforcement Learning on Behavior Simulator
-============================================
+RL with Behavior Simulator
+==========================
 
 This example provides a complete guide to fine-tuning the 
 Behavior algorithms with reinforcement learning in the `Behavior <https://behavior.stanford.edu/index.html>`_ environment
@@ -111,6 +111,7 @@ Assets and Datasets
 .. code:: bash
 
    export ISAAC_PATH=/path/to/isaac-sim
+   mkdir -p $ISAAC_PATH && cd $ISAAC_PATH
    curl https://download.isaacsim.omniverse.nvidia.com/isaac-sim-standalone-4.5.0-linux-x86_64.zip -o isaac-sim.zip
    unzip isaac-sim.zip && rm isaac-sim.zip
 
@@ -125,6 +126,7 @@ Assets and Datasets
    # Change to the directory you wish to put the assets and datasets
    # Beware, the datasets occupy more than 30GB of space
    export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
+   mkdir -p $OMNIGIBSON_DATA_PATH
 
    # Make sure you are inside the correct Python virtual environment (venv) before running below commands
    # For our Docker image, you need to switch to the `openvla-oft` venv via `source switch_env openvla-oft`
