@@ -16,7 +16,7 @@ import asyncio
 import queue
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, overload
+from typing import Any, Callable, Optional, overload
 
 import ray.actor
 import torch.distributed as dist
@@ -166,7 +166,7 @@ class AsyncCollWork(AsyncWork):
 
     def __init__(
         self,
-        works: List[dist.Work],
+        works: list[dist.Work],
     ):
         """Initialize the AsyncCollWork with a list of dist.Work objects.
 
@@ -175,7 +175,7 @@ class AsyncCollWork(AsyncWork):
 
         """
         super().__init__()
-        if not isinstance(works, List):
+        if not isinstance(works, list):
             works = [works]
         self._works = works
         self._next_work = None
@@ -247,7 +247,7 @@ class AsyncChannelWork(AsyncWork):
     # Operation queues used to communicate with the operation processing thread
     async_op_queue: queue.Queue["AsyncChannelWork"] = queue.Queue()
     # Operation queues for each channel-key combination
-    channel_op_queue_map: Dict[str, asyncio.Queue] = {}
+    channel_op_queue_map: dict[str, asyncio.Queue] = {}
     # Global thread lock
     lock: threading.Lock = None
     # Channel operation processing thread
@@ -368,7 +368,7 @@ class AsyncChannelWork(AsyncWork):
 class AsyncChannelCommWork(AsyncWork):
     """Asynchronous work for channel operations."""
 
-    channel_data_store: Dict[int, Future] = {}
+    channel_data_store: dict[int, Future] = {}
     store_lock = threading.Lock()  # Protect store access
 
     def __init__(self, async_comm_work: AsyncWork, query_id: int):

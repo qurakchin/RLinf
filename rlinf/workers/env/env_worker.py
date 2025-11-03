@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from collections import defaultdict
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import numpy as np
 import torch
@@ -208,7 +208,7 @@ class EnvWorker(Worker):
 
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
-    ) -> Tuple[EnvOutput, Dict[str, Any]]:
+    ) -> tuple[EnvOutput, dict[str, Any]]:
         """
         This function is used to interact with the environment.
         """
@@ -255,7 +255,7 @@ class EnvWorker(Worker):
 
     def env_evaluate_step(
         self, raw_actions: torch.Tensor, stage_id: int
-    ) -> Tuple[EnvOutput, Dict[str, Any]]:
+    ) -> tuple[EnvOutput, dict[str, Any]]:
         """
         This function is used to evaluate the environment.
         """

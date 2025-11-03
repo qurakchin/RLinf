@@ -16,7 +16,7 @@ import asyncio
 import io
 import os
 from functools import partial
-from typing import AsyncGenerator, List, Optional, Union
+from typing import AsyncGenerator, Optional, Union
 
 import requests
 from omegaconf import DictConfig
@@ -108,8 +108,8 @@ class VLLMWorker(Worker):
         return sampling_params
 
     def _process_image_data(
-        self, image_data: Optional[List[Union[bytes, str]]]
-    ) -> Optional[List[Image]]:
+        self, image_data: Optional[list[Union[bytes, str]]]
+    ) -> Optional[list[Image]]:
         """
         Process the batch image data which can be bytes or image paths.
 
@@ -186,13 +186,13 @@ class VLLMWorker(Worker):
 
     async def generate(
         self,
-        input_ids: Union[List[List[int]], List[int]],
+        input_ids: Union[list[list[int]], list[int]],
         sampling_params: SamplingParams,
-        prompt_texts: Optional[Union[List[str], str]] = None,
+        prompt_texts: Optional[Union[list[str], str]] = None,
         image_data: Optional[
-            Union[List[List[Union[bytes, str]]], List[Union[bytes, str]]]
+            Union[list[list[Union[bytes, str]]], list[Union[bytes, str]]]
         ] = None,
-    ) -> List[RequestOutput]:
+    ) -> list[RequestOutput]:
         """
         Do Generate Task using the vllm async engine.
 
@@ -210,7 +210,7 @@ class VLLMWorker(Worker):
             List[RequestOutput]: A list of RequestOutput from vllm engine.
         """
 
-        def check_input_ids() -> List[List[int]]:
+        def check_input_ids() -> list[list[int]]:
             assert isinstance(input_ids, list), (
                 "input_ids should be a list or list of list of int."
             )
@@ -220,7 +220,7 @@ class VLLMWorker(Worker):
             else:
                 return input_ids
 
-        def check_prompt_text() -> Optional[List[str]]:
+        def check_prompt_text() -> Optional[list[str]]:
             if prompt_texts is None:
                 return None
             assert isinstance(prompt_texts, list) or isinstance(prompt_texts, str), (
@@ -232,7 +232,7 @@ class VLLMWorker(Worker):
                 assert len(prompt_texts) > 0, "prompt_text should not be empty."
                 return prompt_texts
 
-        def check_image_data() -> Optional[List[List[Image.Image]]]:
+        def check_image_data() -> Optional[list[list[Image.Image]]]:
             if image_data is None or not any(image_data):
                 return None
             assert isinstance(image_data, list), "image_data should be a list."
@@ -245,8 +245,8 @@ class VLLMWorker(Worker):
         prompt_texts = check_prompt_text()
         image_list = check_image_data()
 
-        inputs: List[PromptType] = []
-        outputs: List[RequestOutput] = []
+        inputs: list[PromptType] = []
+        outputs: list[RequestOutput] = []
         if prompt_texts is not None:
             for i, prompt_text in enumerate(prompt_texts):
                 if image_list is not None:
@@ -375,7 +375,7 @@ class VLLMWorker(Worker):
             seq_info: The SeqGroupInfo to process.
             output_channel: The output channel to send results to.
         """
-        vllm_results: List[RequestOutput] = await self.generate(
+        vllm_results: list[RequestOutput] = await self.generate(
             input_ids=seq_info.input_ids,
             image_data=seq_info.image_data,
             sampling_params=self._sampling_params,

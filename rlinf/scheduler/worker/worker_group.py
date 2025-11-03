@@ -18,7 +18,7 @@ import signal
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Generic, List, Optional, Type
+from typing import Generic, Optional
 
 import numpy as np
 import ray
@@ -38,7 +38,7 @@ from .worker import Worker, WorkerAddress, WorkerClsType
 class WorkerGroup(Generic[WorkerClsType]):
     """The class that enables a worker to become a group of workers that can be executed collectively."""
 
-    def __init__(self, worker_cls: Type[Worker], args, kwargs):
+    def __init__(self, worker_cls: type[Worker], args, kwargs):
         """Initialize the WorkerGroup with a worker class. Used as a decorator to create a worker group.
 
         Args:
@@ -75,7 +75,7 @@ class WorkerGroup(Generic[WorkerClsType]):
         return self._worker_group_name
 
     @property
-    def worker_info_list(self) -> List[WorkerInfo]:
+    def worker_info_list(self) -> list[WorkerInfo]:
         """Get the list of workers in the group."""
         return self._workers
 
@@ -86,7 +86,7 @@ class WorkerGroup(Generic[WorkerClsType]):
         name: Optional[str] = None,
         isolate_gpu: bool = True,
         catch_system_failure: Optional[bool] = None,
-    ) -> "Type[WorkerGroup | WorkerClsType]":
+    ) -> "type[WorkerGroup | WorkerClsType]":
         """Create a worker group with the specified cluster and options.
 
         Args:
@@ -367,7 +367,7 @@ class WorkerGroupFuncResult:
     def __init__(
         self,
         worker_group: WorkerGroup,
-        results: List[ray.remote_function.RemoteFunction],
+        results: list[ray.remote_function.RemoteFunction],
         func_name: str,
         cls_name: str,
     ):

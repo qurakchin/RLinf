@@ -12,15 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import numpy as np
 import torch
 
 
 def to_tensor(
-    array: Union[Dict, torch.Tensor, np.ndarray, List, Any], device: str = "cpu"
-) -> Union[Dict, torch.Tensor]:
+    array: Union[dict, torch.Tensor, np.ndarray, list, Any], device: str = "cpu"
+) -> Union[dict, torch.Tensor]:
     """
     Copied from ManiSkill!
     Maps any given sequence to a torch tensor on the CPU/GPU. If physx gpu is not enabled then we use CPU, otherwise GPU, unless specified
@@ -52,8 +52,8 @@ def to_tensor(
 
 
 def list_of_dict_to_dict_of_list(
-    list_of_dict: List[Dict[str, Any]],
-) -> Dict[str, List[Any]]:
+    list_of_dict: list[dict[str, Any]],
+) -> dict[str, list[Any]]:
     """
     Convert a list of dictionaries to a dictionary of lists.
 

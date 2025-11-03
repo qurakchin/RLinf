@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -118,7 +118,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
         return multimodal_embeddings, multimodal_attention_mask
 
-    def _get_action_stats(self) -> Dict[str, Any]:
+    def _get_action_stats(self) -> dict[str, Any]:
         """Get all the logged statistics for the given dataset."""
         unnorm_key = self._check_unnorm_key(self.norm_stats, self.unnorm_key)
         return self.norm_stats[unnorm_key]["action"]
@@ -204,7 +204,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         calulate_logprobs=True,
         calulate_values=True,
         **kwargs,
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         do_sample = kwargs.pop("do_sample")
 
         if env_obs is not None:

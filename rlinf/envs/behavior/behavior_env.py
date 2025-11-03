@@ -14,7 +14,6 @@
 
 import json
 import os
-from typing import Tuple
 
 import cv2
 import gymnasium as gym
@@ -153,7 +152,7 @@ class BehaviorEnv(gym.Env):
 
     def step(
         self, actions=None
-    ) -> Tuple[dict, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
+    ) -> tuple[dict, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         if actions is None:
             assert self._is_start, "Actions must be provided after the first reset."
             obs, infos = self.reset()
@@ -241,14 +240,14 @@ class BehaviorEnv(gym.Env):
         self._is_start = value
 
     @property
-    def video_writer(self) -> Tuple[Container, Stream]:
+    def video_writer(self) -> tuple[Container, Stream]:
         """
         Returns the video writer for the current evaluation step.
         """
         return self._video_writer
 
     @video_writer.setter
-    def video_writer(self, video_writer: Tuple[Container, Stream]) -> None:
+    def video_writer(self, video_writer: tuple[Container, Stream]) -> None:
         if self._video_writer is not None:
             (container, stream) = self._video_writer
             # Flush any remaining packets

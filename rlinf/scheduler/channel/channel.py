@@ -15,7 +15,7 @@
 import asyncio
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import ray
 import ray.actor
@@ -133,7 +133,7 @@ class Channel:
 
     """
 
-    local_channel_map: Dict[int, "LocalChannel"] = {}
+    local_channel_map: dict[int, "LocalChannel"] = {}
 
     @classmethod
     def create(
@@ -506,7 +506,7 @@ class Channel:
         target_weight: int = 0,
         key: Any = DEFAULT_KEY,
         async_op: bool = False,
-    ) -> AsyncWork | List[Any]:
+    ) -> AsyncWork | list[Any]:
         """Get a batch of items from the channel queue based on the set batch weight.
 
         It will try to get items until the total weight of the items is about to (i.e., the next item will) exceed the set batch weight.
@@ -579,7 +579,7 @@ class Channel:
         items = async_work.wait()
         return str(items)
 
-    def __setstate__(self, state_dict: Dict[str, Any]):
+    def __setstate__(self, state_dict: dict[str, Any]):
         """Set current worker when the channel is unpickled."""
         self.__dict__.update(state_dict)
         # Set local channel

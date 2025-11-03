@@ -14,7 +14,7 @@
 
 import copy
 import os
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import gym
 import numpy as np
@@ -301,7 +301,7 @@ class LiberoEnv(gym.Env):
 
     def reset(
         self,
-        env_idx: Optional[Union[int, List[int], np.ndarray]] = None,
+        env_idx: Optional[Union[int, list[int], np.ndarray]] = None,
         reset_state_ids=None,
         options: Optional[dict] = {},
     ):
