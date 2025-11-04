@@ -204,19 +204,19 @@ class RolloutResult:
 
     num_sequence: int
     group_size: int
-    prompt_lengths: List[int]
-    prompt_ids: List[List[int]]
-    response_lengths: List[int]
-    response_ids: List[List[int]]
-    is_end: List[bool]
-    rewards: Optional[List[float] | torch.Tensor] = None
-    advantages: Optional[List[float] | torch.Tensor] = None
-    prompt_texts: Optional[List[str]] = None
-    response_texts: Optional[List[str]] = None
-    answers: Optional[List[str | dict]] = None
-    image_data: Optional[Union[List[List[bytes]], List[List[str]]]] = None
-    multi_modal_inputs: Optional[List[dict]] = None
-    response_mask: Optional[List[List[int]]] = None
+    prompt_lengths: list[int]
+    prompt_ids: list[list[int]]
+    response_lengths: list[int]
+    response_ids: list[list[int]]
+    is_end: list[bool]
+    rewards: Optional[list[float] | torch.Tensor] = None
+    advantages: Optional[list[float] | torch.Tensor] = None
+    prompt_texts: Optional[list[str]] = None
+    response_texts: Optional[list[str]] = None
+    answers: Optional[list[str | dict]] = None
+    image_data: Optional[Union[list[list[bytes]], list[list[str]]]] = None
+    multi_modal_inputs: Optional[list[dict]] = None
+    response_mask: Optional[list[list[int]]] = None
     # Inference
     # Logprobs returned by rollout engines
     rollout_logprobs: Optional[list[list[float]]] = None
