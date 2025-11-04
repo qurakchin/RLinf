@@ -1,4 +1,8 @@
 #!/bin/bash
+
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate
+
 set -ex
 
 WIKI2018_WORK_DIR=/inspire/hdd/global_user/liboxun-p-liboxun/data/data/ASearcher-Local-Knowledge

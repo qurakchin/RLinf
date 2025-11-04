@@ -7,7 +7,7 @@ hydra:
   output_subdir: null
 
 cluster:
-  num_nodes: 1
+  num_nodes: 16
   component_placement:
     # actor,rollout,reward: all
     rollout: 0-3
@@ -36,7 +36,7 @@ runner:
 
   resume_dir: null
   experiment_name: multiturn_demo-grpo-1.5b-fixlossmask
-  output_dir: /path/to/logs
+  output_dir: /inspire/hdd/global_user/liboxun-p-liboxun/liuweilin/RLinf_agent/RLinf/examples/multiturn_demo/logs
 
 algorithm:
   group_size: 4
@@ -104,7 +104,7 @@ agentloop:
 rollout:
   group_name: "RolloutGroup"
 
-  gpu_memory_utilization: 0.55
+  gpu_memory_utilization: 0.8
 
   model_dir: /inspire/hdd/global_user/liboxun-p-liboxun/data/Qwen2.5-3B-Instruct
   model_arch: qwen2.5
@@ -148,7 +148,7 @@ data:
   type: math
   max_prompt_length: 4096
   filter_prompt_by_length: True
-  rollout_batch_size: 32
+  rollout_batch_size: 512
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
