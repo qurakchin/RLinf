@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, Tuple
 
 import torch
 from omegaconf import DictConfig
@@ -44,7 +43,7 @@ class RewardWorker(Worker):
 
     def get_batch(
         self, channel: Channel
-    ) -> Tuple[Dict[str, torch.Tensor], RolloutResult]:
+    ) -> tuple[dict[str, torch.Tensor], RolloutResult]:
         result: RolloutResult = channel.get()
         batch = result.to_actor_batch(
             self.cfg.data.max_prompt_length,
@@ -105,5 +104,5 @@ class RewardWorker(Worker):
             .flatten()
         )
 
-    def compute_batch_rewards_with_model(self, batch: Dict[str, torch.Tensor]):
+    def compute_batch_rewards_with_model(self, batch: dict[str, torch.Tensor]):
         raise NotImplementedError("Reward model is not implemented yet.")

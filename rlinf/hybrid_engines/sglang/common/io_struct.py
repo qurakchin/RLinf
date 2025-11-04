@@ -13,40 +13,33 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+
+from sglang.srt.managers.schedule_batch import Req
+
+
+@dataclass
+class AbortGenerationInput:
+    pass
+
+
+@dataclass
+class AbortGenerationOutput:
+    waiting_reqs: list[Req]
+    running_reqs: list[Req]
 
 
 @dataclass
 class TaskMethodInput:
     method_name: str
-    args: List[Any] = field(default_factory=list)
-    kwargs: Dict[str, Any] = field(default_factory=dict)
+    args: list[Any] = field(default_factory=list)
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class TaskMethodOutput:
     method_name: str
     result: Optional[Any] = None
-
-
-@dataclass
-class OffloadReqInput:
-    pass
-
-
-@dataclass
-class OffloadReqOutput:
-    pass
-
-
-@dataclass
-class SyncWeightInput:
-    pass
-
-
-@dataclass
-class SyncWeightOutput:
-    pass
 
 
 @dataclass

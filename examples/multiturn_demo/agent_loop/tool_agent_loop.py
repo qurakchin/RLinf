@@ -103,9 +103,6 @@ class ToolAgentLoopWorker(AgentLoopWorker):
             max_total_len = int(self.cfg.actor.model.encoder_seq_length)
             max_resp_len = max(1, max_total_len - max_prompt_len)
 
-            if len(prompt_ids) > max_prompt_len:
-                prompt_ids = prompt_ids[-max_prompt_len:]
-
             generate_result = await self.generate(prompt_ids)
             response_ids = generate_result["output_ids"]
             if len(response_ids) > max_resp_len:
@@ -140,10 +137,12 @@ class ToolAgentLoopWorker(AgentLoopWorker):
             response_mask += [0] * len(tool_response_ids)  # 0 for tool response tokens
             if self.print_outputs:
                 # add anything you want to print
-                trace_prints.append({"generate": response_text, "tool_resp": tool_messages})
+                trace_prints.append(
+                    {"generate": response_text, "tool_resp": tool_messages}
+                )
 
         # Separate prompt and response
-        response_ids = prompt_ids[-len(orig_prompt_ids) :]
+        response_ids = prompt_ids[len(orig_prompt_ids):]
 
         return AgentLoopOutput(
             prompt_ids=orig_prompt_ids,
