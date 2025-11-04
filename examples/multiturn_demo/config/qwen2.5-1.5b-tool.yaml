@@ -7,14 +7,14 @@ hydra:
   output_subdir: null
 
 cluster:
-  num_nodes: 1
+  num_nodes: 16
   component_placement:
     # actor,rollout,reward: all
-    rollout: 0-3
-    inference: 4-5
-    actor: 6-7
-    reward: 0-3
-  agentloop_placement_num: 4
+    rollout: 0-7
+    inference: 8-11
+    actor: 12-15
+    reward: 0-7
+  agentloop_placement_num: 8
 
 runner:
   task_type: reasoning
@@ -37,7 +37,7 @@ runner:
 
   resume_dir: null
   experiment_name: multiturn_demo-grpo-1.5b-fixlossmask
-  output_dir: /path/to/logs
+  output_dir: /inspire/hdd/global_user/liboxun-p-liboxun/liuweilin/RLinf_agent/RLinf/examples/multiturn_demo/logs
 
 algorithm:
   group_size: 4
@@ -106,7 +106,7 @@ inference:
 rollout:
   group_name: "RolloutGroup"
 
-  gpu_memory_utilization: 0.55
+  gpu_memory_utilization: 0.8
 
   model_dir: /inspire/hdd/global_user/liboxun-p-liboxun/data/Qwen2.5-3B-Instruct
   model_arch: qwen2.5
@@ -149,7 +149,7 @@ data:
   type: math
   max_prompt_length: 4096
   filter_prompt_by_length: True
-  rollout_batch_size: 32
+  rollout_batch_size: 512
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
@@ -162,9 +162,9 @@ data:
 # Tools configuration for AgentLoop
 tools:
   mcp_file_system: null
-  maxturn: 2
+  maxturn: 10
   search:
-    server_addr: "10.247.123.63:8000"
+    server_addr: 10.253.138.9:8000
     topk: 10
     stop_token: "</search>"
 
