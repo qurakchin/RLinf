@@ -18,7 +18,6 @@ import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
-from rlinf.config import torch_dtype_from_precision
 from rlinf.data.io_struct import EmbodiedRolloutResult
 from rlinf.models import get_model, get_vla_model_config_and_processor
 from rlinf.scheduler import Cluster, Worker
@@ -62,9 +61,6 @@ class MultiStepRolloutWorker(Worker):
             self.hf_model.setup_config_and_processor(
                 model_config, self.cfg, input_processor
             )
-
-        rollout_dtype = torch_dtype_from_precision(self.cfg.rollout.precision)
-        self.hf_model = self.hf_model.to(dtype=rollout_dtype)
 
         self.hf_model.eval()
 
