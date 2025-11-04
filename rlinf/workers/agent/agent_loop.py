@@ -16,6 +16,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import uuid4
+import copy
 
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
@@ -123,7 +124,7 @@ class AgentLoopWorker(Worker):
         rollout_tasks = []
         # grpo group_size
         for _ in range(group_size):
-            task = asyncio.create_task(self.run_one_query(input_ids))
+            task = asyncio.create_task(self.run_one_query(copy.deepcopy(input_ids)))
             rollout_tasks.append(task)
 
         task_results = await asyncio.gather(*rollout_tasks)
