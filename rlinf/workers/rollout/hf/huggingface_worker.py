@@ -15,9 +15,10 @@
 import gc
 
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
+from rlinf.config import torch_dtype_from_precision
 from rlinf.data.io_struct import EmbodiedRolloutResult
 from rlinf.models import get_model, get_vla_model_config_and_processor
 from rlinf.scheduler import Cluster, Worker
@@ -43,7 +44,16 @@ class MultiStepRolloutWorker(Worker):
         self.channel = self.connect_channel(cfg.rollout.channel.name)
 
     def init_worker(self):
+        # NOTE:
+        # because pi series have some different dtype params, we can not call `to`
+        # after get_model, here we simply change actor.model.precision to rollout.precision
+        # and after get_model we change it back. THIS CODE SHOULD BE REFACTORED SOON.
+        with open_dict(self.cfg):
+            original_precision = self.cfg.actor.model.precision
+            self.cfg.actor.model.precision = self.cfg.rollout.precision
         self.hf_model = get_model(self.cfg.rollout.model_dir, self.cfg.actor.model)
+        with open_dict(self.cfg):
+            self.cfg.actor.model.precision = original_precision
 
         if self.cfg.actor.model.model_name in ["openvla", "openvla_oft"]:
             model_config, input_processor = get_vla_model_config_and_processor(
@@ -52,6 +62,9 @@ class MultiStepRolloutWorker(Worker):
             self.hf_model.setup_config_and_processor(
                 model_config, self.cfg, input_processor
             )
+
+        rollout_dtype = torch_dtype_from_precision(self.cfg.rollout.precision)
+        self.hf_model = self.hf_model.to(dtype=rollout_dtype)
 
         self.hf_model.eval()
 
@@ -190,6 +203,7 @@ class MultiStepRolloutWorker(Worker):
 
     def sync_model_from_actor(self):
         param_state_dict = self.recv(self._actor_group_name, src_rank=self._rank)
+
         self.hf_model.load_state_dict(param_state_dict)
         del param_state_dict
         gc.collect()
