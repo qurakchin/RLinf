@@ -758,15 +758,6 @@ class RolloutResult:
         response_lengths = torch.tensor(self.response_lengths)
         is_end = torch.tensor(self.is_end, dtype=torch.bool)
 
-        if self.response_mask is not None:
-            response_mask = batch_pad_to_fixed_len(
-                [torch.as_tensor(ids, dtype=torch.long) for ids in self.response_mask],
-                max_batch_len=max_response_len,
-                pad_token=pad_token,
-            )
-        else:
-            response_mask = None
-
         attention_mask, position_ids = self._get_attention_masks_and_position_ids(
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,

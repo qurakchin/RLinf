@@ -17,6 +17,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import uuid4
+import copy
 
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
