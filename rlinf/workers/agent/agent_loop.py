@@ -177,13 +177,17 @@ class AgentLoopWorker(Worker):
         response_mask = [r.response_mask[:max_resp_len] for r in task_results]
         is_end = [True for _ in task_results]
         answers = [answers] * len(task_results)
+        prompt_text = [r.prompt_text for r in task_results]
+        response_text = [r.response_text for r in task_results]
         return RolloutResult(
             num_sequence=len(task_results),
             group_size=len(task_results),
             prompt_lengths=prompt_lengths,
             prompt_ids=prompt_ids,
+            prompt_texts=prompt_text,
             response_lengths=response_lengths,
             response_ids=response_ids,
+            response_texts=response_text,
             is_end=is_end,
             answers=answers,
             response_mask=response_mask,
