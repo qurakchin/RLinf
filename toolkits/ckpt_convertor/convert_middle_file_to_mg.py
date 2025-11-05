@@ -135,19 +135,23 @@ class Save(Operation):
                 ep_rank = (model_rank - tpe_rank) // target_tpe
 
             # fix: for Megatron 0.11.0, patch the megatron load ckpt from huggingface
-            # if target_tpe * target_ep <= target_tp:
-            if target_ep > 1:
-                if target_pp == 1:
-                    key = f"mp_rank_{tp_rank:02d}_{ep_rank:03d}"
+            if target_ep <= target_tp:
+                if target_ep > 1:
+                    if target_pp == 1:
+                        key = f"mp_rank_{tp_rank:02d}_{ep_rank:03d}"
+                    else:
+                        key = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}_{ep_rank:03d}"
+                    yield key, tp_rank, tpe_rank
                 else:
-                    key = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}_{ep_rank:03d}"
-                yield key, tp_rank, tpe_rank
+                    if target_pp == 1:
+                        key = f"mp_rank_{tp_rank:02d}"
+                    else:
+                        key = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}"
+                    yield key, tp_rank, tpe_rank
             else:
-                if target_pp == 1:
-                    key = f"mp_rank_{tp_rank:02d}"
-                else:
-                    key = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}"
-                yield key, tp_rank, tpe_rank
+                assert False, (
+                    f"target_ep {target_ep} should be less than or equal to target_tp {target_tp}"
+                )
 
     def execute(self):
         value = self.src.execute()
