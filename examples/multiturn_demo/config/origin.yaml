@@ -7,14 +7,13 @@ hydra:
   output_subdir: null
 
 cluster:
-  num_nodes: 16
+  num_nodes: 1
   component_placement:
     # actor,rollout,reward: all
-    rollout: 0-7
-    inference: 8-11
-    actor: 12-15
-    reward: 0-7
-  agentloop_placement_num: 8
+    rollout: 0-3
+    inference: 4-5
+    actor: 6-7
+    reward: 0-3
 
 runner:
   task_type: reasoning
@@ -24,24 +23,25 @@ runner:
     experiment_name: ${runner.experiment_name}
     logger_backends: ["tensorboard"] # wandb, swanlab
 
-  max_epochs: 50
+  max_epochs: 5
   max_steps: -1
 
-  val_check_interval: 50
+  val_check_interval: 1
   save_interval: 50
 
-  seq_length: 7096
+  seq_length: 2048
 
   enable_dynamic_batch_size: False
-  max_tokens_per_mbs: 7096
+  max_tokens_per_mbs: 2048
 
   resume_dir: null
-  experiment_name: multiturn_demo-grpo-1.5b-fixlossmask
-  output_dir: /inspire/hdd/global_user/liboxun-p-liboxun/liuweilin/RLinf_agent/RLinf/examples/multiturn_demo/logs
+  experiment_name: multiturn_demo-grpo-1.5b
+  output_dir: /path/to/logs
 
 algorithm:
   group_size: 4
-  n_minibatches: 1
+
+  n_minibatches: 4
   training_batch_size_per_gpu: 1 # micro batch size
   rollout_batch_size_per_gpu: null # If set to null, rollout_batch_size will be evenly divided across all inference instances. You can reduce this parameter if inference consumes too much GPU memory.
 
@@ -82,17 +82,6 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
-    stop_token_ids: [151666, 151643, 151645]
-
-agentloop:
-  group_name: "AgentLoopGroup"
-  max_user_turns: 3
-  max_assistant_turns: 2
-  max_parallel_calls: 2
-  max_tool_response_length: 500
-  tool_response_truncate_side: "right"
-  response_length: 3000
-  print_outputs: False
 
 inference:
   model_arch: ${rollout.model_arch}
@@ -103,12 +92,22 @@ inference:
     pipeline_model_parallel_size: 1
     sequence_parallel: False
 
+agentloop:
+  group_name: "AgentLoopGroup"
+  max_user_turns: 3
+  max_assistant_turns: 3
+  max_parallel_calls: 2
+  max_tool_response_length: 500
+  tool_response_truncate_side: "right"
+  response_length: 2048
+  print_outputs: True # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
+
 rollout:
   group_name: "RolloutGroup"
 
-  gpu_memory_utilization: 0.8
+  gpu_memory_utilization: 0.55
 
-  model_dir: /inspire/hdd/global_user/liboxun-p-liboxun/data/Qwen2.5-3B-Instruct
+  model_dir: /path/to/model/Qwen2.5-1.5B-Instruct
   model_arch: qwen2.5
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
@@ -147,26 +146,23 @@ rollout:
 
 data:
   type: math
-  max_prompt_length: 4096
+  max_prompt_length: 1024
   filter_prompt_by_length: True
-  rollout_batch_size: 512
+  rollout_batch_size: 4
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
+  answer_key: solutions
+  apply_chat_template: False
   shuffle: True
   validation_shuffle: True
   seed: 1234
-  train_data_paths: ["/inspire/hdd/global_user/liboxun-p-liboxun/data/data/nq_hotpotqa_train/train.jsonl"]
-  val_data_paths: ["/inspire/hdd/global_user/liboxun-p-liboxun/data/data/nq_hotpotqa_train/train.jsonl"]
+  train_data_paths: ["/path/to/train.jsonl"]
+  val_data_paths: ["/path/to/val.jsonl"]
 
 # Tools configuration for AgentLoop
 tools:
   mcp_file_system: null
-  maxturn: 10
-  search:
-    server_addr: 10.253.138.9:8000
-    topk: 10
-    stop_token: "</search>"
 
 actor:
   group_name: "ActorGroup"
@@ -264,7 +260,7 @@ actor:
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor
-      model: qwen_2.5_3b
+      model: qwen_2.5_1.5b
       model_type: null # will be set by hf model's config if null
       hf_model_path: ${rollout.model_dir} # path to the hf model
       save_path: ${runner.output_dir}/${runner.experiment_name}/converted_ckpts/actor
@@ -293,8 +289,8 @@ actor:
 reward:
   group_name: "RewardGroup"
   use_reward_model: false
-  reward_type: 'searchr1'
-  reward_scale: 1.0
+  reward_type: 'math'
+  reward_scale: 5.0
 
   tokenizer:
     tokenizer_model: ${actor.tokenizer.tokenizer_model}
