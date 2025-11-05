@@ -61,6 +61,36 @@ explict_model:
     te_ln_linear_qkv: True
     te_ln_linear_mlp_fc1: True
     te_ln_add_extra_state: True # pay attention if precision is fp8 mixture
+  'Qwen3-4B':
+    model_type: qwen_3
+    num_attention_heads: 32
+    num_query_groups: 8
+    head_dim: 128
+    num_layers: 36
+    tie_word_embeddings: True
+    te_ln_linear_qkv: True
+    te_ln_linear_mlp_fc1: True
+    te_ln_add_extra_state: True # pay attention if precision is fp8 mixture
+  'Qwen3-8B':
+    model_type: qwen_3
+    num_attention_heads: 32
+    num_query_groups: 8
+    head_dim: 128
+    num_layers: 36
+    tie_word_embeddings: False
+    te_ln_linear_qkv: True
+    te_ln_linear_mlp_fc1: True
+    te_ln_add_extra_state: True # pay attention if precision is fp8 mixture
+  'Qwen3-14B':
+    model_type: qwen_3
+    num_attention_heads: 40
+    num_query_groups: 8
+    head_dim: 128
+    num_layers: 40
+    tie_word_embeddings: False
+    te_ln_linear_qkv: True
+    te_ln_linear_mlp_fc1: True
+    te_ln_add_extra_state: True # pay attention if precision is fp8 mixture
   'Qwen3-30B-A3B':
     model_type: qwen_3_moe
     num_attention_heads: 32

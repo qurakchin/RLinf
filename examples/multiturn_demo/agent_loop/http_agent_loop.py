@@ -150,12 +150,13 @@ class HttpAgentLoopWorker(AgentLoopWorker):
         return response_text, return_function_calls
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
-        prompt_ids = copy.deepcopy(prompt_ids)
+        max_prompt_len = int(self.cfg.data.get("max_prompt_length", 1024))
+        prompt_ids = prompt_ids[:max_prompt_len]
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         generate_context: GenerateContext = self.generate_context_create()
         trace_prints = []
         response_mask = []
-        max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+        max_total_len = int(self.cfg.actor.model.encoder_seq_length) - max_prompt_len + len(orig_prompt_ids)
         try:
             # 5 is a magic number in this demo.
             for _ in range(5):
@@ -171,6 +172,7 @@ class HttpAgentLoopWorker(AgentLoopWorker):
                     break
 
                 response_text = self.tokenizer.decode(response_ids)
+                print(f"{response_text=}")
                 # Extract tool calls from response
                 _, tool_requests = await self.extract_tool_calls(response_text)
 
