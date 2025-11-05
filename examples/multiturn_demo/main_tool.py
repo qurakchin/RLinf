@@ -57,11 +57,15 @@ def main(cfg) -> None:
 
     # AgentLoop group.
     agentloop_placement_strategy = NodePlacementStrategy(
-        [placement.node_id for placement in rollout_placement_strategy.get_placement(cluster)]
+        [
+            placement.node_id
+            for placement in rollout_placement_strategy.get_placement(cluster)
+        ]
     )
-    assert len(agentloop_placement_strategy._node_ids) == component_placement.rollout_dp_size, (
-        "agentloop worker num now should be equal to rollout dp size"
-    )
+    assert (
+        len(agentloop_placement_strategy._node_ids)
+        == component_placement.rollout_dp_size
+    ), "agentloop worker num now should be equal to rollout dp size"
     agentloop_group = ToolAgentLoopWorker.create_group(cfg, component_placement).launch(
         cluster,
         name=cfg.agentloop.group_name,

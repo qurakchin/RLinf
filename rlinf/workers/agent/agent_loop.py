@@ -13,10 +13,10 @@
 # limitations under the License.
 
 import asyncio
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import uuid4
-import copy
 
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
@@ -116,11 +116,15 @@ class AgentLoopWorker(Worker):
         To append correct tool response ids.
         For some agents use custom chat template and special tokens, you should use custom method to override it.
         """
-        wo_messages = [{'role': 'user', 'content': 'hi'}]
+        wo_messages = [{"role": "user", "content": "hi"}]
         wi_messages = [*wo_messages, *tool_messages]
-        wo_ids = self.tokenizer.apply_chat_template(wo_messages, add_generation_prompt=False, tokenize=True)
-        wi_ids = self.tokenizer.apply_chat_template(wi_messages, add_generation_prompt=True, tokenize=True)
-        return wi_ids[len(wo_ids):]
+        wo_ids = self.tokenizer.apply_chat_template(
+            wo_messages, add_generation_prompt=False, tokenize=True
+        )
+        wi_ids = self.tokenizer.apply_chat_template(
+            wi_messages, add_generation_prompt=True, tokenize=True
+        )
+        return wi_ids[len(wo_ids) :]
 
     async def run_agentloop_rollout_group(
         self,
@@ -190,8 +194,12 @@ class AgentLoopWorker(Worker):
         response_lengths = [len(o) for o in response_ids]
 
         # prompt_lengths and response_lengths should be clipped to max_prompt_len and max_resp_len to avoid mask/position size mismatch
-        assert max(prompt_lengths) <= max_prompt_len, "prompt_lengths should be clipped to max_prompt_len"
-        assert max(response_lengths) <= max_resp_len, "response_lengths should be clipped to max_resp_len"
+        assert max(prompt_lengths) <= max_prompt_len, (
+            "prompt_lengths should be clipped to max_prompt_len"
+        )
+        assert max(response_lengths) <= max_resp_len, (
+            "response_lengths should be clipped to max_resp_len"
+        )
 
         response_mask = [r.response_mask[:max_resp_len] for r in task_results]
         is_end = [True for _ in task_results]

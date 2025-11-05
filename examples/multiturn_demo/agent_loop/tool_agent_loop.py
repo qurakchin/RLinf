@@ -99,7 +99,7 @@ class ToolAgentLoopWorker(AgentLoopWorker):
         return response_text, return_function_calls
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
-        prompt_ids = prompt_ids[:self.max_prompt_len]
+        prompt_ids = prompt_ids[: self.max_prompt_len]
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         trace_prints = []
         response_mask = []
@@ -136,7 +136,9 @@ class ToolAgentLoopWorker(AgentLoopWorker):
 
             # Tokenize tool responses
             tool_response_ids = self.get_tool_response_ids(tool_messages)
-            max_tool_resp_len = self.max_resp_len - (len(prompt_ids) - len(orig_prompt_ids))
+            max_tool_resp_len = self.max_resp_len - (
+                len(prompt_ids) - len(orig_prompt_ids)
+            )
             if len(tool_response_ids) > max_tool_resp_len:
                 break
 
@@ -147,7 +149,7 @@ class ToolAgentLoopWorker(AgentLoopWorker):
                 trace_prints[-1]["tool_resp"] = tool_messages
 
         # Separate prompt and response
-        response_ids = prompt_ids[len(orig_prompt_ids):]
+        response_ids = prompt_ids[len(orig_prompt_ids) :]
 
         return AgentLoopOutput(
             prompt_ids=orig_prompt_ids,

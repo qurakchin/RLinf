@@ -152,7 +152,7 @@ class MCPAgentLoopWorker(AgentLoopWorker):
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
         generate_context: GenerateContext = self.generate_context_create()
-        prompt_ids = prompt_ids[:self.max_prompt_len]
+        prompt_ids = prompt_ids[: self.max_prompt_len]
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         trace_prints = []
         response_mask = []
@@ -161,7 +161,9 @@ class MCPAgentLoopWorker(AgentLoopWorker):
                 # Generate response from LLM
                 generate_result = await self.generate(prompt_ids)
                 response_ids = generate_result["output_ids"]
-                max_resp_len = self.max_resp_len - (len(prompt_ids) - len(orig_prompt_ids))
+                max_resp_len = self.max_resp_len - (
+                    len(prompt_ids) - len(orig_prompt_ids)
+                )
                 if len(response_ids) > max_resp_len:
                     response_ids = response_ids[:max_resp_len]
                 response_text = self.tokenizer.decode(response_ids)
@@ -190,18 +192,22 @@ class MCPAgentLoopWorker(AgentLoopWorker):
 
                 # Tokenize tool responses
                 tool_response_ids = self.get_tool_response_ids(tool_messages)
-                max_tool_resp_len = self.max_resp_len - (len(prompt_ids) - len(orig_prompt_ids))
+                max_tool_resp_len = self.max_resp_len - (
+                    len(prompt_ids) - len(orig_prompt_ids)
+                )
                 if len(tool_response_ids) > max_tool_resp_len:
                     break
 
                 prompt_ids += tool_response_ids
-                response_mask += [0] * len(tool_response_ids)  # 0 for tool response tokens
+                response_mask += [0] * len(
+                    tool_response_ids
+                )  # 0 for tool response tokens
                 if self.print_outputs:
                     # add anything you want to print
                     trace_prints[-1]["tool_resp"] = tool_messages
 
             # Separate prompt and response
-            response_ids = prompt_ids[len(orig_prompt_ids):]
+            response_ids = prompt_ids[len(orig_prompt_ids) :]
 
             return AgentLoopOutput(
                 prompt_ids=orig_prompt_ids,

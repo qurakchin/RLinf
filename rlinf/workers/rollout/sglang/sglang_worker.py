@@ -15,7 +15,7 @@
 import asyncio
 import copy
 import dataclasses
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import ReleaseMemoryOccupationReqInput
@@ -400,7 +400,7 @@ class SGLangWorker(Worker):
                 if self._use_auto_scheduler:
                     await self._scheduler.report_offloaded()
 
-    async def agenerate(self, prompt_ids: List[int], stop: Optional[List[str]] = None):
+    async def agenerate(self, prompt_ids: list[int], stop: Optional[list[str]] = None):
         sampling_params = self._sampling_params
         if stop is not None:
             sampling_params = copy.deepcopy(sampling_params)
@@ -423,7 +423,7 @@ class SGLangWorker(Worker):
         return result_dict
 
     async def rollout_serverless(self, input_channel: Channel, output_channel: Channel):
-        async def generate_and_send(channel_key: str, prompt_ids: List[int]):
+        async def generate_and_send(channel_key: str, prompt_ids: list[int]):
             result_dict = await self.agenerate(prompt_ids=prompt_ids)
             await output_channel.put(
                 result_dict, key=channel_key, async_op=True

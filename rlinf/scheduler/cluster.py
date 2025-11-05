@@ -28,7 +28,6 @@ from packaging import version as vs
 from ray._private import ray_logging
 from ray.actor import ActorHandle
 from ray.util.state import list_actors
-from ray._private.async_compat import has_async_methods
 
 from .accelerator import Accelerator, AcceleratorType
 

@@ -280,9 +280,13 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.megatron.load = cfg.get("checkpoint_load_path", None)
         use_hf_ckpt = cfg.megatron.get("use_hf_ckpt", False)
         if cfg.megatron.load is None:
-            assert use_hf_ckpt, "checkpoint_load_path is required if use_hf_ckpt is False"
+            assert use_hf_ckpt, (
+                "checkpoint_load_path is required if use_hf_ckpt is False"
+            )
         else:
-            assert not use_hf_ckpt, "checkpoint_load_path should be None if use_hf_ckpt is True"
+            assert not use_hf_ckpt, (
+                "checkpoint_load_path should be None if use_hf_ckpt is True"
+            )
         cfg.megatron.pretrained_checkpoint = cfg.get("pretrained_checkpoint", None)
         cfg.megatron.save = None
         cfg.megatron.micro_batch_size = cfg.get("micro_batch_size", 1)
