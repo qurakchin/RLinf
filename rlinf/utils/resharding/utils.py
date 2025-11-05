@@ -100,9 +100,9 @@ def tp_reshard_fn_qwen3_moe(model_state_dict, merge_factor, tp_group):
 
         if "self_attention.linear_proj.weight" in k:
             dim = 1
-            model_state_dict[k] = _gather_tp_group_tensor_and_reshard(
-                v, dim, merge_factor, tp_group
-            )
+        model_state_dict[k] = _gather_tp_group_tensor_and_reshard(
+            v, dim, merge_factor, tp_group
+        )
     return model_state_dict
 
 
