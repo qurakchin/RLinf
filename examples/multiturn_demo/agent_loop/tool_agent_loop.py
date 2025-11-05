@@ -106,7 +106,9 @@ class ToolAgentLoopWorker(AgentLoopWorker):
         for _ in range(self.max_turns):
             # Generate response from LLM
             max_resp_len = self.max_resp_len - (len(prompt_ids) - len(orig_prompt_ids))
-            generate_result = await self.generate(prompt_ids, sampling_params={"max_new_tokens": max_resp_len})
+            generate_result = await self.generate(
+                prompt_ids, sampling_params={"max_new_tokens": max_resp_len}
+            )
             response_ids = generate_result["output_ids"]
             if len(response_ids) > max_resp_len:
                 response_ids = response_ids[:max_resp_len]

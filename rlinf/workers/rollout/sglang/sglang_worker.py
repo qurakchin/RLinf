@@ -400,7 +400,13 @@ class SGLangWorker(Worker):
                 if self._use_auto_scheduler:
                     await self._scheduler.report_offloaded()
 
-    async def generate_and_send(self, output_channel: Channel, channel_key: str, prompt_ids: list[int], sampling_params: Optional[dict] = None):
+    async def generate_and_send(
+        self,
+        output_channel: Channel,
+        channel_key: str,
+        prompt_ids: list[int],
+        sampling_params: Optional[dict] = None,
+    ):
         final_sampling_params = self._sampling_params
         if sampling_params is not None and len(sampling_params) > 0:
             final_sampling_params = copy.deepcopy(self._sampling_params)
@@ -432,6 +438,6 @@ class SGLangWorker(Worker):
                     output_channel=output_channel,
                     channel_key=rollout_request["channel_key"],
                     prompt_ids=rollout_request["prompt_ids"],
-                    sampling_params=rollout_request.get('sampling_params', None),
+                    sampling_params=rollout_request.get("sampling_params", None),
                 )
             )

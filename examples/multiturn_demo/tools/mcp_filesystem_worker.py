@@ -397,7 +397,7 @@ class MCPFilesystemClientWorker(ToolWorker):
                     async_op=True
                 ).async_wait()
                 self.logger.info(
-                    "MCPFilesystemClientWorker._process_requests: got request: {request}"
+                    f"MCPFilesystemClientWorker._process_requests: got request: {request}"
                 )
                 request_type = request.request_type
                 if request_type == "session_start":

@@ -89,10 +89,17 @@ class AgentLoopWorker(Worker):
         self.tool_name_map = tool_name_map
         self.tool_worker_output_channel = tool_worker_output_channel
 
-    async def generate(self, prompt_ids: list[int], sampling_params: Optional[dict] = None):
+    async def generate(
+        self, prompt_ids: list[int], sampling_params: Optional[dict] = None
+    ):
         channel_key = uuid4().hex
         await self.generate_input_channel.put(
-            {"channel_key": channel_key, "prompt_ids": prompt_ids, "sampling_params": sampling_params}, async_op=True
+            {
+                "channel_key": channel_key,
+                "prompt_ids": prompt_ids,
+                "sampling_params": sampling_params,
+            },
+            async_op=True,
         ).async_wait()
         result = await self.generate_output_channel.get(
             channel_key, async_op=True
