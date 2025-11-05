@@ -15,7 +15,7 @@
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Tuple
+from typing import Any, Literal
 
 import jax
 import numpy as np
@@ -40,11 +40,12 @@ class OpenPi0Config(Pi0Config):
     noise_method: str = "flow_sde"  # flow_sde, flow_cps
     safe_get_logprob: bool = False
     joint_logprob: bool = False
+    double_layer: bool = False
     detach_critic_input: bool = False
     chunk_critic_input: bool = False
     add_value_head: bool = False
     noise_anneal: bool = False
-    noise_params: List = field(
+    noise_params: list = field(
         default_factory=lambda: [0.7, 0.3, 400]
     )  # noise_start, noise_end, noise_anneal_steps
     ignore_last: bool = False
@@ -81,7 +82,16 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         self.sample_actions = sample_actions_func
 
         # rl model init
-        proj_width = 1024
+        if self.config.value_after_vlm:
+            assert not self.config.joint_logprob, (
+                "joint logprob is not tested for value_after_vlm mode"
+            )
+            assert not (self.config.double_layer and self.config.joint_logprob), (
+                "double_layer and joint_logprob can not be set at the same time"
+            )
+            proj_width = 2048
+        else:
+            proj_width = 1024
         self.global_step = 0
         if self.config.add_value_head:
             self.value_head = ValueHead(
@@ -91,7 +101,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                 activation="relu",
                 bias_last=True,
             )
-
+        self.use_vlm_value = getattr(self.config, "value_after_vlm", False) and getattr(
+            self.config, "add_value_head", False
+        )
         if self.config.noise_method == "reinflow":
             self.reinflow_explore_noise_net = ExploreNoiseNet(
                 in_dim=proj_width,
@@ -182,7 +194,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         self,
         data: dict[str, torch.Tensor],
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         compute_values = kwargs.get("compute_values", False)
 
         chains = data["chains"]
@@ -262,7 +274,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
 
     def predict_action_batch(
         self, env_obs, mode: Literal["train", "eval"] = "train", compute_values=True
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         processed_obs = self.input_processor(env_obs)
         observation = _model.Observation.from_dict(processed_obs)
         outputs = self.sample_actions(
@@ -320,7 +332,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
         self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
 
-        _, past_key_values = self.paligemma_with_expert.forward(
+        (prefix_output, _), past_key_values = self.paligemma_with_expert.forward(
             attention_mask=prefix_att_2d_masks_4d,
             position_ids=prefix_position_ids,
             past_key_values=None,
@@ -334,6 +346,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         log_probs = []
         values = []
         chains.append(x_t)
+
+        # add value based on the vlm for pi05, expert for pi0
+        if self.use_vlm_value:
+            values_vlm = self.get_value_from_vlm(prefix_output)
         if self.config.joint_logprob:
             initial_log_prob = self.get_logprob_norm(
                 x_t, torch.zeros_like(noise), torch.ones_like(noise)
@@ -406,7 +422,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         log_probs = torch.stack(log_probs, dim=1)[
             :, :, : self.config.action_chunk, : self.config.action_env_dim
         ]
-        values = torch.stack(values, dim=1).mean(dim=-1, keepdim=True)
+        if self.use_vlm_value:
+            values = values_vlm[:, None]
+        else:
+            values = torch.stack(values, dim=1).mean(dim=-1, keepdim=True)
         return {
             "actions": x_0,
             "chains": chains,
@@ -464,7 +483,11 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         )
         v_t = self.action_out_proj(suffix_out)  # [bs,n_action_steps,max_action_dim]
         # value prediction
-        if self.config.add_value_head and compute_values:
+        if (
+            self.config.add_value_head
+            and compute_values
+            and not self.config.value_after_vlm
+        ):
             # use chunk critic input
             if self.config.chunk_critic_input:
                 suffix_out_value = torch.mean(
@@ -606,7 +629,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
 
         # Compute image and language key value cache
-        _, past_key_values = self.paligemma_with_expert.forward(
+        [prefix_output, _], past_key_values = self.paligemma_with_expert.forward(
             attention_mask=prefix_att_2d_masks_4d,
             position_ids=prefix_position_ids,
             past_key_values=None,
@@ -640,10 +663,35 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             )
             log_probs = self.get_logprob_norm(chains_next, x_t_mean, x_t_std)
             chains_log_probs.append(log_probs)
-            chains_values.append(value_t)
+            if self.use_vlm_value:
+                chains_values.append(self.get_value_from_vlm(prefix_output))
+            else:
+                chains_values.append(value_t)
         chains_log_probs = torch.stack(chains_log_probs, dim=1)
         chains_values = torch.stack(chains_values, dim=1)
         return chains_log_probs, chains_values
+
+    def get_value_from_vlm(self, prefix_output):
+        # prefix_output:
+        # pi05: [bs, (256 * 3 + 200) = 968, 2048]
+        # pi0: [bs, (256 * 3 + 48) = 816, 1024]
+        if self.config.pi05:
+            lang_length = 200
+            all_length = 968
+        else:
+            lang_length = 48
+            all_length = 816
+        if self.config.value_vlm_mode == "mean_token":
+            prefix_mask = [True] * 512 + [False] * 256 + [True] * lang_length
+        elif self.config.value_vlm_mode == "last_token":
+            prefix_mask = [False] * (all_length - 1) + [True] * 1
+        elif self.config.value_vlm_mode == "first_token":
+            prefix_mask = [True] * 1 + [False] * (all_length - 1)
+        prefix_out_value = prefix_output[:, prefix_mask, :]
+        prefix_out_value = prefix_out_value.mean(dim=1, keepdim=False)
+        prefix_out_value = prefix_out_value.to(dtype=torch.float32)
+        values_vlm = self.value_head(prefix_out_value)[:, 0]
+        return values_vlm
 
     def freeze_vlm(self):
         if self.config.train_expert_only:

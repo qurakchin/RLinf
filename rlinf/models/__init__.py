@@ -185,8 +185,10 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
         )
 
         # config
-        # todo chenk: merge openpi config with the rl config
-        actor_train_config = _config.get_config("pi0_libero")
+        if getattr(cfg.openpi, "pi05", False):
+            actor_train_config = _config.get_config("pi05_libero")
+        else:
+            actor_train_config = _config.get_config("pi0_libero")
         actor_model_config = actor_train_config.model
         actor_model_config = OpenPi0Config(**actor_model_config.__dict__)
         override_config_kwargs = cfg.openpi
@@ -262,7 +264,8 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
                     "fc2",  # vision
                     "q",
                     "kv",
-                    "fc3",  # project
+                    "fc3",
+                    "out_proj",  # project
                     "q_proj",
                     "k_proj",
                     "v_proj",
@@ -274,7 +277,14 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
                 ],
                 init_lora_weights="gaussian",
             )
-            model = get_peft_model(model, lora_config)
+            if cfg.model_name == "openpi":
+                module_to_lora = model.paligemma_with_expert.paligemma
+                module_to_lora = get_peft_model(module_to_lora, lora_config)
+                tag_vlm_subtree(model, False)
+                tag_vlm_subtree(module_to_lora, True)
+                model.paligemma_with_expert.paligemma = module_to_lora
+            else:
+                model = get_peft_model(model, lora_config)
         else:
             model = PeftModel.from_pretrained(model, cfg.lora_path, is_trainable=True)
 
@@ -286,3 +296,8 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
         model_dict = torch.load(cfg.ckpt_path)
         model.load_state_dict(model_dict)
     return model
+
+
+def tag_vlm_subtree(model, is_vlm: bool):
+    for n, m in model.named_modules():
+        setattr(m, "_to_lora", is_vlm)
