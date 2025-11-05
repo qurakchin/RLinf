@@ -93,7 +93,7 @@ class SGLangWorker(Worker):
         self.async_meta_stats_collector = MetaInfoStatsCollector(async_stats_file)
         self.async_batch_counter = 0
 
-    def _collect_stats(self, engine_results: List[Dict]):
+    def _collect_stats(self, engine_results: list[dict]):
         self.async_meta_stats_collector.collect_batch_stats(
             engine_results, self.async_batch_counter
         )
@@ -190,11 +190,11 @@ class SGLangWorker(Worker):
 
     async def async_generate(
         self,
-        prompt: List[str] | str | None = None,
-        sampling_params: List[Dict] | Dict | None = None,
-        input_ids: List[List[int]] | List[int] | None = None,
-        image_data: List | None = None,
-        return_logprob: List[bool] | bool | None = False,
+        prompt: list[str] | str | None = None,
+        sampling_params: list[dict] | dict | None = None,
+        input_ids: list[list[int]] | list[int] | None = None,
+        image_data: list | None = None,
+        return_logprob: list[bool] | bool | None = False,
         request_info: Any | None = None,
     ):
         """
@@ -287,13 +287,13 @@ class SGLangWorker(Worker):
             # Have aborted sequences (e.g., migrated from other engines)
             # Continue generation for the aborted group
             idx_aborted = seq_group_info.idx_aborted.copy()
-            seq_idx_list: List[int] = []
+            seq_idx_list: list[int] = []
             seq_group_info.idx_aborted.clear()
-            input_batch: List[List[int]] = []
-            sampling_params_list: List[Dict] = []
-            image_data_list: List = []
+            input_batch: list[list[int]] = []
+            sampling_params_list: list[dict] = []
+            image_data_list: list = []
             for idx in idx_aborted:
-                generated_ids: List[int] = seq_group_info.results[idx]["output_ids"]
+                generated_ids: list[int] = seq_group_info.results[idx]["output_ids"]
                 if len(generated_ids) >= self._sampling_params["max_new_tokens"]:
                     # avoid genererating for sequences that have already meet their max_new_tokens
                     self.log_warning(
@@ -364,7 +364,7 @@ class SGLangWorker(Worker):
             all_rollout_results = []
             while pending := self.status_manager.get_running_tasks():
                 done, pending = await asyncio.wait(pending, return_when=async_wait_type)
-                returned_seq_groups: List[SeqGroupInfo] = [
+                returned_seq_groups: list[SeqGroupInfo] = [
                     task.result() for task in done
                 ]
                 for group in returned_seq_groups:

@@ -15,7 +15,6 @@
 import gc
 import os
 from contextlib import nullcontext
-from typing import Dict, Tuple
 
 import numpy as np
 import torch
@@ -173,7 +172,7 @@ class FSDPActor(FSDPModelManager, Worker):
 
     def get_batch(
         self, channel: Channel
-    ) -> Tuple[Dict[str, torch.Tensor], RolloutResult]:
+    ) -> tuple[dict[str, torch.Tensor], RolloutResult]:
         result: RolloutResult = channel.get()
 
         batch = result.to_actor_batch(
@@ -201,7 +200,7 @@ class FSDPActor(FSDPModelManager, Worker):
                 self.load_fsdp_optimizer(self.device)
 
     @torch.no_grad()
-    def inference_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def inference_step(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         self.model.eval()
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
@@ -291,7 +290,7 @@ class FSDPActor(FSDPModelManager, Worker):
             f"Expected {self.total_batch_size_per_dp} sequences from channel, but got {recv_batch_size}"
         )
 
-    def run_training(self, input_channel: Channel) -> Tuple[Dict, list]:
+    def run_training(self, input_channel: Channel) -> tuple[dict, list]:
         # Get all batches for this DP
         batches = []
         recv_batch_size = 0
@@ -510,7 +509,7 @@ class FSDPActor(FSDPModelManager, Worker):
         torch.distributed.barrier()
 
     # Advantages and returns
-    def compute_advantages_and_returns(self, batch: Dict[str, torch.Tensor]):
+    def compute_advantages_and_returns(self, batch: dict[str, torch.Tensor]):
         """Compute the advantages and returns.
 
         Args:
