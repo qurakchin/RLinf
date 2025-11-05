@@ -132,7 +132,7 @@ class Scheduler(_Scheduler):
 
             for bucket in tqdm(
                 batch_weights,
-                disable=self.get_parent_rank() != 0 or self.tp_rank != 0,
+                disable=self._rlinf_worker.get_parent_rank() != 0 or self.tp_rank != 0,
                 desc="Load weights",
             ):
                 model.load_weights(bucket)
@@ -159,7 +159,7 @@ class Scheduler(_Scheduler):
 
             for bucket in tqdm(
                 batch_weights,
-                disable=self.get_parent_rank() != 0 or self.tp_rank != 0,
+                disable=self._rlinf_worker.get_parent_rank() != 0 or self.tp_rank != 0,
                 desc="Load weights",
             ):
                 model.load_weights(bucket)
@@ -175,10 +175,6 @@ class Scheduler(_Scheduler):
             src_rank=self.actor_weight_rank,
         )
 
-        state_dict = self.recv(
-            src_group_name=self._actor_group_name,
-            src_rank=self.actor_weight_rank,
-        )
         self.reload_hf_weight(state_dict)
 
         self.flush_cache()
