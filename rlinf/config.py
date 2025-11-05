@@ -225,6 +225,9 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         cfg.model.hidden_dropout = getattr(hf_config, "hidden_dropout", 0.0)
         cfg.model.add_qkv_bias = qkv_bias
         cfg.model.layernorm_epsilon = hf_config.rms_norm_eps
+        head_dim = getattr(hf_config, "head_dim", None)
+        if head_dim is not None:
+            cfg.model.kv_channels = head_dim
 
     return cfg
 
