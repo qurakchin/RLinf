@@ -18,8 +18,8 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from multiturn_demo.agent_loop.tool_agent_loop import ToolAgentLoopWorker
-from multiturn_demo.tools.fake_tool_worker import FakeToolWorker
+from rlinf.agents.multiturn_demo.tool_agent_loop import ToolAgentLoopWorker
+from rlinf.agents.multiturn_demo.fake_tool_worker import FakeToolWorker
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer

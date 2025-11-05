@@ -18,8 +18,8 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from multiturn_demo.agent_loop.mcp_agent_loop import MCPAgentLoopWorker
-from multiturn_demo.tools.mcp_filesystem_worker import MCPFilesystemClientWorker
+from rlinf.agents.multiturn_demo.mcp_agent_loop import MCPAgentLoopWorker
+from rlinf.agents.multiturn_demo.mcp_filesystem_worker import MCPFilesystemClientWorker
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
