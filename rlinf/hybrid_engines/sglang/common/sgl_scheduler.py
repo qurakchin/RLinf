@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import logging
+from typing import Any
 
 import torch
-from typing import Any, Dict
-from tqdm import tqdm
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import (
     ReleaseMemoryOccupationReqInput,
@@ -27,6 +26,7 @@ from sglang.srt.managers.scheduler import logger
 from sglang.srt.managers.scheduler import (
     run_scheduler_process as _run_scheduler_process,
 )
+from tqdm import tqdm
 
 from rlinf.scheduler import Worker, WorkerAddress
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
@@ -88,7 +88,7 @@ class Scheduler(_Scheduler):
         self.is_weight_offloaded = True
         return super().release_memory_occupation(recv_req)
 
-    def reload_hf_weight(self, state_dict: Dict[str, Any]):
+    def reload_hf_weight(self, state_dict: dict[str, Any]):
         # Batch load HF weights in sglang
 
         colocate = self.placement_mode == PlacementMode.COLLOCATED
@@ -167,7 +167,7 @@ class Scheduler(_Scheduler):
 
     def sync_hf_weight(self, recv_req: SyncHFWeightInput):
         use_cudagraph = not self.cfg.rollout.enforce_eager
-        
+
         assert use_cudagraph, "use_cudagraph must be True now."
 
         state_dict = self._rlinf_worker.recv(
