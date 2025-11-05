@@ -118,7 +118,7 @@ class TransformFunc:
 
     @staticmethod
     def split_expert_fc1(
-        linear_fc1: torch.Tensor, new_statedict: dict, weight_names: List[str], config
+        linear_fc1: torch.Tensor, new_statedict: dict, weight_names: list[str], config
     ) -> None:
         assert weight_names is not None and len(weight_names) == 2, (
             f"split_fc1 transform expects two weight names, got {weight_names}"
@@ -465,7 +465,7 @@ class Qwen2_5VLConvertor(BaseConvertor):
 
 
 class Qwen3_MoEConvertor(BaseConvertor):
-    def build_rules(self) -> List[ConvertorRule]:
+    def build_rules(self) -> list[ConvertorRule]:
         LID = r"(?P<i>\d+)"
         EID = r"(?P<ei>\d+)"
         WB = r"(?P<wb>weight|bias)"
