@@ -140,15 +140,9 @@ class Searchr1ToolAgentRunner(ReasoningRunner):
                         infer_handle = None
                         inference_channel = self.reward_channel
 
-                    # Advantages and returns
-                    adv_handle: Handle = self.actor.compute_advantages_and_returns(
-                        input_channel=inference_channel,
-                        output_channel=self.actor_channel,
-                    )
-
-                    # Actor training
+                    # Actor training, Advantages and returns
                     actor_handle: Handle = self.actor.run_training(
-                        input_channel=self.actor_channel,
+                        input_channel=inference_channel,
                     )
 
                     metrics = actor_handle.wait()
@@ -185,7 +179,6 @@ class Searchr1ToolAgentRunner(ReasoningRunner):
                 time_metrics["training"] = actor_handle.consume_duration()
                 time_metrics["rollout"] = rollout_handle.consume_duration()
                 time_metrics["reward"] = reward_handle.consume_duration()
-                time_metrics["advantage"] = adv_handle.consume_duration()
                 if infer_handle is not None:
                     # Inference time should be the min time across ranks, because different DP receive the rollout results differently
                     # But at the begin of the pp schedule, there is a timer barrier

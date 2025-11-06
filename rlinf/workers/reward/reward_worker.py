@@ -91,7 +91,7 @@ class RewardWorker(Worker):
         texts = rollout_result.response_texts
         if texts is None:
             texts = self.tokenizer.batch_decode(
-                rollout_result.response_ids, skip_special_tokens=True
+                rollout_result.response_ids, skip_special_tokens=False
             )
 
         kwargs = {}
