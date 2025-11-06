@@ -138,7 +138,7 @@ class Scheduler(_Scheduler):
                 weight_norm_dict_sync[name] = value.norm()
             diff_keys = []
             for k in weight_norm_dict_sync.keys():
-                if weight_norm_dict_sync[k] != self.weight_norm_dict[k]:
+                if not torch.allclose(weight_norm_dict_sync[k], self.weight_norm_dict[k], rtol=1e-3, atol=1e-4):
                     diff_keys.append(k)
 
             if len(diff_keys) != 0:
