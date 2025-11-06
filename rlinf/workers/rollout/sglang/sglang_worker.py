@@ -20,6 +20,7 @@ from typing import Any, Optional
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import ReleaseMemoryOccupationReqInput
 from sglang.srt.server_args import ServerArgs
+import torch
 from transformers import AutoTokenizer
 
 from rlinf.config import torch_dtype_from_precision
@@ -189,6 +190,15 @@ class SGLangWorker(Worker):
             )
             print("===============================", flush=True)
 
+    async def _validate_weight_at_first_sync(self):
+        if torch_dtype_from_precision(self._cfg.rollout.precision) != torch.bfloat16 or torch_dtype_from_precision(self._cfg.actor.model.precision) != torch.bfloat16:
+            self.log_warning(
+                "validate_weight should use same precision in rollout and actor and ckpt. default is bfloat16."
+            )
+        await self._engine.tokenizer_manager.save_norm_weights(
+            obj=io_struct.SaveNormWeightsInput()
+        )
+
     async def async_generate(
         self,
         prompt: list[str] | str | None = None,
@@ -222,7 +232,9 @@ class SGLangWorker(Worker):
             prompt=prompt,
             sampling_params=sampling_params,
             input_ids=input_ids,
-            image_data=image_data if any(image_data) else None,
+            image_data=image_data
+            if image_data is not None and any(image_data)
+            else None,
             return_logprob=return_logprob,
         )
         return result, request_info
@@ -242,6 +254,10 @@ class SGLangWorker(Worker):
         self.log_info(f"SGLang worker {self._rank} initialized.")
         if self._cfg.rollout.validate_weight:
             await self._validate_weight_at_first()
+        if getattr(
+            self._cfg.rollout, "validate_weight_first_sync", False
+        ):
+            await self._validate_weight_at_first_sync()
         if self._placement.is_collocated:
             await self.offload_engine()
         if self._use_auto_scheduler:

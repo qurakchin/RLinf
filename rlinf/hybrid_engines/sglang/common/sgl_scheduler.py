@@ -40,6 +40,8 @@ from .io_struct import (
     SyncHFWeightOutput,
     TaskMethodInput,
     TaskMethodOutput,
+    SaveNormWeightsInput,
+    SaveNormWeightsOutput,
 )
 
 logger.setLevel(logging.WARNING)
@@ -63,10 +65,12 @@ class Scheduler(_Scheduler):
                 (TaskMethodInput, self.run_task_method),
                 (SyncHFWeightInput, self.sync_hf_weight),
                 (AbortGenerationInput, self.abort_generation),
+                (SaveNormWeightsInput, self.save_norm_weights),
             ]
         )
 
         self.is_weight_offloaded = False
+        self.weight_norm_dict = None
 
     def cuda_info(self, text: str = ""):
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
@@ -125,6 +129,24 @@ class Scheduler(_Scheduler):
             self.is_weight_offloaded = False
 
         self.batch_load_hf_weight(state_dict)
+
+        if self.weight_norm_dict is not None:
+            # validate the weight norm dict between load model and first sync.
+            weight_norm_dict_sync = {}
+            model = self.tp_worker.worker.model_runner.model
+            for name, value in model.state_dict().items():
+                weight_norm_dict_sync[name] = value.norm()
+            diff_keys = []
+            for k in weight_norm_dict_sync.keys():
+                if weight_norm_dict_sync[k] != self.weight_norm_dict[k]:
+                    diff_keys.append(k)
+
+            if len(diff_keys) != 0:
+                raise RuntimeError(
+                    f"sglang: validate_weight failed in first sync. diff_keys = {diff_keys}"
+                )
+            self.weight_norm_dict = None
+
         self.flush_cache()
         return SyncHFWeightOutput()
 
@@ -154,6 +176,14 @@ class Scheduler(_Scheduler):
             waiting_reqs=waiting_reqs, running_reqs=running_reqs
         )
         return res
+
+    def save_norm_weights(self, recv_req: SaveNormWeightsInput):
+        model = self.tp_worker.worker.model_runner.model
+        weight_norm_dict = {}
+        for key, value in model.state_dict().items():
+            weight_norm_dict[key] = value.norm()
+        self.weight_norm_dict = weight_norm_dict
+        return SaveNormWeightsOutput() 
 
     def init_rlinf_worker(
         self,
