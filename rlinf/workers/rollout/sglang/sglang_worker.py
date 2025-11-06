@@ -221,7 +221,7 @@ class SGLangWorker(Worker):
             prompt=prompt,
             sampling_params=sampling_params,
             input_ids=input_ids,
-            image_data=image_data if any(image_data) else None,
+            image_data=image_data if image_data and any(image_data) else None,
             return_logprob=return_logprob,
         )
         return result, request_info
