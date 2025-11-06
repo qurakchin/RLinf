@@ -51,8 +51,13 @@ class HttpAgentLoopWorker(AgentLoopWorker):
     ):
         super().__init__(cfg, placement)
         self.tool_parser = HermesToolParser()
+        self.max_prompt_len = int(self.cfg.data.max_prompt_length)
+        max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+        assert max_total_len > self.max_prompt_len
+        self.max_resp_len = max(1, max_total_len - self.max_prompt_len)
 
-        self.tool_response_sys_prefix_len = len(self.tokenizer.apply_chat_template([{}], add_generation_prompt=False, tokenize=True))
+        # 5 is a magic number in this demo.
+        self.max_turns = self.cfg.agentloop.get("max_turns", 5)
 
     def generate_context_create(self) -> dict[str, Any]:
         return GenerateContext()
@@ -80,11 +85,9 @@ class HttpAgentLoopWorker(AgentLoopWorker):
                 ToolChannelRequest(session_id=session_id, request_type="session_start"),
                 async_op=True,
             ).async_wait()
-            self.log_debug("session_start put")
             response: ToolChannelResponse = await self.tool_worker_output_channel.get(
                 session_id, async_op=True
             ).async_wait()
-            self.log_debug("session_start get")
         return session_id
 
     async def tool_session_release(self, tool_worker_name, session_id) -> str | dict:
@@ -93,11 +96,9 @@ class HttpAgentLoopWorker(AgentLoopWorker):
             ToolChannelRequest(session_id=session_id, request_type="session_end"),
             async_op=True,
         ).async_wait()
-        self.log_debug("session_end put")
         response: ToolChannelResponse = await self.tool_worker_output_channel.get(
             session_id, async_op=True
         ).async_wait()
-        self.log_debug("session_end get")
 
     async def tool_call(
         self, generate_context: GenerateContext, tool_request: ToolRequest | ToolChannelResponse
@@ -120,11 +121,9 @@ class HttpAgentLoopWorker(AgentLoopWorker):
                 ),
                 async_op=True,
             ).async_wait()
-            self.log_debug("tool execute put")
             response: ToolChannelResponse = await self.tool_worker_output_channel.get(
                 session_id, async_op=True
             ).async_wait()
-            self.log_debug("tool execute get")
             self.log_info(f"{response}")
             if isinstance(response.result, (list, dict)):
                 result_text = json.dumps(response.result)
@@ -150,29 +149,32 @@ class HttpAgentLoopWorker(AgentLoopWorker):
         return response_text, return_function_calls
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
-        max_prompt_len = int(self.cfg.data.get("max_prompt_length", 1024))
-        prompt_ids = prompt_ids[:max_prompt_len]
-        orig_prompt_ids = copy.deepcopy(prompt_ids)
         generate_context: GenerateContext = self.generate_context_create()
+        prompt_ids = prompt_ids[: self.max_prompt_len]
+        orig_prompt_ids = copy.deepcopy(prompt_ids)
         trace_prints = []
         response_mask = []
-        max_total_len = int(self.cfg.actor.model.encoder_seq_length) - max_prompt_len + len(orig_prompt_ids)
         try:
-            # 5 is a magic number in this demo.
-            for _ in range(5):
+            for _ in range(self.max_turns):
                 # Generate response from LLM
                 generate_result = await self.generate(prompt_ids)
                 response_ids = generate_result["output_ids"]
-                prompt_ids += response_ids
-                response_mask += [1] * len(response_ids)  # 1 for LLM generated tokens
-                print(f"[{len(orig_prompt_ids)}] {len(prompt_ids)} {len(response_ids)} {len(response_mask)}")
-
-                if len(prompt_ids) >= max_total_len:
-                    prompt_ids = prompt_ids[:max_total_len]
-                    break
-
+                max_resp_len = self.max_resp_len - (
+                    len(prompt_ids) - len(orig_prompt_ids)
+                )
+                if len(response_ids) > max_resp_len:
+                    response_ids = response_ids[:max_resp_len]
                 response_text = self.tokenizer.decode(response_ids)
                 print(f"{response_text=}")
+                prompt_ids += response_ids
+                response_mask += [1] * len(response_ids)  # 1 for LLM generated tokens
+                # print(f"[{len(orig_prompt_ids)}] {len(prompt_ids)} {len(response_ids)} {len(response_mask)}")
+                if self.print_outputs:
+                    # add anything you want to print
+                    trace_prints.append({"generate": response_text})
+                if len(response_ids) == max_resp_len:
+                    break
+
                 # Extract tool calls from response
                 _, tool_requests = await self.extract_tool_calls(response_text)
 
@@ -194,37 +196,34 @@ class HttpAgentLoopWorker(AgentLoopWorker):
                     tool_messages.append(message)
 
                 # Tokenize tool responses
-                tool_response_ids = self.tokenizer.apply_chat_template(
-                    tool_messages,
-                    add_generation_prompt=True,
-                    tokenize=True,
-                )[self.tool_response_sys_prefix_len:]
-                
-                if len(prompt_ids) + len(tool_response_ids) >= max_total_len:
+                tool_response_ids = self.get_tool_response_ids(tool_messages)
+                max_tool_resp_len = self.max_resp_len - (
+                    len(prompt_ids) - len(orig_prompt_ids)
+                )
+                if len(tool_response_ids) > max_tool_resp_len:
                     break
 
                 prompt_ids += tool_response_ids
-                response_mask += [0] * len(tool_response_ids)  # 0 for tool response tokens
-                print(f"[{len(orig_prompt_ids)}] {len(prompt_ids)} {len(response_ids)} {len(response_mask)}")
+                response_mask += [0] * len(
+                    tool_response_ids
+                )  # 0 for tool response tokens
+                # print(f"[{len(orig_prompt_ids)}] {len(prompt_ids)} {len(response_ids)} {len(response_mask)}")
 
                 if self.print_outputs:
                     # add anything you want to print
-                    trace_prints.append(
-                        {"generate": response_text, "tool_resp": tool_messages}
-                    )
+                    trace_prints[-1]["tool_resp"] = tool_messages
 
             # Separate prompt and response
-            print(f"{len(prompt_ids)}({len(orig_prompt_ids)}+?) {max_total_len} {len(response_mask)}")
-            response_ids = prompt_ids[len(orig_prompt_ids):]
-            response_mask = response_mask[:max_total_len - len(orig_prompt_ids)]
+            # print(f"{len(prompt_ids)}({len(orig_prompt_ids)}+?) {max_total_len} {len(response_mask)}")
+            response_ids = prompt_ids[len(orig_prompt_ids) :]
 
             assert len(response_mask) == len(response_ids), f"{len(response_mask)} != {len(response_ids)}"
 
             return AgentLoopOutput(
                 prompt_ids=orig_prompt_ids,
                 prompt_text=self.tokenizer.decode(orig_prompt_ids),
-                response_text=self.tokenizer.decode(response_ids),
                 response_ids=response_ids,
+                response_text=self.tokenizer.decode(response_ids),
                 response_mask=response_mask,
                 trace_prints=trace_prints,
             )

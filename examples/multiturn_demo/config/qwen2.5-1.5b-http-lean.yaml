@@ -94,13 +94,12 @@ inference:
 
 agentloop:
   group_name: "AgentLoopGroup"
-  max_user_turns: 3
-  max_assistant_turns: 3
-  max_parallel_calls: 2
-  max_tool_response_length: 500
-  tool_response_truncate_side: "right"
-  response_length: 2048
+  max_turns: 5
   print_outputs: True # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
+  # demo specific parameters. not used in this demo. you can add your own parameters here.
+  # max_parallel_calls: 2
+  # continue_at_tool_failure: True
+  # max_tool_response_length: 500
 
 rollout:
   group_name: "RolloutGroup"
@@ -109,6 +108,7 @@ rollout:
 
   model_dir: /mnt/public/agent/nishang/Qwen3-4B-Instruct-2507
   model_arch: qwen2.5
+  precision: ${actor.model.precision}              # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
   disable_log_stats: False
@@ -187,7 +187,7 @@ actor:
   seed: 1234
 
   model:
-    precision: fp16
+    precision: bf16
     add_bias_linear: False
 
     tensor_model_parallel_size: 1
