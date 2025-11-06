@@ -26,6 +26,8 @@ from .io_struct import (
     SyncHFWeightOutput,
     TaskMethodInput,
     TaskMethodOutput,
+    SaveNormWeightsInput,
+    SaveNormWeightsOutput,
 )
 
 
@@ -51,6 +53,9 @@ class TokenizerManager(_TokenizerManager):
         self.abort_generation_communicator = _Communicator(
             self.send_to_scheduler, server_args.dp_size
         )
+        self.save_norm_weights_communicator = _Communicator(
+            self.send_to_scheduler, server_args.dp_size
+        )
 
         self._result_dispatcher._mapping.extend(
             [
@@ -65,6 +70,10 @@ class TokenizerManager(_TokenizerManager):
                 (
                     AbortGenerationOutput,
                     self.abort_generation_communicator.handle_recv,
+                ),
+                (
+                    SaveNormWeightsOutput,
+                    self.save_norm_weights_communicator.handle_recv,
                 ),
             ]
         )
@@ -100,3 +109,11 @@ class TokenizerManager(_TokenizerManager):
     ):
         self.auto_create_handle_loop()
         await self.abort_generation_communicator(obj)
+
+    async def save_norm_weights(
+        self,
+        obj: SaveNormWeightsInput,
+        request: Optional[fastapi.Request] = None,
+    ):
+        self.auto_create_handle_loop()
+        await self.save_norm_weights_communicator(obj)
