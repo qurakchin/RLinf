@@ -34,7 +34,9 @@ class TransformFunc:
         hidden_size = config.model_config.hidden_size
         num_attention_heads = config.model_config.num_attention_heads
         num_query_groups = config.model_config.num_query_groups or num_attention_heads
-        head_dim = getattr(config.model_config, "kv_channels", hidden_size // num_attention_heads)
+        head_dim = config.model_config.kv_channels
+        if head_dim is None:
+            head_dim = hidden_size // num_attention_heads
 
         target_tp = config.reshard_tp_size
         assert num_query_groups % target_tp == 0, (

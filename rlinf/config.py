@@ -47,7 +47,7 @@ def torch_dtype_from_precision(precision: Union[int, str]) -> torch.dtype:
         return torch.bfloat16
     elif precision in [16, "16", "fp16", "16-mixed"]:
         return torch.float16
-    elif precision in [32, "32", "32-true"]:
+    elif precision in [32, "32", "fp32", "32-true"]:
         return torch.float32
     elif precision in [None]:
         return None
@@ -225,30 +225,57 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         cfg.model.hidden_dropout = getattr(hf_config, "hidden_dropout", 0.0)
         cfg.model.add_qkv_bias = qkv_bias
         cfg.model.layernorm_epsilon = hf_config.rms_norm_eps
-        cfg.model.kv_channels = hf_config.head_dim
+        head_dim = getattr(hf_config, "head_dim", None)
+        if head_dim is not None:
+            cfg.model.kv_channels = head_dim
 
     return cfg
 
 
 def validate_fsdp_cfg(cfg: DictConfig, resume_dir: Optional[str] = None) -> DictConfig:
+    def validate_amp_cfg(config: DictConfig) -> DictConfig:
+        if "amp" not in config:
+            config.amp = {}
+        config.amp.enabled = config.amp.get("enabled", False)
+        config.amp.precision = config.amp.get("precision", "bf16")
+        assert config.amp.precision in ["fp16", "bf16"], (
+            "fsdp.amp.precision must be one of ['fp16', 'bf16']"
+        )
+        config.amp.use_grad_scaler = config.amp.get("use_grad_scaler", False)
+        return config
+
     OmegaConf.set_struct(cfg, True)
     with open_dict(cfg):
-        if "fsdp_config" not in cfg:
-            cfg.fsdp_config = OmegaConf.create({})
-        cfg.fsdp_config.forward_prefetch = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.strategy = cfg.fsdp_config.get("strategy", "fsdp")
+
+        cfg.fsdp_config.sharding_strategy = cfg.fsdp_config.get(
+            "sharding_strategy", "full_shard"
+        )
+
+        cfg.fsdp_config.forward_prefetch = cfg.fsdp_config.get(
             "forward_prefetch", False
         )
-        cfg.fsdp_config.limit_all_gathers = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.limit_all_gathers = cfg.fsdp_config.get(
             "limit_all_gathers", False
         )
-        cfg.fsdp_config.backward_prefetch = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.backward_prefetch = cfg.fsdp_config.get(
             "backward_prefetch", None
         )
-        cfg.fsdp_config.use_orig_params = cfg.get("fsdp_config", {}).get(
-            "use_orig_params", False
-        )
-        cfg.fsdp_config.use_liger_kernel = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.use_orig_params = cfg.fsdp_config.get("use_orig_params", False)
+        cfg.fsdp_config.use_liger_kernel = cfg.fsdp_config.get(
             "use_liger_kernel", False
+        )
+        cfg.fsdp_config = validate_amp_cfg(cfg.fsdp_config)
+
+        cfg.fsdp_config.cpu_offload = cfg.fsdp_config.get("cpu_offload", False)
+        cfg.fsdp_config.offload_pin_memory = cfg.fsdp_config.get(
+            "offload_pin_memory", False
+        )
+        cfg.fsdp_config.reshard_after_forward = cfg.fsdp_config.get(
+            "reshard_after_forward", True
+        )
+        cfg.fsdp_config.enable_gradient_accumulation = cfg.fsdp_config.get(
+            "enable_gradient_accumulation", False
         )
 
         if resume_dir is not None:
@@ -259,6 +286,22 @@ def validate_fsdp_cfg(cfg: DictConfig, resume_dir: Optional[str] = None) -> Dict
             "pre",
             "post",
         ], "fsdp_config.backward_prefetch must be one of [None, 'pre', 'post']"
+
+        # validate mixed precision config
+        assert hasattr(cfg.fsdp_config, "mixed_precision"), (
+            "fsdp_config.mixed_precision is required in FSDP actor configuration."
+        )
+
+        mixed_precision_config = cfg.fsdp_config.mixed_precision
+        mixed_precision_config.param_dtype = mixed_precision_config.get(
+            "param_dtype", "bf16"
+        )
+        mixed_precision_config.reduce_dtype = mixed_precision_config.get(
+            "reduce_dtype", "bf16"
+        )
+        mixed_precision_config.buffer_dtype = mixed_precision_config.get(
+            "buffer_dtype", "fp32"
+        )
 
     return cfg
 
@@ -281,9 +324,13 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.megatron.load = cfg.get("checkpoint_load_path", None)
         use_hf_ckpt = cfg.megatron.get("use_hf_ckpt", False)
         if cfg.megatron.load is None:
-            assert use_hf_ckpt, "checkpoint_load_path is required if use_hf_ckpt is False"
+            assert use_hf_ckpt, (
+                "checkpoint_load_path is required if use_hf_ckpt is False"
+            )
         else:
-            assert not use_hf_ckpt, "checkpoint_load_path should be None if use_hf_ckpt is True"
+            assert not use_hf_ckpt, (
+                "checkpoint_load_path should be None if use_hf_ckpt is True"
+            )
         cfg.megatron.pretrained_checkpoint = cfg.get("pretrained_checkpoint", None)
         cfg.megatron.save = None
         cfg.megatron.micro_batch_size = cfg.get("micro_batch_size", 1)
@@ -566,9 +613,6 @@ def validate_embodied_cfg(cfg):
     cfg.env.eval.num_envs = cfg.env.eval.num_envs // stage_num // env_world_size
 
     with open_dict(cfg):
-        cfg.actor.model.sharding_strategy = cfg.actor.model.get(
-            "sharding_strategy", "full_shard"
-        )
         if cfg.env.train.simulator_type == "maniskill":
 
             def get_robot_control_mode(robot: str):

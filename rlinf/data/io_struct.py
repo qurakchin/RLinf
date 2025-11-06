@@ -258,14 +258,25 @@ class RolloutResult:
         prompt_start = prompt_start.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
         if response_mask is not None:
-            max_response_len=total_len - max_prompt_len
+            max_response_len = total_len - max_prompt_len
             response_mask = batch_pad_to_fixed_len(
                 [torch.as_tensor(ids, dtype=torch.long) for ids in response_mask],
                 max_batch_len=max_response_len,
                 pad_token=0,
             )
 
-            attention_mask = torch.cat([(torch.arange(max_prompt_len).unsqueeze(0).expand(response_mask.size(0), -1) >= prompt_start), response_mask], dim=1).bool()
+            attention_mask = torch.cat(
+                [
+                    (
+                        torch.arange(max_prompt_len)
+                        .unsqueeze(0)
+                        .expand(response_mask.size(0), -1)
+                        >= prompt_start
+                    ),
+                    response_mask,
+                ],
+                dim=1,
+            ).bool()
         else:
             attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
 
