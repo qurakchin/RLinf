@@ -232,6 +232,13 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         cfg.model.hidden_dropout = getattr(hf_config, "hidden_dropout", 0.0)
         cfg.model.add_qkv_bias = qkv_bias
         cfg.model.layernorm_epsilon = hf_config.rms_norm_eps
+        cfg.model.head_dim = getattr(
+            hf_config,
+            "head_dim",
+            cfg.model.hidden_size // cfg.model.num_attention_heads,
+        )
+        if cfg.model.head_dim is not None:
+            cfg.model.kv_channels = cfg.model.head_dim
 
         # MoE model
         cfg.model.num_moe_experts = getattr(hf_config, "num_experts", None)
@@ -239,11 +246,6 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
             hf_config, "moe_intermediate_size", None
         )
         cfg.model.moe_router_topk = getattr(hf_config, "num_experts_per_tok", 2)
-        cfg.model.head_dim = getattr(
-            hf_config,
-            "head_dim",
-            cfg.model.hidden_size // cfg.model.num_attention_heads,
-        )
 
     return cfg
 
@@ -338,6 +340,15 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
 
         # training args for megatron
         cfg.megatron.load = cfg.get("checkpoint_load_path", None)
+        use_hf_ckpt = cfg.megatron.get("use_hf_ckpt", False)
+        if cfg.megatron.load is None:
+            assert use_hf_ckpt, (
+                "checkpoint_load_path is required if use_hf_ckpt is False"
+            )
+        else:
+            assert not use_hf_ckpt, (
+                "checkpoint_load_path should be None if use_hf_ckpt is True"
+            )
         cfg.megatron.pretrained_checkpoint = cfg.get("pretrained_checkpoint", None)
         cfg.megatron.save = None
         cfg.megatron.micro_batch_size = cfg.get("micro_batch_size", 1)
