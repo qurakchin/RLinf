@@ -26,7 +26,6 @@ from sglang.srt.managers.scheduler import logger
 from sglang.srt.managers.scheduler import (
     run_scheduler_process as _run_scheduler_process,
 )
-from tqdm import tqdm
 
 from rlinf.scheduler import Worker, WorkerAddress
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
@@ -88,24 +87,10 @@ class Scheduler(_Scheduler):
         self.is_weight_offloaded = True
         return super().release_memory_occupation(recv_req)
 
-    def reload_hf_weight(self, state_dict: dict[str, Any]):
-        # Batch load HF weights in sglang
-
-        colocate = self.placement_mode == PlacementMode.COLLOCATED
+    def batch_load_hf_weight(self, state_dict: dict[str, Any]) -> Any:
         model = self.tp_worker.worker.model_runner.model
-
-        # now the bucket size is 4GB
-        bucket_size = 4 * 1024 * 1024 * 1024
-        batch_weights = []
-        current_bucket = []
-
-        # divide state_dict into buckets to load in sglang
-        current_bucket_size = 0
-
-        if self.is_weight_offloaded:
-            self.resume_memory_occupation(ResumeMemoryOccupationReqInput())
-            self.is_weight_offloaded = False
-
+        colocate = self.placement_mode == PlacementMode.COLLOCATED
+        batch_weight = []
         if colocate:
             for name, handle in state_dict.items():
                 func, args = handle
@@ -114,60 +99,20 @@ class Scheduler(_Scheduler):
                 # in case two processes have different CUDA_VISIBLE_DEVICES
                 list_args[6] = torch.cuda.current_device()
                 new_weight = func(*list_args)
-
-                # load weight in bf16 or fp16, so the size is 2 * numel
-                if current_bucket_size + (new_weight.numel() * 2) > bucket_size:
-                    assert len(current_bucket) > 0, "current_bucket is empty"
-                    batch_weights.append(current_bucket)
-                    current_bucket = []
-                    current_bucket_size = 0
-
-                # add weight to current bucket
-                current_bucket.append((name, new_weight))
-                current_bucket_size += new_weight.numel() * 2
-
-            assert len(current_bucket) > 0, "current_bucket is empty"
-            # load the last bucket
-            batch_weights.append(current_bucket)
-
-            for bucket in tqdm(
-                batch_weights,
-                disable=self._rlinf_worker.get_parent_rank() != 0 or self.tp_rank != 0,
-                desc="Load weights",
-            ):
-                model.load_weights(bucket)
-                for name, weight in bucket:
-                    del weight
-                bucket.clear()
+                batch_weight.append((name, new_weight))
         else:
             # disaggregate mode, recv tensor directly
             for name, tensor in state_dict.items():
-                # load weight in bf16 or fp16, so the size is 2 * numel
-                if current_bucket_size + (tensor.numel() * 2) > bucket_size:
-                    assert len(current_bucket) > 0, "current_bucket is empty"
-                    batch_weights.append(current_bucket)
-                    current_bucket = []
-                    current_bucket_size = 0
+                batch_weight.append((name, tensor))
 
-                # add weight to current bucket
-                current_bucket.append((name, tensor))
-                current_bucket_size += tensor.numel() * 2
+        model.load_weights(batch_weight)
 
-            assert len(current_bucket) > 0, "current_bucket is empty"
-            # load the last bucket
-            batch_weights.append(current_bucket)
-
-            for bucket in tqdm(
-                batch_weights,
-                disable=self._rlinf_worker.get_parent_rank() != 0 or self.tp_rank != 0,
-                desc="Load weights",
-            ):
-                model.load_weights(bucket)
-                bucket.clear()
+        for name, weight in batch_weight:
+            del weight
+        batch_weight.clear()
 
     def sync_hf_weight(self, recv_req: SyncHFWeightInput):
         use_cudagraph = not self.cfg.rollout.enforce_eager
-
         assert use_cudagraph, "use_cudagraph must be True now."
 
         state_dict = self._rlinf_worker.recv(
@@ -175,8 +120,11 @@ class Scheduler(_Scheduler):
             src_rank=self.actor_weight_rank,
         )
 
-        self.reload_hf_weight(state_dict)
+        if self.is_weight_offloaded:
+            self.resume_memory_occupation(ResumeMemoryOccupationReqInput())
+            self.is_weight_offloaded = False
 
+        self.batch_load_hf_weight(state_dict)
         self.flush_cache()
         return SyncHFWeightOutput()
 
