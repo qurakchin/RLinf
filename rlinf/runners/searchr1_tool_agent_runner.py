@@ -27,10 +27,9 @@ from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.utils.runner_utils import check_progress
 from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-from rlinf.workers.agent_loop.agent_loop import ToolAgentLoopWorker
+from rlinf.workers.agent.agent_loop import AgentLoopWorker
 from rlinf.workers.agent.tool_worker import ToolChannelInfo, ToolWorker, ToolWorkerInfo
 from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-
 from rlinf.workers.reward.reward_worker import RewardWorker
 
 if typing.TYPE_CHECKING:
@@ -53,7 +52,7 @@ class Searchr1ToolAgentRunner(ReasoningRunner):
         inference: Optional[MegatronInference],
         actor: MegatronActor,
         reward: RewardWorker,
-        agent_loop: ToolAgentLoopWorker,
+        agent_loop: AgentLoopWorker,
         tool_workers: dict[ToolWorker, ToolWorkerInfo] = {},
     ):
         super().__init__(
@@ -100,7 +99,6 @@ class Searchr1ToolAgentRunner(ReasoningRunner):
                 self.tool_name_map[tool_name] = worker.worker_group_name
 
         self.tool_output_channel = Channel.create("ToolOutput")
-
 
     def init_workers(self):
         """init tool workers and agent loop worker."""
@@ -172,15 +170,9 @@ class Searchr1ToolAgentRunner(ReasoningRunner):
                         infer_handle = None
                         inference_channel = self.reward_channel
 
-                    # Advantages and returns
-                    adv_handle: Handle = self.actor.compute_advantages_and_returns(
-                        input_channel=inference_channel,
-                        output_channel=self.actor_channel,
-                    )
-
-                    # Actor training
+                    # Actor training, Advantages and returns
                     actor_handle: Handle = self.actor.run_training(
-                        input_channel=self.actor_channel,
+                        input_channel=inference_channel,
                     )
 
                     metrics = actor_handle.wait()
@@ -217,7 +209,6 @@ class Searchr1ToolAgentRunner(ReasoningRunner):
                 time_metrics["training"] = actor_handle.consume_duration()
                 time_metrics["rollout"] = rollout_handle.consume_duration()
                 time_metrics["reward"] = reward_handle.consume_duration()
-                time_metrics["advantage"] = adv_handle.consume_duration()
                 if infer_handle is not None:
                     # Inference time should be the min time across ranks, because different DP receive the rollout results differently
                     # But at the begin of the pp schedule, there is a timer barrier
