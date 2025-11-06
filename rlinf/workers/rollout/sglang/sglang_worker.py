@@ -15,7 +15,7 @@
 import asyncio
 import copy
 import dataclasses
-from typing import Any
+from typing import Any, Optional
 
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import ReleaseMemoryOccupationReqInput
@@ -400,3 +400,45 @@ class SGLangWorker(Worker):
                 await self.offload_engine()
                 if self._use_auto_scheduler:
                     await self._scheduler.report_offloaded()
+
+    async def generate_and_send(
+        self,
+        output_channel: Channel,
+        channel_key: str,
+        prompt_ids: list[int],
+        sampling_params: Optional[dict] = None,
+    ):
+        final_sampling_params = self._sampling_params
+        if sampling_params is not None and len(sampling_params) > 0:
+            final_sampling_params = copy.deepcopy(self._sampling_params)
+            for key, value in sampling_params.items():
+                final_sampling_params[key] = value
+
+        result = await self._engine.async_generate(
+            input_ids=prompt_ids,
+            sampling_params=final_sampling_params,
+            return_logprob=self._return_logprobs,
+        )
+        result_dict = {
+            "output_ids": result["output_ids"],
+            "finish_reason": result["meta_info"]["finish_reason"]["type"],
+        }
+        if self._return_logprobs:
+            result_dict["logprobs"] = [
+                item[0] for item in result["meta_info"]["output_token_logprobs"]
+            ]
+        await output_channel.put(
+            result_dict, key=channel_key, async_op=True
+        ).async_wait()
+
+    async def rollout_serverless(self, input_channel: Channel, output_channel: Channel):
+        while True:
+            rollout_request = await input_channel.get(async_op=True).async_wait()
+            asyncio.create_task(
+                self.generate_and_send(
+                    output_channel=output_channel,
+                    channel_key=rollout_request["channel_key"],
+                    prompt_ids=rollout_request["prompt_ids"],
+                    sampling_params=rollout_request.get("sampling_params", None),
+                )
+            )
