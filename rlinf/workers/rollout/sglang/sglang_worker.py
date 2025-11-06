@@ -139,7 +139,7 @@ class SGLangWorker(Worker):
                 self._cfg.rollout.sglang.torch_compile_max_bs,
                 self._cfg.rollout.max_running_requests,
             ),
-            load_format="dummy" if not self._cfg.rollout.validate_weight else "auto",
+            load_format="dummy" if not self._cfg.rollout.validate_weight and not getattr(self._cfg.rollout, "validate_weight_first_sync", False) else "auto",
             # disable_overlap_schedule=True,
             dtype=torch_dtype_from_precision(self._cfg.rollout.precision),
             # sglang will only return text/output_ids when skip_tokenizer_init=False/True
