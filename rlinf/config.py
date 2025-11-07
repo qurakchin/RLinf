@@ -205,6 +205,11 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         qkv_bias = True
     else:
         qkv_bias = getattr(hf_config, "attention_bias", False)
+    
+    if "Qwen3ForCausalLM" in hf_config.architectures or "Qwen3MoeForCausalLM" in hf_config.architectures:
+        cfg.model.qk_layernorm = True
+    else:
+        cfg.model.qk_layernorm = cfg.model.get("qk_layernorm", False)
 
     with open_dict(cfg):
         rs = getattr(hf_config, "rope_scaling", None)
@@ -552,7 +557,6 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
 
         cfg.model.variable_seq_lengths = cfg.model.get("variable_seq_lengths", True)
         cfg.model.add_bias_linear = cfg.model.get("add_bias_linear", False)
-        cfg.model.qk_layernorm = cfg.model.get("qk_layernorm", False)
 
         cfg.optim.fp16 = (
             torch_dtype_from_precision(cfg.model.precision) == torch.float16
