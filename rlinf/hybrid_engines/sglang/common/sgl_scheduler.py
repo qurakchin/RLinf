@@ -36,12 +36,12 @@ from rlinf.workers.rollout.utils import (
 from .io_struct import (
     AbortGenerationInput,
     AbortGenerationOutput,
+    SaveNormWeightsInput,
+    SaveNormWeightsOutput,
     SyncHFWeightInput,
     SyncHFWeightOutput,
     TaskMethodInput,
     TaskMethodOutput,
-    SaveNormWeightsInput,
-    SaveNormWeightsOutput,
 )
 
 logger.setLevel(logging.WARNING)
@@ -138,7 +138,12 @@ class Scheduler(_Scheduler):
                 weight_norm_dict_sync[name] = value.norm()
             diff_keys = []
             for k in weight_norm_dict_sync.keys():
-                if not torch.allclose(weight_norm_dict_sync[k], self.weight_norm_dict[k], rtol=1e-3, atol=1e-4):
+                if not torch.allclose(
+                    weight_norm_dict_sync[k],
+                    self.weight_norm_dict[k],
+                    rtol=1e-3,
+                    atol=1e-4,
+                ):
                     diff_keys.append(k)
 
             if len(diff_keys) != 0:
@@ -183,7 +188,7 @@ class Scheduler(_Scheduler):
         for key, value in model.state_dict().items():
             weight_norm_dict[key] = value.norm()
         self.weight_norm_dict = weight_norm_dict
-        return SaveNormWeightsOutput() 
+        return SaveNormWeightsOutput()
 
     def init_rlinf_worker(
         self,

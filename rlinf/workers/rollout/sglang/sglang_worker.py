@@ -17,10 +17,10 @@ import copy
 import dataclasses
 from typing import Any, Optional
 
+import torch
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import ReleaseMemoryOccupationReqInput
 from sglang.srt.server_args import ServerArgs
-import torch
 from transformers import AutoTokenizer
 
 from rlinf.config import torch_dtype_from_precision
@@ -139,7 +139,10 @@ class SGLangWorker(Worker):
                 self._cfg.rollout.sglang.torch_compile_max_bs,
                 self._cfg.rollout.max_running_requests,
             ),
-            load_format="dummy" if not self._cfg.rollout.validate_weight and not getattr(self._cfg.rollout, "validate_weight_first_sync", False) else "auto",
+            load_format="dummy"
+            if not self._cfg.rollout.validate_weight
+            and not getattr(self._cfg.rollout, "validate_weight_first_sync", False)
+            else "auto",
             # disable_overlap_schedule=True,
             dtype=torch_dtype_from_precision(self._cfg.rollout.precision),
             # sglang will only return text/output_ids when skip_tokenizer_init=False/True
@@ -191,7 +194,11 @@ class SGLangWorker(Worker):
             print("===============================", flush=True)
 
     async def _validate_weight_at_first_sync(self):
-        if torch_dtype_from_precision(self._cfg.rollout.precision) != torch.bfloat16 or torch_dtype_from_precision(self._cfg.actor.model.precision) != torch.bfloat16:
+        if (
+            torch_dtype_from_precision(self._cfg.rollout.precision) != torch.bfloat16
+            or torch_dtype_from_precision(self._cfg.actor.model.precision)
+            != torch.bfloat16
+        ):
             self.log_warning(
                 "validate_weight should use same precision in rollout and actor and ckpt. default is bfloat16."
             )
@@ -254,9 +261,7 @@ class SGLangWorker(Worker):
         self.log_info(f"SGLang worker {self._rank} initialized.")
         if self._cfg.rollout.validate_weight:
             await self._validate_weight_at_first()
-        if getattr(
-            self._cfg.rollout, "validate_weight_first_sync", False
-        ):
+        if getattr(self._cfg.rollout, "validate_weight_first_sync", False):
             await self._validate_weight_at_first_sync()
         if self._placement.is_collocated:
             await self.offload_engine()
