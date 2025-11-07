@@ -504,15 +504,16 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.model.pipeline_model_parallel_split_rank = cfg.model.get(
             "pipeline_model_parallel_split_rank", None
         )
-        cfg.model.context_parallel_size = cfg.model.context_parallel_size = (
-            cfg.model.get("context_parallel_size", 1)
+        cfg.model.context_parallel_size = cfg.model.get("context_parallel_size", 1)
+
+        cfg.model.expert_model_parallel_size = cfg.model.get(
+            "expert_model_parallel_size", 1
         )
-        cfg.model.expert_model_parallel_size = cfg.model.expert_model_parallel_size = (
-            cfg.model.get("expert_model_parallel_size", 1)
+
+        cfg.model.expert_tensor_parallel_size = cfg.model.get(
+            "expert_tensor_parallel_size", 1
         )
-        cfg.model.expert_tensor_parallel_size = (
-            cfg.model.expert_tensor_parallel_size
-        ) = cfg.model.get("expert_tensor_parallel_size", 1)
+
         cfg.model.moe_grouped_gemm = cfg.model.get("moe_grouped_gemm", None)
         assert cfg.model.moe_grouped_gemm in [None, "te"], (
             f"grouped_gemm type only avail in [null, te]. get value ({cfg.model.moe_grouped_gemm})"
@@ -1041,8 +1042,7 @@ def build_transformer_config(cfg) -> "TransformerConfig":
         "moe_ffn_hidden_size": cfg.get("moe_ffn_hidden_size", None),
         # now the sequential mlp should ffn hidden size == moe_ffn_hidden_size
         "ffn_hidden_size": cfg.get("moe_ffn_hidden_size", None)
-        if cfg.get("moe_ffn_hidden_size", None)
-        else cfg.get("ffn_hidden_size", None),
+        or cfg.get("ffn_hidden_size", None),
         "moe_router_load_balancing_type": cfg.get(
             "moe_router_load_balancing_type", "aux_loss"
         ),

@@ -196,57 +196,71 @@ class MegatronCoreWeightReshard:
                         gathered_params[key2] = weight_list[idx]
             tl_params = gathered_params
 
-        if reshard_ep_model:
-            # if use the te group gemm, we need to convert the weight type from te group to seq group
+        if self.config.model_config.num_moe_experts is not None:
+            # in MoE model, if use the te group gemm, we need to convert the weight type from te group to seq group
             if self.config.moe_grouped_gemm == "te":
                 from toolkits.ckpt_convertor.utils.mg_moe_groupgemm import (
                     moe_te_group_to_seq,
                 )
 
-                expert_params = moe_te_group_to_seq(expert_params)
+                if reshard_ep_model:
+                    expert_params = moe_te_group_to_seq(expert_params)
+                else:
+                    tl_params = moe_te_group_to_seq(tl_params)
             else:
-                assert self.config.moe_grouped_gemm in [None, "te"], (
+                assert self.config.moe_grouped_gemm in [None], (
                     f"now the rlinf just support moe_grouped_gemm to be None or 'te', got {self.config.moe_grouped_gemm}"
                 )
 
-            # gather experts across ep ranks
-            ep_gathered_params = {}
-            for key, val in expert_params.items():
-                weight_list = [torch.zeros_like(val) for _ in range(ep_size)]
-                torch.distributed.all_gather(weight_list, val, group=ep_group)
-                for idx in range(ep_size):
-                    key2 = rename_expert_layer_num(
-                        key, get_expert_num(key) + idx * experts_per_chunk
-                    )
-                    ep_gathered_params[key2] = weight_list[idx]
+            if reshard_ep_model:
+                # gather experts across ep ranks
+                ep_gathered_params = {}
+                for key, val in expert_params.items():
+                    weight_list = [torch.zeros_like(val) for _ in range(ep_size)]
+                    torch.distributed.all_gather(weight_list, val, group=ep_group)
+                    for idx in range(ep_size):
+                        key2 = rename_expert_layer_num(
+                            key, get_expert_num(key) + idx * experts_per_chunk
+                        )
+                        ep_gathered_params[key2] = weight_list[idx]
 
-            # reshard experts across tpe ranks
-            ep_gathered_params = self.config.tpe_reshard_fn(
-                ep_gathered_params,
-                tpe_size,
-                tpe_group,
-                self.config.reshard_tp_size,
-                dst_rank,
-            )
+                # reshard experts across tpe ranks
+                ep_gathered_params = self.config.tpe_reshard_fn(
+                    ep_gathered_params,
+                    tpe_size,
+                    tpe_group,
+                    self.config.reshard_tp_size,
+                    dst_rank,
+                )
 
-            # gather experts across pp ranks
-            pp_gathered_params = {}
-            for key, val in ep_gathered_params.items():
-                weight_list = [torch.zeros_like(val) for _ in range(pp_size)]
-                torch.distributed.all_gather(weight_list, val, group=pp_group)
-                for idx in range(pp_size):
-                    layer_num = get_layer_num(key) + idx * layers_per_chunk
-                    key2 = rename_layer_num(key, layer_num)
-                    if not reshard_pp_model:  # Save only layers of 1 single PP stage
-                        layers_start = layers_per_pp * pp_rank
-                        layers_end = layers_per_pp * (pp_rank + 1) - 1
-                        if layer_num >= layers_start and layer_num <= layers_end:
-                            key2 = rename_layer_num(key, layer_num % layers_per_pp)
+                # gather experts across pp ranks
+                pp_gathered_params = {}
+                for key, val in ep_gathered_params.items():
+                    weight_list = [torch.zeros_like(val) for _ in range(pp_size)]
+                    torch.distributed.all_gather(weight_list, val, group=pp_group)
+                    for idx in range(pp_size):
+                        layer_num = get_layer_num(key) + idx * layers_per_chunk
+                        key2 = rename_layer_num(key, layer_num)
+                        if (
+                            not reshard_pp_model
+                        ):  # Save only layers of 1 single PP stage
+                            layers_start = layers_per_pp * pp_rank
+                            layers_end = layers_per_pp * (pp_rank + 1) - 1
+                            if layer_num >= layers_start and layer_num <= layers_end:
+                                key2 = rename_layer_num(key, layer_num % layers_per_pp)
+                                pp_gathered_params[key2] = weight_list[idx]
+                        else:
                             pp_gathered_params[key2] = weight_list[idx]
-                    else:
-                        pp_gathered_params[key2] = weight_list[idx]
 
-            expert_params = pp_gathered_params
+                expert_params = pp_gathered_params
+            else:
+                tl_params = self.config.tpe_reshard_fn(
+                    tl_params,
+                    tpe_size,
+                    tpe_group,
+                    self.config.reshard_tp_size,
+                    dst_rank,
+                )
 
         model_state_dict = model_level_params
         model_state_dict.update(tl_params)

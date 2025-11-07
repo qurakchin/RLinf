@@ -64,46 +64,96 @@ def _gather_tp_group_tensor_and_reshard(tensor, dim, merge_factor, tp_group):
 
 
 def tp_reshard_fn_qwen2_5(model_state_dict, merge_factor, tp_group):
+    # Parameters that should skip TP resharding (just clone)
+    param_skip_tp_reshard = [
+        "linear_qkv.layer_norm_weight",
+        "mlp.linear_fc1.layer_norm_weight",
+        "final_layernorm.weight",
+    ]
+
+    # Parameters that need to be gathered on dim=0
+    param_reshard_column_parallel_linear = [
+        "word_embeddings.weight",
+        "output_layer.weight",
+        "self_attention.linear_qkv.weight",
+        "self_attention.linear_qkv.bias",
+        "mlp.linear_fc1.weight",
+    ]
+
+    # Parameters that need to be gathered on dim=1
+    param_reshard_row_parallel_linear = [
+        "self_attention.linear_proj.weight",
+        "mlp.linear_fc2.weight",
+    ]
+
     for k, v in model_state_dict.items():
-        if (
-            "rotary_pos_emb.inv_freq" in k
-            or "linear_qkv.layer_norm_weight" in k
-            or "mlp.linear_fc1.layer_norm_weight" in k
-            or "final_layernorm.weight" in k
-        ):
+        if any(param in k for param in param_skip_tp_reshard):
             model_state_dict[k] = v.clone()
             continue
 
-        dim = 0
-        if "self_attention.linear_proj.weight" in k or "mlp.linear_fc2.weight" in k:
+        if any(param in k for param in param_reshard_column_parallel_linear):
+            dim = 0
+        elif any(param in k for param in param_reshard_row_parallel_linear):
             dim = 1
+        else:
+            assert False, f"Unknown parameter: {k}"
+
         model_state_dict[k] = _gather_tp_group_tensor_and_reshard(
             v, dim, merge_factor, tp_group
         )
+
     return model_state_dict
 
 
 def tp_reshard_fn_qwen3_moe(model_state_dict, merge_factor, tp_group):
+    # Parameters that should skip TP resharding (just clone)
+    param_skip_tp_reshard = [
+        "linear_qkv.layer_norm_weight",
+        "linear_fc1.layer_norm_weight",
+        "final_layernorm.weight",
+        "q_layernorm.weight",
+        "k_layernorm.weight",
+        "pre_mlp_layernorm.weight",
+        "router.weight",
+    ]
+
+    # MoE model resharding the mlp weight in tpe_reshard_fn
+    # Parameters that need to be gathered on dim=0
+    param_reshard_column_parallel_linear = [
+        "word_embeddings.weight",
+        "output_layer.weight",
+        "self_attention.linear_qkv.weight",
+    ]
+
+    # Parameters that need to be gathered on dim=1
+    param_reshard_row_parallel_linear = [
+        "self_attention.linear_proj.weight",
+    ]
+
+    # Parameters that need to skip in tp resharding
+    param_reshard_skip_weight = [
+        "linear_fc1.weight",
+        "linear_fc2.weight",
+    ]
+
     for k, v in model_state_dict.items():
-        if (
-            "rotary_pos_emb.inv_freq" in k
-            or "linear_qkv.layer_norm_weight" in k
-            or "linear_fc1.layer_norm_weight" in k
-            or "final_layernorm.weight" in k
-            or "q_layernorm.weight" in k
-            or "k_layernorm.weight" in k
-            or "pre_mlp_layernorm.weight" in k
-            or "router.weight" in k
-        ):
+        if any(param in k for param in param_skip_tp_reshard):
             model_state_dict[k] = v.clone()
             continue
 
-        dim = 0
-        if "self_attention.linear_proj.weight" in k:
+        if any(param in k for param in param_reshard_column_parallel_linear):
+            dim = 0
+        elif any(param in k for param in param_reshard_row_parallel_linear):
             dim = 1
+        elif any(param in k for param in param_reshard_skip_weight):
+            continue
+        else:
+            assert False, f"Unknown parameter: {k}"
+
         model_state_dict[k] = _gather_tp_group_tensor_and_reshard(
             v, dim, merge_factor, tp_group
         )
+
     return model_state_dict
 
 
@@ -185,69 +235,41 @@ def _gather_pp_group_tensor_and_reshard(
     return tensor
 
 
-def pp_reshard_fn_qwen2_5(model_state_dict, pp_group, dtype):
+def gather_pp_group_tensor_and_reshard(
+    model_state_dict, keys_with_ranks, pp_group, dtype
+):
+    """Helper function to reshard multiple keys."""
+    for key, target_rank in keys_with_ranks:
+        tensor = _gather_pp_group_tensor_and_reshard(
+            model_state_dict, key, target_rank, pp_group, dtype
+        )
+        if tensor is not None:
+            model_state_dict[key] = tensor.clone()
+    return model_state_dict
+
+
+def _pp_reshard_fn_Qwen_model(model_state_dict, pp_group, dtype):
+    """Common resharding logic for Qwen models."""
     pp_first_rank = parallel_state.get_pipeline_model_parallel_first_rank()
     pp_last_rank = parallel_state.get_pipeline_model_parallel_last_rank()
 
-    key = "decoder.final_layernorm.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
+    keys_with_ranks = [
+        ("decoder.final_layernorm.weight", pp_last_rank),
+        ("decoder.final_layernorm.bias", pp_last_rank),
+        ("embedding.word_embeddings.weight", pp_first_rank),
+        ("output_layer.weight", pp_last_rank),
+    ]
 
-    key = "decoder.final_layernorm.bias"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
+    return gather_pp_group_tensor_and_reshard(
+        model_state_dict, keys_with_ranks, pp_group, dtype
     )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
 
-    key = "embedding.word_embeddings.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_first_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
 
-    key = "output_layer.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
-    return model_state_dict
+def pp_reshard_fn_qwen2_5(model_state_dict, pp_group, dtype):
+    """Reshard pipeline parallel weights for Qwen2.5 models."""
+    return _pp_reshard_fn_Qwen_model(model_state_dict, pp_group, dtype)
 
 
 def pp_reshard_fn_qwen3_moe(model_state_dict, pp_group, dtype):
-    pp_first_rank = parallel_state.get_pipeline_model_parallel_first_rank()
-    pp_last_rank = parallel_state.get_pipeline_model_parallel_last_rank()
-
-    key = "decoder.final_layernorm.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
-
-    key = "decoder.final_layernorm.bias"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
-
-    key = "embedding.word_embeddings.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_first_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
-
-    key = "output_layer.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
-    return model_state_dict
+    """Reshard pipeline parallel weights for Qwen3 MoE models."""
+    return _pp_reshard_fn_Qwen_model(model_state_dict, pp_group, dtype)

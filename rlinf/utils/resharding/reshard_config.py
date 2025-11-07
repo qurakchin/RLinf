@@ -84,6 +84,7 @@ class ReshardConfig:
 
         # tpe_reshard_fn only use in moe model parallel
         if (
-            self.mg_ep_size > 1 or self.mg_tpe_size > 1
-        ) and self.tpe_reshard_fn is None:
+            self.model_config.num_moe_experts is not None
+            and self.tpe_reshard_fn is None
+        ):
             self.tpe_reshard_fn = get_tpe_reshard_fn(self.model_arch)

@@ -16,7 +16,7 @@
 import torch
 
 
-def moe_seq_to_te_group(state_dict_):
+def moe_seq_to_te_group(state_dict):
     key_moe_grouped = ".mlp.experts."
     key_moe_local = ".mlp.experts.local_experts."
     key_local_linear_fc1 = "linear_fc1.weight"
@@ -25,7 +25,7 @@ def moe_seq_to_te_group(state_dict_):
     key_grouped_linear_fc2 = "linear_fc2.weight"
     te_endswith = "_extra_state"
 
-    for key in list(state_dict_.keys()):
+    for key in list(state_dict.keys()):
         if key_moe_local not in key:
             continue
         key_index = key.find(key_moe_local)
@@ -34,23 +34,23 @@ def moe_seq_to_te_group(state_dict_):
         expert_index_end = key.find(".", expert_index_start)
         expert_index = int(key[expert_index_start:expert_index_end])
         if key.endswith(key_local_linear_fc1):
-            state_dict_[
+            state_dict[
                 f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc1}{expert_index}"
-            ] = state_dict_.pop(key)
+            ] = state_dict.pop(key)
         elif key.endswith(key_local_linear_fc2):
-            state_dict_[
+            state_dict[
                 f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc2}{expert_index}"
-            ] = state_dict_.pop(key)
+            ] = state_dict.pop(key)
         elif key.endswith(te_endswith):
             continue
         else:
             assert False, (
                 f"key {key} not end with {key_local_linear_fc1} {key_local_linear_fc2} {te_endswith}"
             )
-    return state_dict_
+    return state_dict
 
 
-def moe_te_group_to_seq(state_dict_):
+def moe_te_group_to_seq(state_dict):
     key_moe_grouped = ".mlp.experts.linear"
     key_moe_local = ".mlp.experts.local_experts."
     key_local_linear_fc1 = "linear_fc1.weight"
@@ -59,15 +59,15 @@ def moe_te_group_to_seq(state_dict_):
 
     pop_linear_fc1 = {}
     pop_linear_fc2 = {}
-    for key in list(state_dict_.keys()):
+    for key in list(state_dict.keys()):
         if key_moe_grouped not in key:
             continue
         if key.find(key_local_linear_fc1) != -1:
             assert key not in pop_linear_fc1
-            pop_linear_fc1[key] = state_dict_.pop(key)
+            pop_linear_fc1[key] = state_dict.pop(key)
         elif key.find(key_local_linear_fc2) != -1:
             assert key not in pop_linear_fc2
-            pop_linear_fc2[key] = state_dict_.pop(key)
+            pop_linear_fc2[key] = state_dict.pop(key)
 
     for key, weight in pop_linear_fc1.items():
         key_index = key.find(key_moe_grouped)
@@ -75,7 +75,7 @@ def moe_te_group_to_seq(state_dict_):
         expert_index = key.find(key_local_weight)
         # find the local expert index 6 is 'weight' length
         expert_prefix = key[expert_index + 6 :]
-        state_dict_[
+        state_dict[
             f"{key_prefix}{key_moe_local}{expert_prefix}.{key_local_linear_fc1}"
         ] = weight
 
@@ -85,14 +85,14 @@ def moe_te_group_to_seq(state_dict_):
         expert_index = key.find(key_local_weight)
         # find the local expert index 6 is 'weight' length
         expert_prefix = key[expert_index + 6 :]
-        state_dict_[
+        state_dict[
             f"{key_prefix}{key_moe_local}{expert_prefix}.{key_local_linear_fc2}"
         ] = weight
 
-    return state_dict_
+    return state_dict
 
 
-def moe_seq_to_group(state_dict_, num_local_experts, glu):
+def moe_seq_to_group(state_dict, num_local_experts, glu):
     key_moe_grouped = ".mlp.experts."
     key_moe_local = ".mlp.experts.local_experts."
     key_local_linear_fc1 = "linear_fc1.weight"
@@ -102,7 +102,7 @@ def moe_seq_to_group(state_dict_, num_local_experts, glu):
 
     pop_linear_fc1 = {}
     pop_linear_fc2 = {}
-    for key in list(state_dict_.keys()):
+    for key in list(state_dict.keys()):
         if key_moe_local not in key:
             continue
         key_index = key.find(key_moe_local)
@@ -114,12 +114,12 @@ def moe_seq_to_group(state_dict_, num_local_experts, glu):
             if key_prefix not in pop_linear_fc1:
                 pop_linear_fc1[key_prefix] = [None for _ in range(num_local_experts)]
             assert pop_linear_fc1[key_prefix][expert_index] is None
-            pop_linear_fc1[key_prefix][expert_index] = state_dict_.pop(key)
+            pop_linear_fc1[key_prefix][expert_index] = state_dict.pop(key)
         elif key.endswith(key_local_linear_fc2):
             if key_prefix not in pop_linear_fc2:
                 pop_linear_fc2[key_prefix] = [None for _ in range(num_local_experts)]
             assert pop_linear_fc2[key_prefix][expert_index] is None
-            pop_linear_fc2[key_prefix][expert_index] = state_dict_.pop(key)
+            pop_linear_fc2[key_prefix][expert_index] = state_dict.pop(key)
 
     for key_prefix, value_list in pop_linear_fc1.items():
         if glu:
@@ -135,19 +135,19 @@ def moe_seq_to_group(state_dict_, num_local_experts, glu):
             weight = weight.transpose(0, 1)
             weight = weight.reshape(weight.shape[0], -1)
             key = f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc1}"
-        state_dict_[f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc1}"] = weight
+        state_dict[f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc1}"] = weight
 
     for key_prefix, value_list in pop_linear_fc2.items():
         weight = torch.stack(value_list, dim=0)
         weight = weight.transpose(1, 2)
         weight = weight.reshape(-1, weight.shape[-1])
         key = f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc2}"
-        state_dict_[f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc2}"] = weight
+        state_dict[f"{key_prefix}{key_moe_grouped}{key_grouped_linear_fc2}"] = weight
 
-    return state_dict_
+    return state_dict
 
 
-def moe_group_to_seq(state_dict_, num_local_experts, glu):
+def moe_group_to_seq(state_dict, num_local_experts, glu):
     key_moe_grouped = ".mlp.experts."
     key_moe_local = ".mlp.experts.local_experts."
     key_local_linear_fc1 = "linear_fc1.weight"
@@ -157,17 +157,17 @@ def moe_group_to_seq(state_dict_, num_local_experts, glu):
 
     pop_linear_fc1 = {}
     pop_linear_fc2 = {}
-    for key in list(state_dict_.keys()):
+    for key in list(state_dict.keys()):
         if key_moe_grouped not in key:
             continue
         key_index = key.find(key_moe_grouped)
         key_prefix = key[:key_index]
         if key.endswith(key_grouped_linear_fc1):
             assert key_prefix not in pop_linear_fc1
-            pop_linear_fc1[key_prefix] = state_dict_.pop(key)
+            pop_linear_fc1[key_prefix] = state_dict.pop(key)
         elif key.endswith(key_grouped_linear_fc2):
             assert key_prefix not in pop_linear_fc2
-            pop_linear_fc2[key_prefix] = state_dict_.pop(key)
+            pop_linear_fc2[key_prefix] = state_dict.pop(key)
 
     for key_prefix, value in pop_linear_fc1.items():
         if glu:
@@ -181,7 +181,7 @@ def moe_group_to_seq(state_dict_, num_local_experts, glu):
             weight = weight.reshape(-1, weight.shape[-1])
             weight_list = torch.chunk(weight, num_local_experts, dim=0)
         for i, weight in enumerate(weight_list):
-            state_dict_[f"{key_prefix}{key_moe_local}{i}.{key_local_linear_fc1}"] = (
+            state_dict[f"{key_prefix}{key_moe_local}{i}.{key_local_linear_fc1}"] = (
                 weight
             )
 
@@ -191,8 +191,8 @@ def moe_group_to_seq(state_dict_, num_local_experts, glu):
         weight = weight.reshape(-1, weight.shape[-1])
         weight_list = torch.chunk(weight, num_local_experts, dim=0)
         for i, weight in enumerate(weight_list):
-            state_dict_[f"{key_prefix}{key_moe_local}{i}.{key_local_linear_fc2}"] = (
+            state_dict[f"{key_prefix}{key_moe_local}{i}.{key_local_linear_fc2}"] = (
                 weight
             )
 
-    return state_dict_
+    return state_dict

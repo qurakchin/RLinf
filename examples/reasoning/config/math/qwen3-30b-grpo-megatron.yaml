@@ -202,9 +202,6 @@ actor:
     moe_router_pre_softmax: False
     moe_aux_loss_coeff: 0.0
 
-    # qwen3 related
-    qk_layernorm: True
-
   optim:
     optimizer: adam
     bf16: False
