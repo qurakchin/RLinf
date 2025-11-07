@@ -22,12 +22,12 @@ from sglang.srt.server_args import PortArgs, ServerArgs
 from .io_struct import (
     AbortGenerationInput,
     AbortGenerationOutput,
+    SaveNormWeightsInput,
+    SaveNormWeightsOutput,
     SyncHFWeightInput,
     SyncHFWeightOutput,
     TaskMethodInput,
     TaskMethodOutput,
-    SaveNormWeightsInput,
-    SaveNormWeightsOutput,
 )
 
 

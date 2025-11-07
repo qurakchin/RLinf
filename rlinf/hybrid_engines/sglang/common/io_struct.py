@@ -51,9 +51,11 @@ class SyncHFWeightInput:
 class SyncHFWeightOutput:
     pass
 
+
 @dataclass
 class SaveNormWeightsInput:
     pass
+
 
 @dataclass
 class SaveNormWeightsOutput:
