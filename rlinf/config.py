@@ -210,9 +210,9 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         "Qwen3ForCausalLM" in hf_config.architectures
         or "Qwen3MoeForCausalLM" in hf_config.architectures
     ):
-        cfg.model.qk_layernorm = True
+        qk_layernorm = True
     else:
-        cfg.model.qk_layernorm = cfg.model.get("qk_layernorm", False)
+        qk_layernorm = getattr(cfg.model, "qk_layernorm", False)
 
     with open_dict(cfg):
         rs = getattr(hf_config, "rope_scaling", None)
@@ -239,6 +239,7 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         cfg.model.attention_dropout = hf_config.attention_dropout
         cfg.model.hidden_dropout = getattr(hf_config, "hidden_dropout", 0.0)
         cfg.model.add_qkv_bias = qkv_bias
+        cfg.model.qk_layernorm = qk_layernorm
         cfg.model.layernorm_epsilon = hf_config.rms_norm_eps
         cfg.model.head_dim = getattr(
             hf_config,

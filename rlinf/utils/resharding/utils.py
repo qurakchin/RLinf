@@ -254,9 +254,9 @@ def _pp_reshard_fn_Qwen_model(model_state_dict, pp_group, dtype):
     pp_last_rank = parallel_state.get_pipeline_model_parallel_last_rank()
 
     keys_with_ranks = [
+        ("embedding.word_embeddings.weight", pp_first_rank),
         ("decoder.final_layernorm.weight", pp_last_rank),
         ("decoder.final_layernorm.bias", pp_last_rank),
-        ("embedding.word_embeddings.weight", pp_first_rank),
         ("output_layer.weight", pp_last_rank),
     ]
 
