@@ -137,8 +137,13 @@ class AgentRunner(ReasoningRunner):
         )
         for tool_worker in self.tool_workers:
             tool_worker.start_server()
+        train_end = False
         for _ in epoch_iter:
+            if train_end:
+                break
             for batch in self.train_dataloader:
+                if train_end:
+                    break
                 with self.timer("step"):
                     with self.timer("prepare_data"):
                         self._put_batch(batch)
@@ -197,13 +202,13 @@ class AgentRunner(ReasoningRunner):
                         logging.info(
                             f"Step limit given by max_steps={self.max_steps} reached. Stopping run"
                         )
-                        return
+                        train_end = True
 
                     if run_time_exceeded:
                         logging.info(
                             f"Time limit given by run_timer={self.run_timer} reached. Stopping run"
                         )
-                        return
+                        train_end = True
 
                 time_metrics = self.timer.consume_durations()
                 time_metrics["training"] = actor_handle.consume_duration()
