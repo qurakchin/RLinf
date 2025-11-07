@@ -205,8 +205,11 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         qkv_bias = True
     else:
         qkv_bias = getattr(hf_config, "attention_bias", False)
-    
-    if "Qwen3ForCausalLM" in hf_config.architectures or "Qwen3MoeForCausalLM" in hf_config.architectures:
+
+    if (
+        "Qwen3ForCausalLM" in hf_config.architectures
+        or "Qwen3MoeForCausalLM" in hf_config.architectures
+    ):
         cfg.model.qk_layernorm = True
     else:
         cfg.model.qk_layernorm = cfg.model.get("qk_layernorm", False)
