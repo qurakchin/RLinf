@@ -171,7 +171,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Megatron SGLang Pipeline mode
-        timeout-minutes: 20
+        timeout-minutes: 10
         run: |
           export REPO_PATH=$(pwd)
           source switch_env reason
