@@ -21,6 +21,7 @@ from rlinf.utils.utils import retrieve_model_state_dict_in_cpu
 
 from ..actor.megatron_actor_worker import MegatronActor
 
+from rlinf.utils.utils import retrieve_model_state_dict_in_cpu
 
 class MegatronInference(MegatronActor):
     """The class for running inference using Megatron.
