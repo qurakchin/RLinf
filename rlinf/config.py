@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 logging.getLogger().setLevel(logging.INFO)
 
-SUPPORTED_MODEL_ARCHS = ["qwen2.5", "qwen2.5_vl", "openvla", "openvla_oft", "openpi"]
+SUPPORTED_MODEL_ARCHS = ["qwen2.5", "qwen2.5_vl", "qwen3", "openvla", "openvla_oft", "openpi"]
 SUPPORTED_ROLLOUT_BACKENDS = ["sglang", "vllm"]
 SUPPORTED_TASK_TYPE = ["embodied", "reasoning", "coding_online_rl"]
 SUPPORTED_TRAINING_BACKENDS = ["megatron", "fsdp"]
@@ -198,6 +198,9 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         qkv_bias = True
     else:
         qkv_bias = getattr(hf_config, "attention_bias", False)
+    qk_layernorm = False
+    if "Qwen3ForCausalLM" in hf_config.architectures:
+        qk_layernorm = True
 
     with open_dict(cfg):
         rs = getattr(hf_config, "rope_scaling", None)
@@ -224,6 +227,7 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         cfg.model.attention_dropout = hf_config.attention_dropout
         cfg.model.hidden_dropout = getattr(hf_config, "hidden_dropout", 0.0)
         cfg.model.add_qkv_bias = qkv_bias
+        cfg.model.qk_layernorm = qk_layernorm
         cfg.model.layernorm_epsilon = hf_config.rms_norm_eps
         head_dim = getattr(hf_config, "head_dim", None)
         if head_dim is not None:
@@ -519,6 +523,7 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
 
         cfg.model.variable_seq_lengths = cfg.model.get("variable_seq_lengths", True)
         cfg.model.add_bias_linear = cfg.model.get("add_bias_linear", False)
+        cfg.model.qk_layernorm = cfg.model.get("qk_layernorm", False)
 
         cfg.optim.fp16 = (
             torch_dtype_from_precision(cfg.model.precision) == torch.float16
@@ -1001,6 +1006,8 @@ def build_transformer_config(cfg) -> "TransformerConfig":
         "rotary_interleaved": rotary_interleaved,
         "deallocate_pipeline_outputs": False,
         "tp_only_amax_red": tp_only_amax_red,
+        "qk_layernorm": cfg.get("qk_layernorm", False),
+        # "kv_channels": cfg.get("head_dim", None),
         # MoE related
         "num_moe_experts": cfg.get("num_moe_experts", None),
         "moe_router_load_balancing_type": cfg.get(

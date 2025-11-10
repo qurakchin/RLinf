@@ -19,6 +19,8 @@ import torch
 def get_tp_reshard_fn(model_arch: str):
     if model_arch == "qwen2.5":
         return tp_reshard_fn_qwen2_5
+    elif model_arch == "qwen3":
+        return tp_reshard_fn_qwen3
     else:
         raise NotImplementedError(
             f"get_tp_reshard_fn for model_arch {model_arch} is not implemented"
@@ -27,6 +29,8 @@ def get_tp_reshard_fn(model_arch: str):
 
 def get_pp_reshard_fn(model_arch: str):
     if model_arch == "qwen2.5":
+        return pp_reshard_fn_qwen2_5
+    elif model_arch == "qwen3":
         return pp_reshard_fn_qwen2_5
     else:
         raise NotImplementedError(
@@ -68,6 +72,26 @@ def tp_reshard_fn_qwen2_5(model_state_dict, merge_factor, tp_group):
         )
     return model_state_dict
 
+def tp_reshard_fn_qwen3(model_state_dict, merge_factor, tp_group):
+    for k, v in model_state_dict.items():
+        if (
+            "rotary_pos_emb.inv_freq" in k
+            or "linear_qkv.layer_norm_weight" in k
+            or "mlp.linear_fc1.layer_norm_weight" in k
+            or "final_layernorm.weight" in k
+            or "q_layernorm.weight" in k
+            or "k_layernorm.weight" in k
+        ):
+            model_state_dict[k] = v.clone()
+            continue
+
+        dim = 0
+        if "self_attention.linear_proj.weight" in k or "mlp.linear_fc2.weight" in k:
+            dim = 1
+        model_state_dict[k] = _gather_tp_group_tensor_and_reshard(
+            v, dim, merge_factor, tp_group
+        )
+    return model_state_dict
 
 ##############################
 # pp reshard fn implementation

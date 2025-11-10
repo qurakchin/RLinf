@@ -29,10 +29,10 @@ runner:
   val_check_interval: 1
   save_interval: 50
 
-  seq_length: 2048
+  seq_length: 4096
 
   enable_dynamic_batch_size: False
-  max_tokens_per_mbs: 2048
+  max_tokens_per_mbs: 8192
 
   resume_dir: null
   experiment_name: multiturn_demo-grpo-1.5b
@@ -88,9 +88,9 @@ inference:
   group_name: "InferenceGroup"
   load_from_actor: True
   model:
-    tensor_model_parallel_size: 1
+    tensor_model_parallel_size: 4
     pipeline_model_parallel_size: 1
-    sequence_parallel: False
+    sequence_parallel: True
 
 agentloop:
   group_name: "AgentLoopGroup"
@@ -107,7 +107,7 @@ rollout:
   gpu_memory_utilization: 0.55
 
   model_dir: /mnt/public/agent/nishang/Qwen3-4B-Instruct-2507
-  model_arch: qwen2.5
+  model_arch: qwen3
   precision: ${actor.model.precision}              # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
@@ -148,7 +148,7 @@ data:
   type: math
   max_prompt_length: 1024
   filter_prompt_by_length: True
-  rollout_batch_size: 4
+  rollout_batch_size: 8
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
@@ -175,7 +175,8 @@ actor:
   spec_name: decoder_gpt
 
   # checkpoint_load_path: /mnt/public/agent/nishang/outputs/test_multi_turn_code_judge/logs/multiturn_demo-grpo-1.5b/converted_ckpts/actor
-  checkpoint_load_path: /mnt/public/agent/nishang/outputs/test_multi_turn_code_judge_lean/logs/multiturn_demo-grpo-1.5b/converted_ckpts/actor
+  # checkpoint_load_path: /mnt/public/agent/nishang/outputs/test_multi_turn_code_judge_lean/logs/multiturn_demo-grpo-1.5b/converted_ckpts/actor
+  checkpoint_load_path: null
 
   offload_optimizer: True
   offload_weight: True
@@ -190,17 +191,17 @@ actor:
     precision: bf16
     add_bias_linear: False
 
-    tensor_model_parallel_size: 1
+    tensor_model_parallel_size: 4
     pipeline_model_parallel_size: 1
 
     activation: swiglu
-    sequence_parallel: False
+    sequence_parallel: True
     # recompute_method: block
     # recompute_granularity: selective
 
     recompute_method: block
     recompute_granularity: full
-    recompute_num_layers: 20
+    recompute_num_layers: 36
 
     seq_length: ${runner.seq_length}
     encoder_seq_length: ${runner.seq_length}
@@ -261,7 +262,7 @@ actor:
     use_dist_ckpt: False
     tp_comm_bootstrap_backend: nccl
     tp_comm_overlap_cfg: null # tp_comm_overlap_cfg.yaml
-    use_hf_ckpt: False # if true, will transfer hf model to generate megatron checkpoint and use it for training.
+    use_hf_ckpt: True # if true, will transfer hf model to generate megatron checkpoint and use it for training.
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor
