@@ -161,11 +161,11 @@ actor:
     precision: fp16
     add_bias_linear: False
 
-    tensor_model_parallel_size: 4
-    pipeline_model_parallel_size: 1
-    expert_model_parallel_size: 2
+    tensor_model_parallel_size: 2
+    pipeline_model_parallel_size: 2
+    expert_model_parallel_size: 1
     expert_tensor_parallel_size: 2
-    moe_grouped_gemm: null # grouped_gemm type, avail in [null, te]. null means do not use grouped_gemm
+    moe_grouped_gemm: te # grouped_gemm type, avail in [null, te]. null means do not use grouped_gemm
 
     activation: swiglu
     sequence_parallel: True
