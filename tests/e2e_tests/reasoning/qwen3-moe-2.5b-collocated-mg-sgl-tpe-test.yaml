@@ -145,7 +145,7 @@ actor:
   mcore_gpt: True
   spec_name: decoder_gpt
 
-  checkpoint_load_path: null
+  checkpoint_load_path: /workspace/dataset/Qwen3-2.5B-A1B-tp4-pp1-ep1-tpe4
 
   offload_optimizer: True
   offload_weight: True
@@ -242,7 +242,7 @@ actor:
     use_dist_ckpt: False
     tp_comm_bootstrap_backend: nccl
     tp_comm_overlap_cfg: null # tp_comm_overlap_cfg.yaml
-    use_hf_ckpt: True # if true, will transfer hf model to generate megatron checkpoint and use it for training.
+    use_hf_ckpt: False # if true, will transfer hf model to generate megatron checkpoint and use it for training.
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor

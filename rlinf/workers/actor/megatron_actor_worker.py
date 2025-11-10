@@ -408,7 +408,11 @@ class MegatronActor(MegatronModelManager, Worker):
             if not self.return_loss:
 
                 def id_func(output, non_loss_data=True):
-                    return output["log_probs"][:, -response_len - 1 : -1].contiguous()
+                    return output
+
+                # in last stage need to get the log_probs from the output
+                if unwrap_model(model).post_process:
+                    output = output["log_probs"][:, -response_len - 1 : -1].contiguous()
 
                 return output, id_func
 
