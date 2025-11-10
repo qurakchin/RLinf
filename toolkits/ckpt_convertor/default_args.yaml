@@ -59,6 +59,13 @@ explict_model:
     head_dim: 128
     num_layers: 48
     num_experts: 128
+  'Qwen3-2.5B-A1B':
+    model_type: qwen_3_moe
+    num_attention_heads: 32
+    num_query_groups: 4
+    head_dim: 128
+    num_layers: 4
+    num_experts: 128
   'Qwen3-0.6B':
     model_type: qwen_3
     num_attention_heads: 16
