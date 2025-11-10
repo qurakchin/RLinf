@@ -177,18 +177,27 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
         import openpi.transforms as transforms
         import safetensors
         from openpi.training import checkpoints as _checkpoints
-        from openpi.training import config as _config
 
+        from .embodiment.openpi import get_openpi_config
         from .embodiment.openpi_action_model import (
             OpenPi0Config,
             OpenPi0ForRLActionPrediction,
         )
 
         # config
-        if getattr(cfg.openpi, "pi05", False):
-            actor_train_config = _config.get_config("pi05_libero")
+        simulator_type = getattr(cfg.openpi, "simulator_type", "libero")
+        if simulator_type == "libero":
+            if getattr(cfg.openpi, "pi05", False):
+                actor_train_config = get_openpi_config("pi05_libero")
+            else:
+                actor_train_config = get_openpi_config("pi0_libero")
+        elif simulator_type == "metaworld":
+            if getattr(cfg.openpi, "pi05", False):
+                actor_train_config = get_openpi_config("pi05_metaworld")
+            else:
+                actor_train_config = get_openpi_config("pi0_metaworld")
         else:
-            actor_train_config = _config.get_config("pi0_libero")
+            raise ValueError(f"Invalid simulator type: {simulator_type}")
         actor_model_config = actor_train_config.model
         actor_model_config = OpenPi0Config(**actor_model_config.__dict__)
         override_config_kwargs = cfg.openpi

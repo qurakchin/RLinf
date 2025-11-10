@@ -16,31 +16,30 @@ import copy
 import os
 from typing import Optional, Union
 
-import gym
+import gymnasium as gym
+import metaworld
 import numpy as np
 import torch
-from libero.libero import get_libero_path
-from libero.libero.benchmark import Benchmark
-from libero.libero.envs import OffScreenRenderEnv
-from omegaconf.omegaconf import OmegaConf
 
 from rlinf.envs.libero.utils import (
-    get_benchmark_overridden,
-    get_libero_image,
-    get_libero_wrist_image,
     put_info_on_image,
-    quat2axisangle,
     save_rollout_video,
     tile_images,
 )
-from rlinf.envs.libero.venv import ReconfigureSubprocEnv
+from rlinf.envs.metaworld.utils import load_prompt_from_json
+from rlinf.envs.metaworld.venv import ReconfigureSubprocEnv
 from rlinf.envs.utils import (
     list_of_dict_to_dict_of_list,
     to_tensor,
 )
 
+# Ensure MW envs only register once
+if not getattr(metaworld, "_has_registered_mw_envs", False):
+    metaworld.register_mw_envs()
+    metaworld._has_registered_mw_envs = True
 
-class LiberoEnv(gym.Env):
+
+class MetaWorldEnv(gym.Env):
     def __init__(self, cfg, seed_offset, total_num_processes):
         self.seed_offset = seed_offset
         self.cfg = cfg
@@ -57,10 +56,10 @@ class LiberoEnv(gym.Env):
 
         self._generator = np.random.default_rng(seed=self.seed)
         self._generator_ordered = np.random.default_rng(seed=0)
-        self.start_idx = 0
 
-        self.task_suite: Benchmark = get_benchmark_overridden(cfg.task_suite_name)()
-
+        self.num_tasks = 50
+        self.task_num_trials = 10
+        self.RESET_STEP = 15
         self._compute_total_num_group_envs()
         self.reset_state_ids_all = self.get_reset_state_ids_all()
         self.update_reset_state_ids()
@@ -76,11 +75,22 @@ class LiberoEnv(gym.Env):
         self.video_cfg = cfg.video_cfg
         self.video_cnt = 0
         self.render_images = []
-        self.current_raw_obs = None
 
     def _init_env(self):
+        # metaworld task and prompt description
+        config_path = os.path.join(os.path.dirname(__file__), "metaworld_config.json")
+        self.task_description_dict = load_prompt_from_json(
+            config_path, "TASK_DESCRIPTIONS"
+        )
+        self.env_all_names = list(self.task_description_dict.keys())
+        self.task_all_names = list(self.task_description_dict.values())
         env_fns = self.get_env_fns()
-        self.env = ReconfigureSubprocEnv(env_fns)
+        self.use_async_vector_env = False
+        if self.use_async_vector_env:
+            assert not self.auto_reset, "AsyncVectorEnv does not support auto_reset."
+            self.env = gym.vector.AsyncVectorEnv(env_fns)
+        else:
+            self.env = ReconfigureSubprocEnv(env_fns)
 
     def get_env_fns(self):
         env_fn_params = self.get_env_fn_params()
@@ -88,9 +98,17 @@ class LiberoEnv(gym.Env):
         for env_fn_param in env_fn_params:
 
             def env_fn(param=env_fn_param):
-                seed = param.pop("seed")
-                env = OffScreenRenderEnv(**param)
-                env.seed(seed)
+                os.environ["MUJOCO_EGL_DEVICE_ID"] = str(self.seed_offset)
+                env_name = param["env_name"]
+                env = gym.make(
+                    "Meta-World/MT1",
+                    env_name=env_name,
+                    render_mode="rgb_array",
+                    camera_id=2,
+                    disable_env_checker=True,
+                )
+                # Set camera position to align with sft
+                env.env.env.env.env.env.env.model.cam_pos[2] = [0.75, 0.075, 0.7]
                 return env
 
             env_fns.append(env_fn)
@@ -98,8 +116,6 @@ class LiberoEnv(gym.Env):
 
     def get_env_fn_params(self, env_idx=None):
         env_fn_params = []
-        base_env_args = OmegaConf.to_container(self.cfg.init_params, resolve=True)
-
         task_descriptions = []
         if env_idx is None:
             env_idx = np.arange(self.cfg.num_envs)
@@ -107,28 +123,24 @@ class LiberoEnv(gym.Env):
             if env_id not in env_idx:
                 task_descriptions.append(self.task_descriptions[env_id])
                 continue
-            task = self.task_suite.get_task(self.task_ids[env_id])
-            task_bddl_file = os.path.join(
-                get_libero_path("bddl_files"), task.problem_folder, task.bddl_file
-            )
+            env_name = self.env_all_names[self.task_ids[env_id]]
+            task_description = self.task_all_names[self.task_ids[env_id]]
+
             env_fn_params.append(
                 {
-                    **base_env_args,
-                    "bddl_file_name": task_bddl_file,
-                    "seed": self.seed,
+                    "env_name": env_name,
                 }
             )
-            task_descriptions.append(task.language)
+            task_descriptions.append(task_description)
         self.task_descriptions = task_descriptions
         return env_fn_params
 
     def _compute_total_num_group_envs(self):
         self.total_num_group_envs = 0
         self.trial_id_bins = []
-        for task_id in range(self.task_suite.get_num_tasks()):
-            task_num_trials = len(self.task_suite.get_task_init_states(task_id))
-            self.trial_id_bins.append(task_num_trials)
-            self.total_num_group_envs += task_num_trials
+        for task_id in range(self.num_tasks):
+            self.trial_id_bins.append(self.task_num_trials)
+            self.total_num_group_envs += self.task_num_trials
         self.cumsum_trial_id_bins = np.cumsum(self.trial_id_bins)
 
     def update_reset_state_ids(self):
@@ -154,19 +166,13 @@ class LiberoEnv(gym.Env):
         valid_size = len(reset_state_ids) - (
             len(reset_state_ids) % self.total_num_processes
         )
-        self._generator_ordered.shuffle(reset_state_ids)
+        # self._generator_ordered.shuffle(reset_state_ids) # TODO: eval env shuffle ?
         reset_state_ids = reset_state_ids[:valid_size]
         reset_state_ids = reset_state_ids.reshape(self.total_num_processes, -1)
         return reset_state_ids
 
     def _get_ordered_reset_state_ids(self, num_reset_states):
-        if self.start_idx + num_reset_states > len(self.reset_state_ids_all[0]):
-            self.reset_state_ids_all = self.get_reset_state_ids_all()
-            self.start_idx = 0
-        reset_state_ids = self.reset_state_ids_all[self.seed_offset][
-            self.start_idx : self.start_idx + num_reset_states
-        ]
-        self.start_idx = self.start_idx + num_reset_states
+        reset_state_ids = self.reset_state_ids_all[self.seed_offset]
         return reset_state_ids
 
     def _get_task_and_trial_ids_from_reset_state_ids(self, reset_state_ids):
@@ -183,17 +189,6 @@ class LiberoEnv(gym.Env):
                 start_pivot = end_pivot
 
         return np.array(task_ids), np.array(trial_ids)
-
-    def _get_reset_states(self, env_idx):
-        if env_idx is None:
-            env_idx = np.arange(self.num_envs)
-        init_state = [
-            self.task_suite.get_task_init_states(self.task_ids[env_id])[
-                self.trial_ids[env_id]
-            ]
-            for env_id in env_idx
-        ]
-        return init_state
 
     @property
     def elapsed_steps(self):
@@ -244,34 +239,24 @@ class LiberoEnv(gym.Env):
         return infos
 
     def _extract_image_and_state(self, obs):
-        if self.cfg.get("use_wrist_image", False):
-            return {
-                "full_image": get_libero_image(obs),
-                "wrist_image": get_libero_wrist_image(obs),
-                "state": np.concatenate(
-                    [
-                        obs["robot0_eef_pos"],
-                        quat2axisangle(obs["robot0_eef_quat"]),
-                        obs["robot0_gripper_qpos"],
-                    ]
-                ),
-            }
-        else:
-            return {
-                "full_image": get_libero_image(obs),
-                "state": np.concatenate(
-                    [
-                        obs["robot0_eef_pos"],
-                        quat2axisangle(obs["robot0_eef_quat"]),
-                        obs["robot0_gripper_qpos"],
-                    ]
-                ),
-            }
+        images = self.env.render()
+        images = np.array(images)[:, ::-1, ::-1]
+        state = obs[:, :4]
+        return {
+            "full_image": images,
+            "state": state,
+        }
 
     def _wrap_obs(self, obs_list):
         images_and_states_list = []
-        for obs in obs_list:
-            images_and_states = self._extract_image_and_state(obs)
+        images = self.env.render()
+        images = np.array(images)[:, ::-1, ::-1]
+        state = obs_list[:, :4]
+        for idx in range(self.num_envs):
+            images_and_states = {
+                "full_image": images[idx],
+                "state": state[idx],
+            }
             images_and_states_list.append(images_and_states)
 
         obs = {
@@ -292,13 +277,15 @@ class LiberoEnv(gym.Env):
                 reconfig_env_idx.append(env_id)
             self.task_ids[env_id] = task_ids[j]
             self.trial_ids[env_id] = trial_ids[j]
-        if reconfig_env_idx:
-            env_fn_params = self.get_env_fn_params(reconfig_env_idx)
-            self.env.reconfigure_env_fns(env_fn_params, reconfig_env_idx)
-        self.env.seed(self.seed * len(env_idx))
-        self.env.reset(id=env_idx)
-        init_state = self._get_reset_states(env_idx=env_idx)
-        self.env.set_init_state(init_state=init_state, id=env_idx)
+        if self.use_async_vector_env:
+            env_fns = self.get_env_fns()
+            self.env = gym.vector.AsyncVectorEnv(env_fns)
+            self.env.reset()
+        else:
+            if reconfig_env_idx:
+                env_fn_params = self.get_env_fn_params(reconfig_env_idx)
+                self.env.reconfigure_env_fns(env_fn_params, reconfig_env_idx)
+            self.env.reset(id=env_idx)
 
     def reset(
         self,
@@ -314,19 +301,23 @@ class LiberoEnv(gym.Env):
             reset_state_ids = self._get_random_reset_state_ids(num_reset_states)
 
         self._reconfigure(reset_state_ids, env_idx)
-        for _ in range(15):
-            zero_actions = np.zeros((len(env_idx), 7))
-            zero_actions[:, -1] = -1
-            raw_obs, _reward, terminations, info_lists = self.env.step(
-                zero_actions, env_idx
-            )
-        if self.current_raw_obs is None:
-            self.current_raw_obs = [None] * self.num_envs
-        for i, idx in enumerate(env_idx):
-            self.current_raw_obs[idx] = raw_obs[i]
 
-        obs = self._wrap_obs(self.current_raw_obs)
-        self._reset_metrics(env_idx)
+        if self.use_async_vector_env:
+            for _ in range(self.RESET_STEP):
+                zero_action = np.zeros((self.num_envs, 4))
+                raw_obs, _reward, _, _, _ = self.env.step(zero_action)
+        else:
+            for _ in range(self.RESET_STEP):
+                zero_action = np.zeros((len(env_idx), 4))
+                self.env.step(zero_action, id=env_idx)
+            all_actions = np.zeros((self.num_envs, 4))
+            raw_obs, _reward, _, _, _ = self.env.step(all_actions)
+
+        obs = self._wrap_obs(raw_obs)
+        if env_idx is not None:
+            self._reset_metrics(env_idx)
+        else:
+            self._reset_metrics()
         infos = {}
         return obs, infos
 
@@ -349,9 +340,13 @@ class LiberoEnv(gym.Env):
             actions = actions.detach().cpu().numpy()
 
         self._elapsed_steps += 1
-        raw_obs, _reward, terminations, info_lists = self.env.step(actions)
-        self.current_raw_obs = raw_obs
-        infos = list_of_dict_to_dict_of_list(info_lists)
+
+        if self.use_async_vector_env:
+            raw_obs, _reward, _, _, infos = self.env.step(actions)
+        else:
+            raw_obs, _reward, _, _, info_lists = self.env.step(actions)
+            infos = list_of_dict_to_dict_of_list(info_lists)
+        terminations = np.array(infos["success"]).astype(bool)
         truncations = self.elapsed_steps >= self.cfg.max_episode_steps
         obs = self._wrap_obs(raw_obs)
 
@@ -363,7 +358,7 @@ class LiberoEnv(gym.Env):
                 "terminations": terminations,
                 "task": self.task_descriptions,
             }
-            self.add_new_frames(raw_obs, plot_infos)
+            self.add_new_frames(obs, plot_infos)
 
         infos = self._record_metrics(step_reward, terminations, infos)
         if self.ignore_terminations:
@@ -462,13 +457,14 @@ class LiberoEnv(gym.Env):
         else:
             return reward
 
-    def add_new_frames(self, raw_obs, plot_infos):
+    def add_new_frames(self, obs, plot_infos):
         images = []
-        for env_id, raw_single_obs in enumerate(raw_obs):
+        obs_batch = obs["images_and_states"]["full_image"]
+        for env_id in range(obs_batch.shape[0]):
             info_item = {
                 k: v if np.size(v) == 1 else v[env_id] for k, v in plot_infos.items()
             }
-            img = raw_single_obs["agentview_image"][::-1, ::-1]
+            img = obs_batch[env_id].numpy()
             img = put_info_on_image(img, info_item)
             images.append(img)
         full_image = tile_images(images, nrows=int(np.sqrt(self.num_envs)))
