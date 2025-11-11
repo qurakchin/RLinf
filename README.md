@@ -546,7 +546,7 @@ and exhibits greater stability.
 ### 1. System-Level Enhancements
 - [X] Support for heterogeneous GPUs  
 - [ ] Support for asynchronous pipeline execution  
-- [ ] Support for Mixture of Experts (MoE)  
+- [X] Support for Mixture of Experts (MoE)  
 - [X] Support for vLLM inference backend
 
 ### 2. Application-Level Extensions

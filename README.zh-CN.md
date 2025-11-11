@@ -547,7 +547,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 
 - [ ] 支持异步流水线执行
 
-- [ ] 支持专家混合（Mixture of Experts, MoE）
+- [X] 支持专家混合（Mixture of Experts, MoE）
 
 - [X] 支持 vLLM 推理后端
 

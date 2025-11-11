@@ -162,8 +162,8 @@ actor:
     add_bias_linear: False
 
     tensor_model_parallel_size: 2
-    pipeline_model_parallel_size: 1
-    expert_model_parallel_size: 1
+    pipeline_model_parallel_size: 2
+    expert_model_parallel_size: 2
     expert_tensor_parallel_size: 1
     moe_grouped_gemm: te # grouped_gemm type, avail in [null, te]. null means do not use grouped_gemm
 
