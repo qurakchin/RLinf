@@ -832,15 +832,26 @@ class MegatronActor(MegatronModelManager, Worker):
             return batch
 
     def _dp_load_balance(self, batch: dict[str, torch.Tensor]):
-        # batch_size = batch["input_ids"].shape[0]
-        # assert batch_size == self.total_batch_size_per_dp, (
-        #     f"DP Load balance is only available when a single batch contains all data, e.g., in collocated mode. But got {batch_size=} and {self.total_batch_size_per_dp=}."
-        # )
+        batch_size = batch["input_ids"].shape[0]
+        assert batch_size == self.total_batch_size_per_dp, (
+            f"DP Load balance is only available when a single batch contains all data, e.g., in collocated mode. But got {batch_size=} and {self.total_batch_size_per_dp=}."
+        )
         batch = RolloutDataBalance.from_rollout_batches(
             rollout_batches=batch,
             dp_world_size=parallel_state.get_data_parallel_world_size(),
             dp_rank=parallel_state.get_data_parallel_rank(),
             dp_group=parallel_state.get_data_parallel_group(),
+            partitioning_tool=get_seqlen_balanced_partitions,
+        )
+        return batch
+
+    def _dp_load_balance_dynamic(self, batch: dict[str, torch.Tensor], batch_pad):
+        batch = RolloutDataBalance.from_rollout_batches_dynamic(
+            rollout_batches=batch,
+            dp_world_size=parallel_state.get_data_parallel_world_size(),
+            dp_rank=parallel_state.get_data_parallel_rank(),
+            dp_group=parallel_state.get_data_parallel_group(),
+            rollout_batch_pad=batch_pad,
             partitioning_tool=get_seqlen_balanced_partitions,
         )
         return batch
@@ -874,7 +885,9 @@ class MegatronActor(MegatronModelManager, Worker):
             for _ in range(total_result_size_per_dp):
                 batch, rollout_result = self.get_batch_dynamic(input_channel)
                 batches.append(batch)
-            # batch = DynamicRolloutResult.merge_batches(batches)
+            print(f"zcy_dbg: size of batch 1: {len(batches)}, total size: {sum([len(b['input_ids']) for b in batches])}, size of each batch: {[len(b['input_ids']) for b in batches]}")
+            batch = DynamicRolloutResult.merge_batches(batches, self.cfg.algorithm.group_size)
+            print(f"zcy_dbg: size of batch 2: {len(batch['input_ids'])}, keys: {batch.keys()}")
         else:
             recv_batch_size = 0
             while recv_batch_size < self.total_batch_size_per_dp:
@@ -884,12 +897,15 @@ class MegatronActor(MegatronModelManager, Worker):
             assert recv_batch_size == self.total_batch_size_per_dp, (
                 f"Expected {self.total_batch_size_per_dp} sequences from channel, but got {recv_batch_size}"
             )
-        print(f"zcy_dbg: size of batch 1: {len(batches)}, total size: {sum([len(b['input_ids']) for b in batches])}, size of each batch: {[len(b['input_ids']) for b in batches]}")
-        batch = RolloutResult.merge_batches(batches)
-        print(f"zcy_dbg: size of batch 2: {len(batch['input_ids'])}, keys: {batch.keys()}")
+            print(f"zcy_dbg: size of batch 1: {len(batches)}, total size: {sum([len(b['input_ids']) for b in batches])}, size of each batch: {[len(b['input_ids']) for b in batches]}")
+            batch = RolloutResult.merge_batches(batches)
+            print(f"zcy_dbg: size of batch 2: {len(batch['input_ids'])}, keys: {batch.keys()}")
 
         # Compute advantages and returns
         batch = self.compute_advantages_and_returns(batch)
+        if self.is_dynamic_rollout_batch:
+            # idx_to_traj is not needed after computing advantages
+            batch.pop("idx_to_traj")
         print(f"zcy_dbg: size of batch 3: {len(batch['input_ids'])}, advantages: {batch['advantages'].shape}, mask: {batch['attention_mask'].shape}, keys: {batch.keys()}")
 
         # Must be called after batch is retrieved, which is when rollout has stopped
@@ -908,7 +924,11 @@ class MegatronActor(MegatronModelManager, Worker):
 
         # DP batch load balance
         if self.cfg.actor.get("enable_dp_load_balance", False) and parallel_state.get_data_parallel_world_size() > 1:
-            batch = self._dp_load_balance(batch)
+            if self.is_dynamic_rollout_batch:
+                batch_pad = DynamicRolloutResult.get_batch_pad(self.cfg.actor.model.encoder_seq_length)
+                batch = self._dp_load_balance_dynamic(batch, batch_pad)
+            else:
+                batch = self._dp_load_balance(batch)
             print(f"zcy_dbg: size of batch 4: {len(batch['input_ids'])}, advantages: {batch['advantages'].shape}, mask: {batch['attention_mask'].shape}, keys: {batch.keys()}")
 
         if self.use_profiler:
@@ -1357,6 +1377,7 @@ class MegatronActor(MegatronModelManager, Worker):
                         rewards=batch["rewards"].cuda(),
                         loss_mask=mask.cuda(),
                         num_sequence=len(batch["input_ids"]),
+                        group_size=self.cfg.algorithm.group_size,
                         idx_to_traj=batch["idx_to_traj"],
                         kl_beta=self.cfg.algorithm.get("reinpp_kl_beta", 0.0),
                         kl_penalty_type=self.kl_penalty_type,
