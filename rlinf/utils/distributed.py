@@ -384,6 +384,61 @@ class RolloutDataBalance(UserDict):
 
         return cls(final_rank_data, ordered_keys_hint=final_ordered_keys)
 
+    @classmethod
+    def from_rollout_batches_dynamic(
+        cls: Self,
+        rollout_batches: dict[str, torch.Tensor],
+        dp_world_size: int,
+        dp_rank: int,
+        dp_group: Optional[ProcessGroup],
+        rollout_batch_pad: dict[str, torch.Tensor],
+        partitioning_tool: Callable,
+    ) -> Self:
+        # 0. Check data
+        assert rollout_batches.keys() == rollout_batch_pad.keys(), f"rollout_batches and rollout_batch_pad must have the same keys"
+        assert "input_ids" in rollout_batches and "prompt_lengths" in rollout_batches and "response_lengths" in rollout_batches
+        batch_size = rollout_batches["input_ids"].size(0)
+        assert all(v.size(0) == batch_size for v in rollout_batches.values())
+        assert all(v.size(0) == 1 for v in rollout_batch_pad.values())
+        for k in rollout_batches.keys():
+            assert rollout_batches[k].dtype == rollout_batch_pad[k].dtype, f"batch dtype mismatch: key: {k}, dtype: {rollout_batches[k].dtype}, {rollout_batch_pad[k].dtype}"
+            assert rollout_batches[k].shape[1:] == rollout_batch_pad[k].shape[1:], f"batch shape mismatch: key: {k}, shape: {rollout_batches[k].shape}, {rollout_batch_pad[k].shape}"
+        rollout_batches = {
+            k: v.cpu() for k, v in rollout_batches.items()
+        }
+        rollout_batch_pad = {
+            k: v.cpu() for k, v in rollout_batch_pad.items()
+        }
+
+        # 1. Allgather data
+        gathered_rollout_batches = [None for _ in range(dp_world_size)]
+        torch.distributed.all_gather_object(
+            gathered_rollout_batches, rollout_batches, group=dp_group
+        )
+        global_batch_size = batch_size = sum(b["input_ids"].size(0) for b in gathered_rollout_batches)
+
+        # 2. Merge data and pad data to fixed length
+        pad_size = dp_world_size - (global_batch_size % dp_world_size)
+        merged_rollout_batches = {}
+        for key in rollout_batches.keys():
+            merged_rollout_batches[key] = torch.cat([rollout_batches[key] for rollout_batches in gathered_rollout_batches] + [rollout_batch_pad[key]] * pad_size, dim=0)
+
+        # 3. get length of each sample
+        sample_lengths = (merged_rollout_batches["prompt_lengths"] + merged_rollout_batches["response_lengths"]).tolist()
+
+        # 4. Calc partitions
+        partitions = partitioning_tool(
+            seqlen_list=sample_lengths,
+            k_partitions=dp_world_size,
+            equal_size=True,
+        )
+        self_partition = partitions[dp_rank]
+
+        # 5. Get indices of samples for current rank
+        selected_rollout_batches = {k: v[self_partition] for k, v in merged_rollout_batches.items()}
+
+        return selected_rollout_batches
+
     def gather_and_balance_globally(self):
         global_rollout_batch = type(self)()
 

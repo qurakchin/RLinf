@@ -126,7 +126,7 @@ def compute_grpo_advantages(
 def compute_grpo_dynamic_advantages(
     rewards: torch.Tensor,
     loss_mask: torch.Tensor,
-    num_sequence: int,
+    group_size: int,
     idx_to_traj: list[int],
     **kwargs,
 ):
@@ -142,6 +142,7 @@ def compute_grpo_dynamic_advantages(
         torch.Tensor: advantages
     """
     # TODO: use idx_to_traj
+    num_sequence = len(idx_to_traj)
     grouped_rewards = rewards.view(-1, num_sequence)
 
     grouped_reward_mean = grouped_rewards.mean(dim=-1, keepdim=True).expand_as(

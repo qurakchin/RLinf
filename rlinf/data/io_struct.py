@@ -984,8 +984,8 @@ class DynamicRolloutResult:
         #           |<------------------ cfg.runner.seq_length --------->|
 
 
-        prompt_lengths = torch.tensor(self.prompt_lengths)
-        response_lengths = torch.tensor(self.response_lengths)
+        prompt_lengths = torch.tensor(self.prompt_lengths, dtype=torch.int32)
+        response_lengths = torch.tensor(self.response_lengths, dtype=torch.int32)
         is_end = torch.tensor(self.is_end, dtype=torch.bool)
 
         attention_mask, position_ids = self._get_attention_masks_and_position_ids(
@@ -1034,6 +1034,47 @@ class DynamicRolloutResult:
 
         return batch
 
+    def get_batch_pad(seq_length: int) -> dict[str, torch.Tensor]:
+        """Get the batch pad for the dynamic rollout result."""
+        pad_seq_shape = (1, seq_length)
+        return {
+            "input_ids": torch.zeros(*pad_seq_shape, dtype=torch.long, device=torch.cuda.current_device()),
+            "attention_mask": torch.ones(*pad_seq_shape, dtype=torch.bool, device=torch.cuda.current_device()),
+            "position_ids": torch.zeros(*pad_seq_shape, dtype=torch.long, device=torch.cuda.current_device()),
+            "is_end": torch.zeros(1, dtype=torch.bool, device=torch.cuda.current_device()),
+            "prompt_lengths": torch.zeros(1, dtype=torch.int32, device=torch.cuda.current_device()),
+            "response_lengths": torch.zeros(1, dtype=torch.int32, device=torch.cuda.current_device()),
+            "prev_logprobs": torch.zeros(*pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()),
+            "rewards": torch.zeros(1, dtype=torch.float32, device=torch.cuda.current_device()),
+            "advantages": torch.zeros(*pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()),
+        }
+
+    @staticmethod
+    def merge_batches(
+        batches: list[dict[str, torch.Tensor]],
+        group_size: int,
+    ) -> dict[str, torch.Tensor]:
+        """Merge two batches into one."""
+        merged_batch = {}
+        if len(batches) == 0:
+            return merged_batch
+        if len(batches) == 1:
+            return batches[0]
+
+        for key in batches[0].keys():
+            if key == "idx_to_traj":
+                merged_batch[key] = []
+                for i, batch in enumerate(batches):
+                    merged_batch[key].extend([j + i * group_size for j in batch[key]])
+            elif torch.is_tensor(batches[0][key]):
+                merged_batch[key] = torch.cat([batch[key] for batch in batches], dim=0)
+            elif isinstance(batches[0][key], list):
+                merged_batch[key] = []
+                for batch in batches:
+                    merged_batch[key].extend(batch[key])
+            else:
+                raise ValueError(f"Unsupported batch key type: {type(batches[0][key])}")
+        return merged_batch
 
 class BatchResizingIterator:
     """The iterator for handling getting a batch and split it as a batch iterator with optional dynamic batch size."""
