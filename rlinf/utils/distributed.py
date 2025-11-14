@@ -36,10 +36,15 @@ def compute_rollout_metrics(
     response_len: int,
     data_parallel_group: Optional[ProcessGroup] = None,
     use_critic: bool = False,
+    debug_right_padding: bool = False,
 ):
+    assert debug_right_padding == True, "zcy_dbg: debug_right_padding True"
     device = torch.device(f"cuda:{torch.cuda.current_device()}")
     advantages = rollout_batch["advantages"].to(device=device)
-    mask = rollout_batch["attention_mask"][:, -response_len:].to(device=device)
+    if debug_right_padding:
+        mask = rollout_batch["attention_mask"].to(device=device)
+    else:
+        mask = rollout_batch["attention_mask"][:, -response_len:].to(device=device)
     prompt_lengths = rollout_batch["prompt_lengths"].clone().to(device=device)
     response_lengths = rollout_batch["response_lengths"].clone().to(device=device)
     reward_scores = rollout_batch["rewards"].clone().to(device=device)
@@ -164,10 +169,14 @@ class RolloutDataBalance(UserDict):
     ) -> Self:
         current_device = torch.cuda.current_device()
 
-        attn_mask = rollout_batches.get("attention_mask")
-        current_num_samples = attn_mask.size(0)
-
-        # 2. Calculate local sample token counts
+        # 1. Get local sample count
+        current_num_samples = 0
+        if rollout_batches:
+            first_tensor = next(iter(rollout_batches.values()))
+            if isinstance(first_tensor, torch.Tensor) and first_tensor.numel() > 0:
+                current_num_samples = first_tensor.size(0)
+                
+        # 2. Calculate local token counts
         local_token_counts = torch.zeros(
             current_num_samples, dtype=torch.int, device=current_device
         )
@@ -180,20 +189,23 @@ class RolloutDataBalance(UserDict):
                 local_token_counts = attn_mask.sum(dim=1).int()
 
         # 3. Gather global information: sample counts from each rank
-        num_samples_tensor = torch.tensor(
-            current_num_samples, device=current_device, dtype=torch.long
-        )
-        all_num_samples_t = [
-            torch.empty_like(num_samples_tensor) for _ in range(dp_world_size)
-        ]
-        if dp_group and dp_world_size > 1:
-            torch.distributed.all_gather(
-                all_num_samples_t, num_samples_tensor, group=dp_group
+        if dp_world_size > 1 and dp_group is not None:
+            # Multi-rank case: use all_gather_object
+            all_num_samples = [None] * dp_world_size
+            torch.distributed.all_gather_object(
+                all_num_samples, current_num_samples, group=dp_group
             )
         else:
-            all_num_samples_t = [num_samples_tensor]
-        all_num_samples = [s.item() for s in all_num_samples_t]
+            # Single-rank case: 
+            all_num_samples = [current_num_samples]
+
+        all_num_samples = [
+            int(num_samples) if num_samples is not None else 0
+            for num_samples in all_num_samples
+        ]
+        
         global_total_samples = sum(all_num_samples)
+        
         max_samples_rank = max(all_num_samples) if global_total_samples > 0 else 0
 
         # 4. Gather global token counts for all samples
@@ -213,6 +225,10 @@ class RolloutDataBalance(UserDict):
                 torch.empty_like(padded_local_tokens) for _ in range(dp_world_size)
             ]
             if dp_group and dp_world_size > 1:
+                all_padded_tokens_t = [
+                    torch.zeros(max_samples_rank, dtype=torch.int, device=current_device)
+                    for _ in range(dp_world_size)
+                ]
                 torch.distributed.all_gather(
                     all_padded_tokens_t, padded_local_tokens, group=dp_group
                 )
@@ -285,6 +301,11 @@ class RolloutDataBalance(UserDict):
             torch.distributed.all_gather_object(
                 all_payloads_cpu, payload_cpu, group=dp_group
             )
+            print(f"zcy_dbg: data balance: 1, size: {len(all_payloads_cpu)}, dp_ws: {dp_world_size}")
+            remove_len = len(all_payloads_cpu) % dp_world_size
+            if remove_len > 0:
+                all_payloads_cpu = all_payloads_cpu[:-remove_len]
+            print(f"zcy_dbg: data balance: 2, size: {len(all_payloads_cpu)}, dp_ws: {dp_world_size}")
         else:
             all_payloads_cpu = [payload_cpu]
 
@@ -355,6 +376,11 @@ class RolloutDataBalance(UserDict):
                         final_rank_data[key] = _create_empty_tensor_for_key(
                             key, template_specs, current_device
                         )
+        else:
+            for key in final_ordered_keys:
+                final_rank_data[key] = _create_empty_tensor_for_key(
+                    key, template_specs, current_device
+                )
 
         return cls(final_rank_data, ordered_keys_hint=final_ordered_keys)
 
