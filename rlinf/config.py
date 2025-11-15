@@ -498,12 +498,12 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         )
 
         # TODO fix this
-        cfg.megatron.train_iters = 100000
+        cfg.megatron.train_iters = 662
         # lr_decay_iters: number of iterations to decay learning rate over, defaults to train_iters
         cfg.lr_sched.lr_decay_iters = cfg.lr_sched.get("lr_decay_iters", None)
         cfg.lr_sched.lr_wsd_decay_iters = cfg.lr_sched.get("lr_wsd_decay_iters", None)
         cfg.lr_sched.lr_warmup_init = cfg.lr_sched.get("lr_warmup_init", 0.0)
-        cfg.lr_sched.lr_warmup_iters = cfg.lr_sched.get("lr_warmup_iters", 0)
+        cfg.lr_sched.lr_warmup_iters = cfg.lr_sched.get("lr_warmup_iters", 93)
         cfg.lr_sched.lr_warmup_fraction = cfg.lr_sched.get("lr_warmup_fraction", None)
         cfg.lr_sched.use_checkpoint_opt_param_scheduler = cfg.lr_sched.get(
             "use_checkpoint_opt_param_scheduler", True
