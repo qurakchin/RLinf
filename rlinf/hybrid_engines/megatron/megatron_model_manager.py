@@ -147,6 +147,7 @@ class MegatronModelManager:
             model_type=model_type,
             checkpointing_context=self.checkpoint_context,
         )
+        print("*"*50,"\nlr_scheduler\n",self.lr_scheduler.__dict__,"\n")
 
     def model_provider_func(self, pre_process, post_process):
         """Model depends on pipeline paralellism."""
