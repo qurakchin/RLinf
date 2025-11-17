@@ -127,7 +127,6 @@ if sglang_version < parse("0.5.0"):
         "sglang.srt.managers.detokenizer_manager.run_detokenizer_process",
         "rlinf.hybrid_engines.sglang.common.detokenizer_manager.run_detokenizer_process",
     )
-
 Patcher.add_patch(
     "sglang.srt.managers.scheduler.run_scheduler_process",
     "rlinf.hybrid_engines.sglang.common.sgl_scheduler.run_scheduler_process",
