@@ -17,6 +17,7 @@ import copy
 from omegaconf import DictConfig, open_dict
 
 from rlinf.utils.placement import ComponentPlacement
+from rlinf.utils.utils import retrieve_model_state_dict_in_cpu
 
 from ..actor.megatron_actor_worker import MegatronActor
 

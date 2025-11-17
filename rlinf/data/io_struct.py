@@ -258,14 +258,25 @@ class RolloutResult:
         prompt_start = prompt_start.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
         if response_mask is not None:
-            max_response_len=total_len - max_prompt_len
+            max_response_len = total_len - max_prompt_len
             response_mask = batch_pad_to_fixed_len(
                 [torch.as_tensor(ids, dtype=torch.long) for ids in response_mask],
                 max_batch_len=max_response_len,
                 pad_token=0,
             )
 
-            attention_mask = torch.cat([(torch.arange(max_prompt_len).unsqueeze(0).expand(response_mask.size(0), -1) >= prompt_start), response_mask], dim=1).bool()
+            attention_mask = torch.cat(
+                [
+                    (
+                        torch.arange(max_prompt_len)
+                        .unsqueeze(0)
+                        .expand(response_mask.size(0), -1)
+                        >= prompt_start
+                    ),
+                    response_mask,
+                ],
+                dim=1,
+            ).bool()
         else:
             attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
 
@@ -1086,12 +1097,21 @@ class EnvOutput:
         elif self.simulator_type == "behavior":
             image_tensor = obs["images"]
             wrist_image_tensor = obs["wrist_images"]
+        elif self.simulator_type == "metaworld":
+            image_tensor = torch.stack(
+                [
+                    value.clone().permute(2, 0, 1)
+                    for value in obs["images_and_states"]["full_image"]
+                ]
+            )
         else:
             raise NotImplementedError
 
         states = None
         if "images_and_states" in obs and "state" in obs["images_and_states"]:
             states = obs["images_and_states"]["state"]
+        if "state" in obs:
+            states = obs["state"]
 
         task_descriptions = (
             list(obs["task_descriptions"]) if "task_descriptions" in obs else None
