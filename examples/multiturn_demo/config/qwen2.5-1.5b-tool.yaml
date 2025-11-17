@@ -97,6 +97,8 @@ agentloop:
   max_turns: 5
   print_outputs: True # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
   # demo specific parameters. not used in this demo. you can add your own parameters here.
+  is_dynamic_rollout_batch: False
+  # belows are custom by user-defined agentloop
   max_parallel_calls: 2
   continue_at_tool_failure: True
   max_tool_response_length: 500
@@ -189,7 +191,7 @@ actor:
     pipeline_model_parallel_size: 1
 
     activation: swiglu
-    sequence_parallel: False
+    sequence_parallel: ${gt:${actor.model.tensor_model_parallel_size}, 1} # enable sq if tp > 1
     # recompute_method: block
     # recompute_granularity: selective
 

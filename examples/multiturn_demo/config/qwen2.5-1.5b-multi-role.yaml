@@ -31,7 +31,7 @@ runner:
   max_tokens_per_mbs: 8192
 
   resume_dir: null
-  experiment_name: multiturn_demo-grpo-1.5b
+  experiment_name: multiturn_demo-multi_role-grpo-1.5b
   output_dir: /mnt/public/zhuchunyang_rl/logs
 
 algorithm:
@@ -93,6 +93,8 @@ agentloop:
   max_turns: 5
   print_outputs: True # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
   # demo specific parameters. not used in this demo. you can add your own parameters here.
+  is_dynamic_rollout_batch: True
+  # belows are custom by user-defined agentloop
   max_parallel_calls: 2
   continue_at_tool_failure: True
   max_tool_response_length: 500
@@ -169,7 +171,7 @@ actor:
   mcore_gpt: True
   spec_name: decoder_gpt
 
-  checkpoint_load_path: /mnt/public/zhuchunyang_rl/logs/multiturn_demo-grpo-1.5b/converted_ckpts/actor
+  checkpoint_load_path: /mnt/public/zhuchunyang_rl/logs/multiturn_demo-multi_role-grpo-1.5b/converted_ckpts/actor
 
   offload_optimizer: True
   offload_weight: True
@@ -184,8 +186,8 @@ actor:
     precision: bf16
     add_bias_linear: False
 
-    tensor_model_parallel_size: 2
-    pipeline_model_parallel_size: 2
+    tensor_model_parallel_size: 1
+    pipeline_model_parallel_size: 1
 
     activation: swiglu
     sequence_parallel: ${gt:${actor.model.tensor_model_parallel_size}, 1} # enable sq if tp > 1
@@ -231,6 +233,9 @@ actor:
     overlap_param_gather_with_optimizer_step: False
     clip_grad: 0.8
     loss_scale: 65536
+
+    optimizer_cpu_offload: True
+    use_precision_aware_optimizer: True
 
   # if this is set, it will override the lr_sched
   # below parameters equals:

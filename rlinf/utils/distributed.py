@@ -38,7 +38,6 @@ def compute_rollout_metrics(
     use_critic: bool = False,
     debug_right_padding: bool = False,
 ):
-    assert debug_right_padding == True, "zcy_dbg: debug_right_padding True"
     device = torch.device(f"cuda:{torch.cuda.current_device()}")
     advantages = rollout_batch["advantages"].to(device=device)
     if debug_right_padding:

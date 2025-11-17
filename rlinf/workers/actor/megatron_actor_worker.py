@@ -203,7 +203,7 @@ class MegatronActor(MegatronModelManager, Worker):
 
         self._init_profiler()
         self._init_auto_scheduler(role)
-        self.is_dynamic_rollout_batch = True
+        self.is_dynamic_rollout_batch = self.cfg.agentloop.is_dynamic_rollout_batch
         if self.is_dynamic_rollout_batch:
             assert self.enable_dp_load_balance, "enable_dp_load_balance must be True when is_dynamic_rollout_batch is True"
 
