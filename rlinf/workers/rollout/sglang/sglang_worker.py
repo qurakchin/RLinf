@@ -424,6 +424,8 @@ class SGLangWorker(Worker):
             "output_ids": result["output_ids"],
             "finish_reason": result["meta_info"]["finish_reason"]["type"],
         }
+        if "text" in result:
+            result_dict["response_text"] = result["text"]
         if self._return_logprobs:
             result_dict["logprobs"] = [
                 item[0] for item in result["meta_info"]["output_token_logprobs"]

@@ -112,6 +112,21 @@ Patcher.add_patch(
     "sglang.srt.managers.tokenizer_manager.TokenizerManager",
     "rlinf.hybrid_engines.sglang.common.tokenizer_manager.TokenizerManager",
 )
+from importlib.metadata import PackageNotFoundError, version
+from packaging.version import parse
+try:
+    sglang_version = parse(version("sglang"))
+except Exception as e:
+    raise ValueError(f"sglang version not supported: {e}")
+if sglang_version < parse("0.5.0"):
+    Patcher.add_patch(
+        "sglang.srt.managers.detokenizer_manager.DetokenizerManager",
+        "rlinf.hybrid_engines.sglang.common.detokenizer_manager.DetokenizerManager",
+    )
+    Patcher.add_patch(
+        "sglang.srt.managers.detokenizer_manager.run_detokenizer_process",
+        "rlinf.hybrid_engines.sglang.common.detokenizer_manager.run_detokenizer_process",
+    )
 
 Patcher.add_patch(
     "sglang.srt.managers.scheduler.run_scheduler_process",
