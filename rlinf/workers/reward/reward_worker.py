@@ -91,11 +91,7 @@ class RewardWorker(Worker):
         texts = rollout_result.response_texts
         if texts is None:
             texts = self.tokenizer.batch_decode(
-<<<<<<< HEAD
-                rollout_result.response_ids, skip_special_tokens=False
-=======
                 rollout_result.response_ids, skip_special_tokens=True
->>>>>>> upstream/feature/sglang_gen_text_ids
             )
 
         kwargs = {}

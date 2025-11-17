@@ -15,11 +15,7 @@
 import asyncio
 import copy
 import dataclasses
-<<<<<<< HEAD
-from typing import Any, Dict, List, Optional
-=======
 from typing import Any, Optional
->>>>>>> upstream/feature/sglang_gen_text_ids
 
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import ReleaseMemoryOccupationReqInput

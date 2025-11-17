@@ -20,7 +20,6 @@ explict_model:
     num_attention_heads: 12
     num_query_groups: 2
     head_dim: 128
-<<<<<<< HEAD
     te_ln_linear_qkv: True
     te_ln_linear_mlp_fc1: True
     te_ln_add_extra_state: True
@@ -34,8 +33,6 @@ explict_model:
     te_ln_linear_qkv: True
     te_ln_linear_mlp_fc1: True
     te_ln_add_extra_state: True
-=======
->>>>>>> upstream/feature/sglang_gen_text_ids
   qwen_2.5_32b:
     model_type: qwen_2
     num_attention_heads: 40
