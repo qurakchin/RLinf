@@ -66,7 +66,7 @@ def main(cfg) -> None:
         len(agentloop_placement_strategy._node_ids)
         == component_placement.rollout_dp_size
     ), "agentloop worker num now should be equal to rollout dp size"
-    agentloop_group = MCPAgentLoopWorker.create_group(cfg, component_placement).launch(
+    agentloop_group = Searchr1ToolAgentLoopWorker.create_group(cfg, component_placement).launch(
         cluster,
         name=cfg.agentloop.group_name,
         placement_strategy=agentloop_placement_strategy,

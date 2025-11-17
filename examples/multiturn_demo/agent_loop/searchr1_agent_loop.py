@@ -28,7 +28,7 @@ from rlinf.data.tool_call.tool_io_struct import (
     ToolResponse,
 )
 
-from rlinf.scheduler import Channel, Worker
+from rlinf.scheduler import Channel
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.agent.agent_loop import AgentLoopOutput, AgentLoopWorker
 
@@ -41,9 +41,16 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         placement: ModelParallelComponentPlacement,
     ):
         super().__init__(cfg, placement)
+        self.max_prompt_len = int(self.cfg.data.max_prompt_length)
+        max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+        self.max_resp_len = max(1, max_total_len - self.max_prompt_len)
+
+        # 5 is a magic number in this demo.
+        self.max_turns = self.cfg.agentloop.get("max_turns", 5)
         self.tool_call_start_token: str = "<search>"
         self.tool_call_end_token: str = "</search>"
         self.tool_call_regex = re.compile(r"<search>(.*?)</search>", re.DOTALL)
+        
 
     async def state_less_tool_call_with_channel(
         self,
@@ -103,16 +110,16 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         return content, function_calls
 
     async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
+        prompt_ids = prompt_ids[: self.max_prompt_len]
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         trace_prints = []
         response_mask = []
         for _ in range(self.cfg.tools.maxturn):
             # Generate response from LLM
-            max_prompt_len = int(self.cfg.data.get("max_prompt_length", 1024))
-            max_total_len = int(self.cfg.actor.model.encoder_seq_length)
-            max_resp_len = max(1, max_total_len - max_prompt_len)
-
-            generate_result = await self.generate(prompt_ids)
+            max_resp_len = self.max_resp_len - (len(prompt_ids) - len(orig_prompt_ids))
+            generate_result = await self.generate(
+                prompt_ids, sampling_params={"max_new_tokens": max_resp_len}
+            )
             response_ids = generate_result["output_ids"]
             if len(response_ids) > max_resp_len:
                 response_ids = response_ids[:max_resp_len]
@@ -120,6 +127,11 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
 
             prompt_ids += response_ids
             response_mask += [1] * len(response_ids)  # 1 for LLM generated tokens
+            if self.print_outputs:
+                # add anything you want to print
+                trace_prints.append({"generate": response_text})
+            if len(response_ids) == max_resp_len:
+                break
 
             # Extract tool calls from response
             _, tool_requests = await self.extract_tool_calls(response_text)
@@ -135,10 +147,15 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
             # Convert tool responses to messages and tokenize
             tool_messages = []
             for tool_response in tool_responses:
-                message = tool_response.text
+                message = {"role": "tool", "content": tool_response.text}
                 tool_messages.append(message)
             # Tokenize tool responses
-            tool_response_ids = self.tokenizer.encode(tool_messages[0], add_special_tokens=False)
+            tool_response_ids = self.tokenizer.encode(tool_messages[0]["content"], add_special_tokens=False)
+            max_tool_resp_len = self.max_resp_len - (
+                len(prompt_ids) - len(orig_prompt_ids)
+            )
+            if len(tool_response_ids) > max_tool_resp_len:
+                break
             prompt_ids += tool_response_ids
             response_mask += [0] * len(tool_response_ids)
             if self.print_outputs:
@@ -152,6 +169,7 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
             prompt_ids=orig_prompt_ids,
             prompt_text=self.tokenizer.decode(orig_prompt_ids),
             response_ids=response_ids,
+            response_text=self.tokenizer.decode(response_ids),
             response_mask=response_mask,
             trace_prints=trace_prints,
         )
