@@ -18,3 +18,4 @@ uv.lock
 rlinf/envs/maniskill/assets
 node_modules/
 examples/multiturn_demo/logs
+ckpt/

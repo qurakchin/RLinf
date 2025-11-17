@@ -10,10 +10,10 @@ cluster:
   num_nodes: 1
   component_placement:
     # actor,rollout,reward: all
-    rollout: 0-3
-    inference: 4-5
-    actor: 6-7
-    reward: 0-3
+    rollout: 0-1
+    inference: 2
+    actor: 3
+    reward: 0-1
 
 
 runner:
@@ -37,21 +37,21 @@ runner:
 
   resume_dir: null
   experiment_name: multiturn_demo-grpo-3b-lr1e6-1node-fixlr-nospecialtoken-toolstop
-  output_dir: /inspire/hdd/project/inference-chip/liboxun-p-liboxun/ckpt/RLinf_agent/
+  output_dir: /mnt/public/liuweilin/RLinf/ckpt/
 
 algorithm:
   group_size: 4
   n_minibatches: 2
-  training_batch_size_per_gpu: 4 # micro batch size
+  training_batch_size_per_gpu: 1 # micro batch size
   rollout_batch_size_per_gpu: null # If set to null, rollout_batch_size will be evenly divided across all inference instances. You can reduce this parameter if inference consumes too much GPU memory.
 
   # mbs to do log prob inference, can be set to
   # lower than rollout_batch_size_per_gpu to reduce
   # memory usage
-  logprob_forward_micro_batch_size: 4 # ${.rollout_batch_size_per_gpu}
+  logprob_forward_micro_batch_size: 1 # ${.rollout_batch_size_per_gpu}
 
   # val rollout mbs
-  val_rollout_batch_size_per_gpu: 4 # ${.rollout_batch_size_per_gpu}
+  val_rollout_batch_size_per_gpu: 1 # ${.rollout_batch_size_per_gpu}
 
   recompute_logprobs: True
   shuffle_rollout: False
@@ -91,7 +91,6 @@ agentloop:
   max_parallel_calls: 2
   max_tool_response_length: 500
   tool_response_truncate_side: "right"
-  response_length: 3000
   print_outputs: False
 
 inference:
@@ -106,14 +105,15 @@ inference:
 rollout:
   group_name: "RolloutGroup"
 
-  gpu_memory_utilization: 0.8
+  gpu_memory_utilization: 0.7
 
-  model_dir: /inspire/hdd/global_user/liboxun-p-liboxun/data/Qwen2.5-3B-Instruct
+  model_dir: /mnt/public/hf_models/Qwen2.5-3B-Instruct-search
   model_arch: qwen2.5
+  precision: ${actor.model.precision}      
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
   disable_log_stats: False
-  detokenize: False            # Whether to detokenize the output. During RL we actually don't need to detokenize it. Can be set to True for debugging.
+  detokenize: True            # Whether to detokenize the output. During RL we actually don't need to detokenize it. Can be set to True for debugging.
   padding: null               # will be tokenizer.pad_token_id if null. it is used to filter megatron's padding for rollout engine
   eos: null                   # will be tokenizer.eos_token_id if null.
 
@@ -158,8 +158,8 @@ data:
   shuffle: True
   validation_shuffle: True
   seed: 1234
-  train_data_paths: ["/inspire/hdd/global_user/liboxun-p-liboxun/data/data/nq_hotpotqa_train/train.jsonl"]
-  val_data_paths: ["/inspire/hdd/global_user/liboxun-p-liboxun/data/data/nq_hotpotqa_train/train.jsonl"]
+  train_data_paths: ["/mnt/public/liuweilin/nq_hotpotqa_train/split_train.jsonl"]
+  val_data_paths: ["/mnt/public/liuweilin/nq_hotpotqa_train/eval.jsonl"]
 
 # Tools configuration for AgentLoop
 tools:
@@ -168,7 +168,6 @@ tools:
   search:
     server_addr: 0.0.0.0:8000
     topk: 10
-    stop_token: "</search>"
 
 actor:
   group_name: "ActorGroup"
@@ -234,7 +233,7 @@ actor:
     use_distributed_optimizer: True
     overlap_grad_reduce: False
     overlap_param_gather: False
-    optimizer_enable_pin: false
+    optimizer_enable_pin: False
     overlap_param_gather_with_optimizer_step: False
     clip_grad: 0.8
     loss_scale: 65536
@@ -294,7 +293,7 @@ actor:
 
 reward:
   group_name: "RewardGroup"
-  use_reward_model: false
+  use_reward_model: False
   reward_type: 'searchr1'
   reward_scale: 1.0
 
@@ -305,4 +304,4 @@ reward:
     padding_side: ${actor.tokenizer.padding_side}
 
 critic:
-  use_critic_model: false
+  use_critic_model: False
