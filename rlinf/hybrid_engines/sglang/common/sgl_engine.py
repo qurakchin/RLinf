@@ -118,7 +118,9 @@ try:
     sglang_version = parse(version("sglang"))
 except Exception as e:
     raise ValueError(f"sglang version not supported: {e}")
-if sglang_version < parse("0.5.0"):
+# for sglang < 0.5.0, support to get output_ids in result
+# for sglang < 0.5.5, fix a bug in sglang to get correct output_ids
+if sglang_version <= parse("0.5.5"):
     Patcher.add_patch(
         "sglang.srt.managers.detokenizer_manager.DetokenizerManager",
         "rlinf.hybrid_engines.sglang.common.detokenizer_manager.DetokenizerManager",
