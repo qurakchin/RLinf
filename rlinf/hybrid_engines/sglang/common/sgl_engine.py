@@ -17,8 +17,10 @@ import logging
 import multiprocessing as mp
 import os
 import threading
+from importlib.metadata import version
 
 import uvloop
+from packaging.version import parse
 from sglang.srt.entrypoints.engine import Engine as _Engine
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import (
@@ -112,8 +114,7 @@ Patcher.add_patch(
     "sglang.srt.managers.tokenizer_manager.TokenizerManager",
     "rlinf.hybrid_engines.sglang.common.tokenizer_manager.TokenizerManager",
 )
-from importlib.metadata import PackageNotFoundError, version
-from packaging.version import parse
+
 try:
     sglang_version = parse(version("sglang"))
 except Exception as e:
