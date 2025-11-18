@@ -139,7 +139,10 @@ class SGLangWorker(Worker):
                 self._cfg.rollout.sglang.torch_compile_max_bs,
                 self._cfg.rollout.max_running_requests,
             ),
-            load_format="dummy" if not self._cfg.rollout.validate_weight else "auto",
+            load_format="dummy"
+            if not self._cfg.rollout.validate_weight
+            and not getattr(self._cfg.rollout, "validate_weight_first_sync", False)
+            else "auto",
             # disable_overlap_schedule=True,
             dtype=torch_dtype_from_precision(self._cfg.rollout.precision),
             # sglang will only return text/output_ids when skip_tokenizer_init=False/True
@@ -432,12 +435,11 @@ class SGLangWorker(Worker):
             sampling_params=final_sampling_params,
             return_logprob=self._return_logprobs,
         )
+        # sglang will trim matched stop in result text, so we should only return output_ids
         result_dict = {
             "output_ids": result["output_ids"],
             "finish_reason": result["meta_info"]["finish_reason"]["type"],
         }
-        if "text" in result:
-            result_dict["response_text"] = result["text"]
         if self._return_logprobs:
             result_dict["logprobs"] = [
                 item[0] for item in result["meta_info"]["output_token_logprobs"]
