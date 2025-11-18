@@ -12,25 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from sglang.srt.managers.detokenizer_manager import DetokenizerManager as _DetokenizerManager
 from sglang.srt.managers.detokenizer_manager import (
+    DETOKENIZER_MAX_STATES,
+    BatchStrOut,
     BatchTokenIDOut,
     DecodeStatus,
-    DETOKENIZER_MAX_STATES,
-    find_printable_text,
-    BatchStrOut,
-)
-from sglang.srt.managers.detokenizer_manager import (
-    ServerArgs,
     PortArgs,
-    kill_itself_when_parent_died,
-    setproctitle,
+    ServerArgs,
     configure_logger,
-    psutil,
+    find_printable_text,
     get_exception_traceback,
+    kill_itself_when_parent_died,
     logger,
+    psutil,
+    setproctitle,
     signal,
 )
+from sglang.srt.managers.detokenizer_manager import (
+    DetokenizerManager as _DetokenizerManager,
+)
+
 
 class DetokenizerManager(_DetokenizerManager):
     def handle_batch_token_id_out(self, recv_obj: BatchTokenIDOut):
@@ -132,6 +133,7 @@ class DetokenizerManager(_DetokenizerManager):
             output_token_ids_logprobs_idx=recv_obj.output_token_ids_logprobs_idx,
             output_hidden_states=recv_obj.output_hidden_states,
         )
+
 
 def run_detokenizer_process(
     server_args: ServerArgs,
