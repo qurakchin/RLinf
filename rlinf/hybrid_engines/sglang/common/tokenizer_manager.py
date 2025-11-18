@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib.metadata import version
 from typing import Optional
 
 import fastapi
+from packaging.version import parse
 from sglang.srt.managers.tokenizer_manager import TokenizerManager as _TokenizerManager
 from sglang.srt.managers.tokenizer_manager import _Communicator
 from sglang.srt.server_args import PortArgs, ServerArgs
@@ -68,8 +70,7 @@ class TokenizerManager(_TokenizerManager):
                 ),
             ]
         )
-        from importlib.metadata import PackageNotFoundError, version
-        from packaging.version import parse
+
         try:
             sglang_version = parse(version("sglang"))
         except Exception as e:
@@ -115,8 +116,15 @@ class TokenizerManager(_TokenizerManager):
     ):
         import json
         import time
-        from sglang.srt.managers.tokenizer_manager import logger
-        from sglang.srt.managers.tokenizer_manager import BatchEmbeddingOut, BatchMultimodalOut, BatchStrOut, BatchTokenIDOut
+
+        from sglang.srt.managers.tokenizer_manager import (
+            BatchEmbeddingOut,
+            BatchMultimodalOut,
+            BatchStrOut,
+            BatchTokenIDOut,
+            logger,
+        )
+
         # for sglang 0.5.0 and later, we use the original _handle_batch_output
         if not self.patch_handle_batch_output:
             return super()._handle_batch_output(recv_obj)
