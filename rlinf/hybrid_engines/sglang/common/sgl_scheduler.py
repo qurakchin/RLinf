@@ -36,8 +36,6 @@ from rlinf.workers.rollout.utils import (
 from .io_struct import (
     AbortGenerationInput,
     AbortGenerationOutput,
-    SaveNormWeightsInput,
-    SaveNormWeightsOutput,
     SyncHFWeightInput,
     SyncHFWeightOutput,
     TaskMethodInput,
@@ -65,7 +63,6 @@ class Scheduler(_Scheduler):
                 (TaskMethodInput, self.run_task_method),
                 (SyncHFWeightInput, self.sync_hf_weight),
                 (AbortGenerationInput, self.abort_generation),
-                (SaveNormWeightsInput, self.save_norm_weights),
             ]
         )
 
@@ -150,6 +147,10 @@ class Scheduler(_Scheduler):
                 raise RuntimeError(
                     f"sglang: validate_weight failed in first sync. diff_keys = {diff_keys}"
                 )
+            else:
+                self._rlinf_worker.log_info(
+                    f"sglang: validate_weight success at rank {self._rlinf_worker.get_parent_rank()}"
+                )
             self.weight_norm_dict = None
 
         self.flush_cache()
@@ -182,14 +183,6 @@ class Scheduler(_Scheduler):
         )
         return res
 
-    def save_norm_weights(self, recv_req: SaveNormWeightsInput):
-        model = self.tp_worker.worker.model_runner.model
-        weight_norm_dict = {}
-        for key, value in model.state_dict().items():
-            weight_norm_dict[key] = value.norm()
-        self.weight_norm_dict = weight_norm_dict
-        return SaveNormWeightsOutput()
-
     def init_rlinf_worker(
         self,
         parent_address: WorkerAddress,
@@ -214,6 +207,15 @@ class Scheduler(_Scheduler):
         for _, module in self.tp_worker.worker.model_runner.model.named_modules():
             if hasattr(module, "use_presharded_weights"):
                 module.use_presharded_weights = use_presharded_weights
+
+        self.weight_norm_dict = None
+        if self.cfg.rollout.validate_weight_first_sync:
+            # save weight norm when init. used for validate when sync from megatron at the first time.
+            model = self.tp_worker.worker.model_runner.model
+            weight_norm_dict = {}
+            for key, value in model.state_dict().items():
+                weight_norm_dict[key] = value.norm()
+            self.weight_norm_dict = weight_norm_dict
 
         self._rlinf_worker.log_info(
             f"Running Scheduler dp rank {self._rlinf_worker.get_parent_rank()}, tp rank {self.tp_rank}, corresponding actor weight rank = {self.actor_weight_rank}"
