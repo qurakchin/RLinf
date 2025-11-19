@@ -125,7 +125,7 @@ class TokenizerManager(_TokenizerManager):
         )
 
         # for sglang 0.5.0 and later, we use the original _handle_batch_output
-        if not self.patch_handle_batch_output:
+        if not self.patch_return_output_ids:
             return super()._handle_batch_output(recv_obj)
 
         for i, rid in enumerate(recv_obj.rids):
