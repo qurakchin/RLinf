@@ -27,8 +27,8 @@ runner:
   max_epochs: 1
   max_steps: -1
 
-  val_check_interval: 50
-  save_interval: 50
+  val_check_interval: 30
+  save_interval: 30
 
   seq_length: 7096
 
@@ -36,7 +36,7 @@ runner:
   max_tokens_per_mbs: 7096
 
   resume_dir: null
-  experiment_name: multiturn_demo-grpo-3b-lr1e6-1node-fixlr-nospecialtoken-toolstop
+  experiment_name: multiturn_demo-grpo-3b-lr1e6-1node-fixlr-manualsplit
   output_dir: /mnt/public/liuweilin/RLinf/ckpt/
 
 algorithm:
@@ -82,7 +82,7 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
-    stop: ["</search>","</answer>"]
+    stop: ["</search>","</search>\n","</search>\n\n","</search><","</search><\n","</search><think>","</search><|","</answer>","</answer><","</answer><think>","</answer>\n","</answer>\n\n","<|im_end|>"]
 
 agentloop:
   group_name: "AgentLoopGroup"
@@ -138,8 +138,8 @@ rollout:
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
   
-  validate_weight: False # whether to send all weights at first for weight comparison.
-  validate_save_dir: null # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
+  validate_weight: True # whether to send all weights at first for weight comparison.
+  validate_save_dir: /mnt/public/liuweilin/RLinf/validate # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
   print_outputs: False         # whether to print the outputs (token ids, texts, etc.) of rollout engine.
 
   max_running_requests: 64 # the maximum number of running requests in the rollout engine.
