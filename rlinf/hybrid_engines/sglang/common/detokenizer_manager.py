@@ -32,11 +32,13 @@ from sglang.srt.managers.detokenizer_manager import (
 class DetokenizerManager(_DetokenizerManager):
     def handle_batch_token_id_out(self, recv_obj: BatchTokenIDOut):
         result = super().handle_batch_token_id_out(recv_obj)
-        # sglang have a bug in this, so we patched it
+        # for sglang 0.4.x, this will be None, then we can't get output_ids in tokenizer_manager, and then we can't get output_ids in result.
+        # for sglang 0.5.x < 0.5.5, it has a bug in this, so we patched it. refer to https://github.com/sgl-project/sglang/pull/12628
         result.output_ids = recv_obj.output_ids
         return result
 
 
+# It must be patched, otherwise sglang will use the original DetokenizerManager
 def run_detokenizer_process(
     server_args: ServerArgs,
     port_args: PortArgs,
