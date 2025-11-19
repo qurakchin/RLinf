@@ -207,6 +207,8 @@ class Scheduler(_Scheduler):
             "num_queue_reqs": len(self.waiting_queue),
         }
 
+    # to return output_ids and response_text simaltaneously in sglang 0.4.x.
+    # copied from srt/managers/scheduler.py (0.4.6) and only delete the condition outside the assignment of "output_ids"
     def stream_output_generation(
         self,
         reqs,
@@ -311,7 +313,9 @@ class Scheduler(_Scheduler):
 
                 req.send_decode_id_offset = len(decode_ids)
                 read_offsets.append(read_offset)
+                # ----- patched code start -----
                 output_ids.append(req.output_ids[send_token_offset:])
+                # -----  patched code end  -----
                 req.send_token_offset = len(req.output_ids)
                 skip_special_tokens.append(req.sampling_params.skip_special_tokens)
                 spaces_between_special_tokens.append(
