@@ -60,6 +60,7 @@ class SGLangWorker(Worker):
             "The president of the United States is",
             "The capital of France is",
             "The future of AI is",
+            "<|im_start|>system\nYou are a helpful and harmless assistant.<|im_end|>\n<|im_start|>user\nAnswer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search> and it will return the top searched results between <information> and </information>. You can search as many times as your want. If you find no further external knowledge needed, you can directly provide the answer inside <answer> and </answer>, without detailed illustrations. For example, <answer> Beijing </answer>. Question: texas team that won the 2017 world series?<|im_end|>\n<|im_start|>assistant\n"
         ]
 
         self.status_manager = RunningStatusManager()
@@ -177,6 +178,16 @@ class SGLangWorker(Worker):
             self.log_warning(
                 "validate_weight with detokenize=True is not supported yet."
             )
+            input_ids = self._tokenizer(self._validate_prompts).input_ids
+            engine_results, _ = await self.async_generate(
+                input_ids=input_ids,
+                sampling_params=self._validate_sampling_params,
+                return_logprob=False,
+            )
+            print_sglang_outputs(
+                self._validate_prompts, engine_results, self._tokenizer
+            )
+            print("===============================", flush=True)
         else:
             input_ids = self._tokenizer(self._validate_prompts).input_ids
             engine_results, _ = await self.async_generate(
@@ -222,7 +233,9 @@ class SGLangWorker(Worker):
             prompt=prompt,
             sampling_params=sampling_params,
             input_ids=input_ids,
-            image_data=image_data if any(image_data) else None,
+            image_data=image_data
+            if image_data is not None and any(image_data)
+            else None,
             return_logprob=return_logprob,
         )
         return result, request_info

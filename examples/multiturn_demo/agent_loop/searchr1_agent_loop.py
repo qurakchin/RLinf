@@ -117,19 +117,21 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         for _ in range(self.cfg.tools.maxturn):
             # Generate response from LLM
             max_resp_len = self.max_resp_len - (len(prompt_ids) - len(orig_prompt_ids))
+            
             generate_result = await self.generate(
                 prompt_ids, sampling_params={"max_new_tokens": max_resp_len}
             )
+            generate_prompt_ids = copy.deepcopy(prompt_ids)
             response_ids = generate_result["output_ids"]
+            
             if len(response_ids) > max_resp_len:
                 response_ids = response_ids[:max_resp_len]
             response_text = self.tokenizer.decode(response_ids)
-
             prompt_ids += response_ids
             response_mask += [1] * len(response_ids)  # 1 for LLM generated tokens
             if self.print_outputs:
                 # add anything you want to print
-                trace_prints.append({"generate": response_text})
+                trace_prints.append({"decode_prompt":self.tokenizer.decode(generate_prompt_ids),"generate": response_text,"merged_prompt":self.tokenizer.decode(prompt_ids),"response_ids":response_ids})
             if len(response_ids) == max_resp_len:
                 break
 
