@@ -17,8 +17,10 @@ import logging
 import multiprocessing as mp
 import os
 import threading
+from importlib.metadata import version
 
 import uvloop
+from packaging.version import parse
 from sglang.srt.entrypoints.engine import Engine as _Engine
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import (
@@ -112,13 +114,14 @@ Patcher.add_patch(
     "sglang.srt.managers.tokenizer_manager.TokenizerManager",
     "rlinf.hybrid_engines.sglang.common.tokenizer_manager.TokenizerManager",
 )
-from importlib.metadata import PackageNotFoundError, version
-from packaging.version import parse
+
 try:
     sglang_version = parse(version("sglang"))
 except Exception as e:
     raise ValueError(f"sglang version not supported: {e}")
-if sglang_version < parse("0.5.0"):
+# for sglang < 0.5.0, support to get output_ids in result
+# for sglang < 0.5.5, fix a bug in sglang to get correct output_ids
+if sglang_version <= parse("0.5.5"):
     Patcher.add_patch(
         "sglang.srt.managers.detokenizer_manager.DetokenizerManager",
         "rlinf.hybrid_engines.sglang.common.detokenizer_manager.DetokenizerManager",

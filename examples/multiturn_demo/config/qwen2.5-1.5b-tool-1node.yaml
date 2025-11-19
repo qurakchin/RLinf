@@ -82,7 +82,7 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
-    stop: ["</search>","</search>\n","</search>\n\n","</search><","</search><\n","</search><think>","</search><|","</answer>","</answer><","</answer><think>","</answer>\n","</answer>\n\n","<|im_end|>"]
+    stop: ["</search>","</search>\n","</search>\n\n","</search><","</search><\n","</search><think>","</search><|","</answer>","</answer><","</answer><think>","</answer>\n","</answer>\n\n"]
 
 agentloop:
   group_name: "AgentLoopGroup"
@@ -138,7 +138,7 @@ rollout:
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
   
-  validate_weight: True # whether to send all weights at first for weight comparison.
+  validate_weight: False # whether to send all weights at first for weight comparison.
   validate_save_dir: /mnt/public/liuweilin/RLinf/validate # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
   print_outputs: False         # whether to print the outputs (token ids, texts, etc.) of rollout engine.
 
