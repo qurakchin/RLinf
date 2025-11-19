@@ -153,64 +153,65 @@ class AgentRunner(ReasoningRunner):
                             output_channel=self.rollout_channel,
                         )
 
-                    if self.reward is not None:
-                        # Rewards
-                        reward_handle: Handle = self.reward.compute_rewards(
-                            input_channel=self.rollout_channel,
-                            output_channel=self.reward_channel,
+                        if self.reward is not None:
+                            # Rewards
+                            reward_handle: Handle = self.reward.compute_rewards(
+                                input_channel=self.rollout_channel,
+                                output_channel=self.reward_channel,
+                            )
+                            inference_input_channel = self.reward_channel
+                        else:
+                            inference_input_channel = self.rollout_channel
+
+                        if self.recompute_logprobs:
+                            # Inference prev/ref logprobs
+                            infer_handle: Handle = self.inference.run_inference(
+                                input_channel=inference_input_channel,
+                                output_channel=self.inference_channel,
+                                compute_ref_logprobs=self.compute_ref_logprobs,
+                            )
+                            inference_channel = self.inference_channel
+                        else:
+                            infer_handle = None
+                            inference_channel = inference_input_channel
+
+                        # Actor training, Advantages and returns
+                        actor_handle: Handle = self.actor.run_training(
+                            input_channel=inference_channel,
                         )
-                        inference_input_channel = self.reward_channel
-                    else:
-                        inference_input_channel = self.rollout_channel
 
-                    if self.recompute_logprobs:
-                        # Inference prev/ref logprobs
-                        infer_handle: Handle = self.inference.run_inference(
-                            input_channel=inference_input_channel,
-                            output_channel=self.inference_channel,
-                            compute_ref_logprobs=self.compute_ref_logprobs,
+                        if not self.is_pipeline:
+                            rollout_handle.wait()
+                            self.rollout.offload_engine().wait()
+                        metrics = actor_handle.wait()
+                        actor_rollout_metrics = metrics[0][0]
+                        actor_training_metrics = metrics[0][1]
+                        self.global_steps += 1
+
+                        run_time_exceeded = self.run_timer.is_finished()
+                        _, save_model, is_train_end = check_progress(
+                            self.global_steps,
+                            self.max_steps,
+                            self.cfg.runner.val_check_interval,
+                            self.cfg.runner.save_interval,
+                            1.0,
+                            run_time_exceeded=run_time_exceeded,
                         )
-                        inference_channel = self.inference_channel
-                    else:
-                        infer_handle = None
-                        inference_channel = inference_input_channel
 
-                    # Actor training, Advantages and returns
-                    actor_handle: Handle = self.actor.run_training(
-                        input_channel=inference_channel,
-                    )
-                    if not self.is_pipeline:
-                        rollout_handle.wait()
-                        self.rollout.offload_engine().wait()
-                    metrics = actor_handle.wait()
-                    actor_rollout_metrics = metrics[0][0]
-                    actor_training_metrics = metrics[0][1]
-                    self.global_steps += 1
+                        if save_model:
+                            self._save_checkpoint()
 
-                    run_time_exceeded = self.run_timer.is_finished()
-                    _, save_model, is_train_end = check_progress(
-                        self.global_steps,
-                        self.max_steps,
-                        self.cfg.runner.val_check_interval,
-                        self.cfg.runner.save_interval,
-                        1.0,
-                        run_time_exceeded=run_time_exceeded,
-                    )
+                        if is_train_end:
+                            logging.info(
+                                f"Step limit given by max_steps={self.max_steps} reached. Stopping run"
+                            )
+                            return
 
-                    if save_model:
-                        self._save_checkpoint()
-
-                    if is_train_end:
-                        logging.info(
-                            f"Step limit given by max_steps={self.max_steps} reached. Stopping run"
-                        )
-                        return
-
-                    if run_time_exceeded:
-                        logging.info(
-                            f"Time limit given by run_timer={self.run_timer} reached. Stopping run"
-                        )
-                        return
+                        if run_time_exceeded:
+                            logging.info(
+                                f"Time limit given by run_timer={self.run_timer} reached. Stopping run"
+                            )
+                            return
 
                     time_metrics = self.timer.consume_durations()
                     time_metrics["training"] = actor_handle.consume_duration()
