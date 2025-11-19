@@ -82,7 +82,7 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
-    stop: ["</reason>", "</answer>"]
+    stop: ["</reason>", "</answer>"] # if the stop str param is used, ensure rollout.detokenize is True, otherwise sglang may break.
 
 inference:
   model_arch: ${rollout.model_arch}
