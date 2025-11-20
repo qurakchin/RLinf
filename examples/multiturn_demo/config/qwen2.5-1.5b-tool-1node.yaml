@@ -36,7 +36,7 @@ runner:
   max_tokens_per_mbs: 7096
 
   resume_dir: null
-  experiment_name: multiturn_demo-grpo-3b-lr1e6-1node-fixlr-manualsplit
+  experiment_name: multiturn_demo-grpo-3b-lr1e6-1node-fixlr-manualsplit1
   output_dir: /mnt/public/liuweilin/RLinf/ckpt/
 
 algorithm:
@@ -91,7 +91,7 @@ agentloop:
   max_parallel_calls: 2
   max_tool_response_length: 500
   tool_response_truncate_side: "right"
-  print_outputs: False
+  print_outputs: True
 
 inference:
   model_arch: ${rollout.model_arch}
