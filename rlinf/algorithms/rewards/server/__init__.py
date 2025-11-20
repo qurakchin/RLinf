@@ -107,7 +107,6 @@ def extract_code_solution(solution_str: str) -> Tuple[Optional[str], str]:
 
     final_answer = matches[-1].group(1).strip()
 
-    final_answer = processed_str
     if '```python' in final_answer or '```cpp' in final_answer or '```lean' in final_answer:
         final_answer = extract_program_in_delimiter(final_answer, last_only=True)
     return final_answer, processed_str, question_str
