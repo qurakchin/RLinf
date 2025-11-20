@@ -75,7 +75,12 @@ class TokenizerManager(_TokenizerManager):
             sglang_version = parse(version("sglang"))
         except Exception as e:
             raise ValueError(f"sglang version not supported: {e}")
+<<<<<<< HEAD
         self.patch_handle_batch_output = sglang_version < parse("0.5.0")
+=======
+        self.patch_return_output_ids = sglang_version < parse("0.5.0")
+
+>>>>>>> upstream/feature/sglang_gen_text_ids
     async def run_task_method(
         self,
         obj: TaskMethodInput = None,
@@ -108,7 +113,8 @@ class TokenizerManager(_TokenizerManager):
         self.auto_create_handle_loop()
         await self.abort_generation_communicator(obj)
 
-    # # to return output_ids and response_text simaltaneously in sglang 0.4.x
+    # to return output_ids and response_text simaltaneously in sglang 0.4.x.
+    # copied from srt/managers/tokenizer_manager.py (0.4.6) and only add "output_ids" in out_dict when isinstance(recv_obj, BatchStrOut) is True
     def _handle_batch_output(
         self,
         recv_obj,
@@ -125,7 +131,7 @@ class TokenizerManager(_TokenizerManager):
         )
 
         # for sglang 0.5.0 and later, we use the original _handle_batch_output
-        if not self.patch_handle_batch_output:
+        if not self.patch_return_output_ids:
             return super()._handle_batch_output(recv_obj)
 
         for i, rid in enumerate(recv_obj.rids):
@@ -168,6 +174,7 @@ class TokenizerManager(_TokenizerManager):
 
             if isinstance(recv_obj, BatchStrOut):
                 state.text += recv_obj.output_strs[i]
+                # ----- patched code start -----
                 if state.obj.stream:
                     state.output_ids.extend(recv_obj.output_ids[i])
                     output_token_ids = state.output_ids[state.last_output_offset :]
@@ -175,10 +182,13 @@ class TokenizerManager(_TokenizerManager):
                 else:
                     state.output_ids.extend(recv_obj.output_ids[i])
                     output_token_ids = state.output_ids.copy()
+                # -----  patched code end  -----
 
                 out_dict = {
                     "text": state.text,
+                    # ----- patched code start -----
                     "output_ids": output_token_ids,
+                    # -----  patched code end  -----
                     "meta_info": meta_info,
                 }
             elif isinstance(recv_obj, BatchTokenIDOut):
