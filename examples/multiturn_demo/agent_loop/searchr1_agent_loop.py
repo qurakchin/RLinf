@@ -123,15 +123,23 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
             )
             generate_prompt_ids = copy.deepcopy(prompt_ids)
             response_ids = generate_result["output_ids"]
+
             
             if len(response_ids) > max_resp_len:
                 response_ids = response_ids[:max_resp_len]
             response_text = self.tokenizer.decode(response_ids)
+            
+            # split </search> manually
+            if "</search>" in response_text:
+                response_text = response_text.split('</search>')[0] + '</search>'
+                response_ids = self.tokenizer.encode(response_text)
+            
             prompt_ids += response_ids
             response_mask += [1] * len(response_ids)  # 1 for LLM generated tokens
             if self.print_outputs:
                 # add anything you want to print
-                trace_prints.append({"decode_prompt":self.tokenizer.decode(generate_prompt_ids),"generate": response_text,"merged_prompt":self.tokenizer.decode(prompt_ids),"response_ids":response_ids})
+                if "</search>" in response_text and "</search>" not in response_text[-30:]:
+                    trace_prints.append({"decode_prompt":self.tokenizer.decode(generate_prompt_ids),"generate": response_text,"merged_prompt":self.tokenizer.decode(prompt_ids),"response_ids":response_ids})
             if len(response_ids) == max_resp_len:
                 break
 
@@ -162,7 +170,7 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
             response_mask += [0] * len(tool_response_ids)
             if self.print_outputs:
                 # add anything you want to print
-                trace_prints.append({"generate": response_text, "tool_resp": tool_messages})
+                trace_prints.append({"decode_prompt":self.tokenizer.decode(generate_prompt_ids),"generate": response_text, "tool_resp": tool_messages})
 
         # Separate prompt and response
         response_ids = prompt_ids[len(orig_prompt_ids) :]

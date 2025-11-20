@@ -75,12 +75,8 @@ class TokenizerManager(_TokenizerManager):
             sglang_version = parse(version("sglang"))
         except Exception as e:
             raise ValueError(f"sglang version not supported: {e}")
-<<<<<<< HEAD
-        self.patch_handle_batch_output = sglang_version < parse("0.5.0")
-=======
         self.patch_return_output_ids = sglang_version < parse("0.5.0")
 
->>>>>>> upstream/feature/sglang_gen_text_ids
     async def run_task_method(
         self,
         obj: TaskMethodInput = None,
