@@ -132,7 +132,7 @@ class Scheduler(_Scheduler):
             weight_norm_dict_sync = {}
             model = self.tp_worker.worker.model_runner.model
             for name, value in model.state_dict().items():
-                weight_norm_dict_sync[name] = value.norm()
+                weight_norm_dict_sync[name] = posi_norm(value)
             diff_keys = []
             for k in weight_norm_dict_sync.keys():
                 if not torch.allclose(
@@ -214,7 +214,7 @@ class Scheduler(_Scheduler):
             model = self.tp_worker.worker.model_runner.model
             weight_norm_dict = {}
             for key, value in model.state_dict().items():
-                weight_norm_dict[key] = value.norm()
+                weight_norm_dict[key] = posi_norm(value)
             self.weight_norm_dict = weight_norm_dict
 
         self._rlinf_worker.log_info(
@@ -236,6 +236,10 @@ class Scheduler(_Scheduler):
             "num_queue_reqs": len(self.waiting_queue),
         }
 
+def posi_norm(tensor: torch.Tensor):
+    # use a position-aware norm to do validate. otherwise the misalignment cannot be detect.
+    posi_tensor = torch.arange(tensor.numel(), dtype=tensor.dtype, device=tensor.device).view_as(tensor) / tensor.numel() - 0.5
+    return (tensor - posi_tensor).norm()
 
 def run_scheduler_process(*args, **kwargs):
     from rlinf.utils.patcher import Patcher
