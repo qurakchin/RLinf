@@ -220,6 +220,14 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
     else:
         qk_layernorm = getattr(cfg.model, "qk_layernorm", False)
 
+    if (
+        "Qwen3ForCausalLM" in hf_config.architectures
+        or "Qwen3MoeForCausalLM" in hf_config.architectures
+    ):
+        qk_layernorm = True
+    else:
+        qk_layernorm = getattr(cfg.model, "qk_layernorm", False)
+
     with open_dict(cfg):
         rs = getattr(hf_config, "rope_scaling", None)
         if isinstance(rs, dict):
@@ -579,6 +587,9 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.optim.overlap_param_gather_with_optimizer_step = cfg.optim.get(
             "overlap_param_gather_with_optimizer_step", False
         )
+        cfg.optim.optimizer_cpu_offload = cfg.optim.get("optimizer_cpu_offload", False)
+        cfg.optim.optimizer_offload_fraction = cfg.optim.get("optimizer_offload_fraction", 0.0)
+        cfg.optim.use_precision_aware_optimizer = cfg.optim.get("use_precision_aware_optimizer", False)
 
         # learning rate
         cfg.lr_sched.lr = cfg.optim.get("lr", None)

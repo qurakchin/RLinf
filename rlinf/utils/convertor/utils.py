@@ -672,6 +672,115 @@ class Qwen3_MoEConvertor(BaseConvertor):
         ]
 
 
+class Qwen3_MoEConvertor(BaseConvertor):
+    def build_rules(self) -> list[ConvertorRule]:
+        LID = r"(?P<i>\d+)"
+        EID = r"(?P<ei>\d+)"
+        WB = r"(?P<wb>weight|bias)"
+
+        return [
+            # embeddings
+            ConvertorRule(
+                re.compile(r"embedding\.word_embeddings\.weight$"),
+                TransformType.SPLIT_NONE,
+                [r"model.embed_tokens.weight"],
+            ),
+            # final_layernorm
+            ConvertorRule(
+                re.compile(r"decoder\.final_layernorm\.weight$"),
+                TransformType.SPLIT_NONE,
+                [r"model.norm.weight"],
+            ),
+            # lm_head
+            ConvertorRule(
+                re.compile(r"output_layer\.weight$"),
+                TransformType.SPLIT_NONE,
+                [r"lm_head.weight"],
+            ),
+            # attn qkv norm
+            ConvertorRule(
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.linear_qkv\.layer_norm_weight$"
+                ),
+                TransformType.SPLIT_NONE,
+                [r"model.layers.\g<i>.input_layernorm.weight"],
+            ),
+            # attn qkv weights/bias
+            ConvertorRule(
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.linear_qkv\.{WB}$"
+                ),
+                TransformType.SPLIT_QKV,
+                [
+                    r"model.layers.\g<i>.self_attn.q_proj.\g<wb>",
+                    r"model.layers.\g<i>.self_attn.k_proj.\g<wb>",
+                    r"model.layers.\g<i>.self_attn.v_proj.\g<wb>",
+                ],
+            ),
+            # attn q layernorm weight/bias
+            ConvertorRule(
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.q_layernorm\.{WB}$"
+                ),
+                TransformType.SPLIT_NONE,
+                [
+                    r"model.layers.\g<i>.self_attn.q_norm.\g<wb>",
+                ],
+            ),
+            # attn k layernorm weight/bias
+            ConvertorRule(
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.k_layernorm\.{WB}$"
+                ),
+                TransformType.SPLIT_NONE,
+                [
+                    r"model.layers.\g<i>.self_attn.k_norm.\g<wb>",
+                ],
+            ),
+            # attn o proj
+            ConvertorRule(
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.linear_proj\.{WB}$"
+                ),
+                TransformType.SPLIT_NONE,
+                [r"model.layers.\g<i>.self_attn.o_proj.\g<wb>"],
+            ),
+            # mlp expert fc1
+            ConvertorRule(
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc1\.{WB}$"
+                ),
+                TransformType.SPLIT_EXPERT_FC1,
+                [
+                    r"model.layers.\g<i>.mlp.experts.\g<ei>.gate_proj.\g<wb>",
+                    r"model.layers.\g<i>.mlp.experts.\g<ei>.up_proj.\g<wb>",
+                ],
+            ),
+            # mlp expert fc2
+            ConvertorRule(
+                re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.experts\.local_experts\.{EID}\.linear_fc2\.{WB}$"
+                ),
+                TransformType.SPLIT_NONE,
+                [r"model.layers.\g<i>.mlp.experts.\g<ei>.down_proj.\g<wb>"],
+            ),
+            # pre_mlp_layernorms
+            ConvertorRule(
+                re.compile(rf"decoder\.layers\.{LID}\.pre_mlp_layernorm\.{WB}$"),
+                TransformType.SPLIT_NONE,
+                [r"model.layers.\g<i>.post_attention_layernorm.\g<wb>"],
+            ),
+            # router weight
+            ConvertorRule(
+                re.compile(rf"decoder\.layers\.{LID}\.mlp\.router\.{WB}$"),
+                TransformType.SPLIT_NONE,
+                [
+                    r"model.layers.\g<i>.mlp.gate.\g<wb>",
+                ],
+            ),
+        ]
+
+
 _MG2HF_CONVERTOR_REGISTRY = {}
 
 
@@ -682,8 +791,9 @@ def register_mg2hf_convertor(model_arch: str, convertor_cls: Callable) -> None:
 
 
 register_mg2hf_convertor("qwen2.5", Qwen2_5Convertor)
-register_mg2hf_convertor("qwen2.5_vl", Qwen2_5VLConvertor)
+# register_mg2hf_convertor("qwen2.5_vl", Qwen2_5VLConvertor)
 register_mg2hf_convertor("qwen3", Qwen3Convertor)
+register_mg2hf_convertor("qwen2.5-vl", Qwen2_5VLConvertor)
 register_mg2hf_convertor("qwen3_moe", Qwen3_MoEConvertor)
 
 
