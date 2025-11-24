@@ -163,10 +163,8 @@ def tp_reshard_fn_qwen3_moe(model_state_dict, merge_factor, tp_group):
 
 
 def tpe_reshard_fn_qwen3_moe(
-    model_state_dict, tpe_size, tpe_group, rollout_tp_size, dst_rank
+    model_state_dict, tpe_size, tpe_group, rollout_tp_size, dst_tp_rank
 ):
-    rollout_dp_rank, rollout_tp_rank = dst_rank
-
     for key, value in model_state_dict.items():
         if "linear_fc1.weight" in key:
             dim = 0
@@ -197,14 +195,14 @@ def tpe_reshard_fn_qwen3_moe(
             up_value_slice = torch.split(up_weight, rollout_split_size, dim=dim)
 
             model_state_dict[key] = torch.cat(
-                [gate_value_slice[rollout_tp_rank], up_value_slice[rollout_tp_rank]],
+                [gate_value_slice[dst_tp_rank], up_value_slice[dst_tp_rank]],
                 dim=0,
             ).contiguous()
             del gate_weight, up_weight, gate_value_slice, up_value_slice, value
         else:
             rollout_split_size = value.shape[dim] // rollout_tp_size
             value_slice = torch.split(value, rollout_split_size, dim=dim)
-            model_state_dict[key] = value_slice[rollout_tp_rank].contiguous()
+            model_state_dict[key] = value_slice[dst_tp_rank].contiguous()
             del value
 
     return model_state_dict

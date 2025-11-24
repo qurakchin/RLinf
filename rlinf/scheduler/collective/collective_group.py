@@ -255,7 +255,11 @@ class CollectiveGroup:
         """
         recv_comm_id = next(self._recv_comm_id_iter)
 
-        recv_work = AsyncFuncWork(self._atomic_recv, comm_id=recv_comm_id)
+        if self._worker.has_accelerator and Worker.torch_platform.is_initialized():
+            current_device = Worker.torch_platform.current_device()
+        else:
+            current_device = None
+        recv_work = AsyncFuncWork(self._atomic_recv, comm_id=recv_comm_id, current_device=current_device)
 
         if self._worker.has_accelerator and Worker.torch_platform.is_initialized():
             recv_event = Worker.torch_platform.Event()
@@ -275,9 +279,11 @@ class CollectiveGroup:
             return recv_work.wait()
 
     def _atomic_recv(
-        self, comm_id: int
+        self, comm_id: int, current_device: int
     ) -> AsyncWork | torch.Tensor | list[torch.Tensor] | dict[str, torch.Tensor] | Any:
         """Atomic recv implementation."""
+        if current_device is not None:
+            Worker.torch_platform.set_device(current_device)
         # First recv object type
         self._init_p2p_process_group()
         object_type_tensor = torch.empty(1, dtype=torch.int, device="cpu")
