@@ -30,6 +30,8 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
 
 
 ## What's NEW!
+- [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [IsaacLab](https://github.com/isaac-sim/IsaacLab). Doc: [RL on IsaacLab](https://rlinf.readthedocs.io/en/latest/rst_source/examples/isaaclab.html) 
+- [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [Behavior 1k](https://github.com/StanfordVL/BEHAVIOR-1K). Doc: [RL on Behavior 1k](https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html) 
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [GR00T-N1.5](https://github.com/NVIDIA/Isaac-GR00T). Doc: [RL on GR00T-N1.5](https://rlinf.readthedocs.io/en/latest/rst_source/examples/gr00t.html).
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [Metaworld](https://github.com/Farama-Foundation/Metaworld). Doc: [RL on Metaworld](https://rlinf.readthedocs.io/en/latest/rst_source/examples/metaworld.html).
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [Behavior 1k](https://github.com/StanfordVL/BEHAVIOR-1K). Doc: [RL on Behavior 1k](https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html).
@@ -66,7 +68,7 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
           <li>RoboVerse</li>
           <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html">BEHAVIOR</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/metaworld.html">MetaWorld</a> ✅</li>
-          <li>IsaacLab</li>
+          <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/isaaclab.html">IsaacLab</a> ✅</li>
           <li>RoboCasa</li>
           <li>More...</li>
         </ul>
