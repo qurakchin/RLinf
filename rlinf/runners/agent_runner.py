@@ -159,6 +159,10 @@ class AgentRunner(ReasoningRunner):
                             output_channel=self.reward_channel,
                         )
 
+                        if not self.is_pipeline:
+                            rollout_handle.wait()
+                            self.rollout.offload_engine().wait()
+
                         if self.recompute_logprobs:
                             # Inference prev/ref logprobs
                             infer_handle: Handle = self.inference.run_inference(
@@ -176,9 +180,6 @@ class AgentRunner(ReasoningRunner):
                             input_channel=inference_channel,
                         )
 
-                        if not self.is_pipeline:
-                            rollout_handle.wait()
-                            self.rollout.offload_engine().wait()
                         metrics = actor_handle.wait()
                         actor_rollout_metrics = metrics[0][0]
                         actor_training_metrics = metrics[0][1]

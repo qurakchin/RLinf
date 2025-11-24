@@ -102,10 +102,15 @@ def extract_code_solution(solution_str: str) -> Tuple[Optional[str], str]:
     answer_pattern = r'<answer>(.*?)</answer>'
     matches = list(re.finditer(answer_pattern, processed_str, re.DOTALL))
 
-    if not matches:
-        return None, processed_str, question_str
+    # if not matches:
+    #     return None, processed_str, question_str
 
-    final_answer = matches[-1].group(1).strip()
+    # final_answer = matches[-1].group(1).strip()
+
+    if not matches:
+        final_answer = processed_str
+    else:
+        final_answer = matches[-1].group(1).strip()
 
     if '```python' in final_answer or '```cpp' in final_answer or '```lean' in final_answer:
         final_answer = extract_program_in_delimiter(final_answer, last_only=True)

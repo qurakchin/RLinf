@@ -12,7 +12,8 @@ MEGATRON_PATH=/opt/Megatron-LM
 export PYTHONPATH=${REPO_PATH}:${MEGATRON_PATH}:${REPO_PATH}/examples:$PYTHONPATH
 
 if [ -z "$1" ]; then
-    CONFIG_NAME="qwen3-14b-ins-http-lean"
+    # CONFIG_NAME="qwen3-14b-ins-http-lean"
+    CONFIG_NAME="qwen3-30a3b-ins-http-lean"
 else
     CONFIG_NAME=$1
 fi
