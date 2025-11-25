@@ -236,10 +236,18 @@ class Scheduler(_Scheduler):
             "num_queue_reqs": len(self.waiting_queue),
         }
 
+
 def posi_norm(tensor: torch.Tensor):
     # use a position-aware norm to do validate. otherwise the misalignment cannot be detect.
-    posi_tensor = torch.arange(tensor.numel(), dtype=tensor.dtype, device=tensor.device).view_as(tensor) / tensor.numel() - 0.5
+    posi_tensor = (
+        torch.arange(tensor.numel(), dtype=tensor.dtype, device=tensor.device).view_as(
+            tensor
+        )
+        / tensor.numel()
+        - 0.5
+    )
     return (tensor - posi_tensor).norm()
+
 
 def run_scheduler_process(*args, **kwargs):
     from rlinf.utils.patcher import Patcher
