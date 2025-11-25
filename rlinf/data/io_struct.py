@@ -251,7 +251,6 @@ class RolloutResult:
     def _get_attention_masks_and_position_ids(
         prompt_lengths: torch.Tensor,
         response_lengths: torch.Tensor,
-        response_mask: torch.Tensor | None,
         max_prompt_len: int,
         total_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -271,28 +270,7 @@ class RolloutResult:
         # Broadcast [B, total_len]
         prompt_start = prompt_start.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
-        if response_mask is not None:
-            max_response_len = total_len - max_prompt_len
-            response_mask = batch_pad_to_fixed_len(
-                [torch.as_tensor(ids, dtype=torch.long) for ids in response_mask],
-                max_batch_len=max_response_len,
-                pad_token=0,
-            )
-
-            attention_mask = torch.cat(
-                [
-                    (
-                        torch.arange(max_prompt_len)
-                        .unsqueeze(0)
-                        .expand(response_mask.size(0), -1)
-                        >= prompt_start
-                    ),
-                    response_mask,
-                ],
-                dim=1,
-            ).bool()
-        else:
-            attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
+        attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
 
         # =========================
         # Position IDs
@@ -304,6 +282,39 @@ class RolloutResult:
             position_ids[i, ps:] = torch.arange(total_len - ps)
 
         return attention_mask, position_ids
+
+    @staticmethod
+    def _get_response_masks(
+        response_mask: list[list[int]],
+        prompt_lengths: torch.Tensor,
+        max_prompt_len: int,
+        total_len: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        max_response_len = total_len - max_prompt_len
+        # [B]
+        prompt_start = max_prompt_len - prompt_lengths
+        # Broadcast [B, total_len]
+        prompt_start = prompt_start.unsqueeze(1)
+
+        response_mask = batch_pad_to_fixed_len(
+            [torch.as_tensor(ids, dtype=torch.long) for ids in response_mask],
+            max_batch_len=max_response_len,
+            pad_token=0,
+        )
+
+        response_mask = torch.cat(
+            [
+                (
+                    torch.arange(max_prompt_len)
+                    .unsqueeze(0)
+                    .expand(response_mask.size(0), -1)
+                    >= prompt_start
+                ),
+                response_mask,
+            ],
+            dim=1,
+        ).bool()
+        return response_mask
 
     @staticmethod
     def from_vllm_results(
@@ -492,6 +503,10 @@ class RolloutResult:
             merged_result.response_lengths.extend(res.response_lengths)
             merged_result.response_ids.extend(res.response_ids)
             merged_result.is_end.extend(res.is_end)
+            if res.response_mask is not None:
+                merged_result.response_mask = merge_list(
+                    merged_result.response_mask, res.response_mask
+                )
             if res.answers is not None:
                 merged_result.answers = merge_list(merged_result.answers, res.answers)
             if res.advantages is not None:
@@ -740,7 +755,7 @@ class RolloutResult:
                 shape ``[batch_size, training_seq_length - data_seq_length]``.
         """
 
-        # len = training_seq_length: input_ids, attention_mask, position_ids
+        # len = training_seq_length: input_ids, attention_mask, position_ids, response_mask
         #           [prompt_padding, prompt_ids,    response_ids, ... ,response_padding]
         #           |<-- padding -->|<-- pmp len -->|<-- resp len --->|<-- padding --->|
         #           |<---- cfg.data.seq_length ---->|
@@ -760,7 +775,6 @@ class RolloutResult:
         attention_mask, position_ids = self._get_attention_masks_and_position_ids(
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,
-            response_mask=self.response_mask,
             max_prompt_len=data_seq_length,
             total_len=training_seq_length,
         )
@@ -789,6 +803,14 @@ class RolloutResult:
             "prompt_lengths": prompt_lengths.cuda(),
             "response_lengths": response_lengths.cuda(),
         }
+
+        if self.response_mask is not None:
+            batch["response_mask"] = self._get_response_masks(
+                self.response_mask,
+                prompt_lengths=prompt_lengths,
+                max_prompt_len=data_seq_length,
+                total_len=training_seq_length,
+            )
 
         if (
             self.multi_modal_inputs is not None
@@ -828,7 +850,7 @@ class RolloutResult:
                     for logprobs in self.rollout_logprobs
                 ],
                 max_batch_len=max_response_len,
-                pad_token=pad_token,
+                pad_token=0,
             )
             batch["prev_logprobs"] = logprobs.cuda()
 
