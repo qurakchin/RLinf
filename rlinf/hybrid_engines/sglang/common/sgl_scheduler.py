@@ -217,6 +217,9 @@ class Scheduler(_Scheduler):
                 weight_norm_dict[key] = posi_norm(value)
             self.weight_norm_dict = weight_norm_dict
 
+            # avoid release memory before norm kernel launch (gpu is async from cpu)
+            torch.cuda.synchronize()
+
         self._rlinf_worker.log_info(
             f"Running Scheduler dp rank {self._rlinf_worker.get_parent_rank()}, tp rank {self.tp_rank}, corresponding actor weight rank = {self.actor_weight_rank}"
         )
