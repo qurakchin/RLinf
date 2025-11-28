@@ -288,12 +288,15 @@ class RolloutResult:
 
     @staticmethod
     def _get_response_masks(
-        response_mask: list[list[int]], # [[0 / 1] * response len] * group size
+        response_mask: list[list[int]],  # [[0 / 1] * response len] * group size
         max_prompt_len: int,
         total_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         response_mask = batch_pad_to_fixed_len(
-            [torch.as_tensor([0] * max_prompt_len + ids, dtype=torch.long) for ids in response_mask],
+            [
+                torch.as_tensor([0] * max_prompt_len + ids, dtype=torch.long)
+                for ids in response_mask
+            ],
             max_batch_len=total_len,
             pad_token=0,
         ).bool()
@@ -768,11 +771,13 @@ class RolloutResult:
         response_lengths = torch.tensor(self.response_lengths)
         is_end = torch.tensor(self.is_end, dtype=torch.bool)
 
-        attention_mask, response_mask, position_ids = self._get_attention_masks_and_position_ids(
-            prompt_lengths=prompt_lengths,
-            response_lengths=response_lengths,
-            max_prompt_len=data_seq_length,
-            total_len=training_seq_length,
+        attention_mask, response_mask, position_ids = (
+            self._get_attention_masks_and_position_ids(
+                prompt_lengths=prompt_lengths,
+                response_lengths=response_lengths,
+                max_prompt_len=data_seq_length,
+                total_len=training_seq_length,
+            )
         )
         if self.response_mask is not None:
             response_mask = self._get_response_masks(
