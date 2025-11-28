@@ -5,6 +5,10 @@ tabs 4
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export TOKENIZERS_PARALLELISM=false
 export RAY_DEDUP_LOGS=0
+export RAY_DEBUG=1
+
+ray stop
+ray start --head
 
 CONFIG_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_PATH=$(dirname $(dirname "$CONFIG_PATH"))
@@ -12,9 +16,9 @@ MEGATRON_PATH=/opt/Megatron-LM
 export PYTHONPATH=${REPO_PATH}:${MEGATRON_PATH}:$PYTHONPATH
 
 if [ -z "$1" ]; then
-    CONFIG_NAME="qwen2.5-1.5b-multi-role"
+    CONFIG_NAME="qwen2.5-1.5b-tool-1node"
 else
     CONFIG_NAME=$1
 fi
 
-python ${REPO_PATH}/examples/multiturn_demo/main_multi_role.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
+python ${REPO_PATH}/examples/search_r1_multi/main_searchr1.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME

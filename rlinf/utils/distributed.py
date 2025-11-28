@@ -29,6 +29,132 @@ from typing_extensions import Self
 
 from rlinf.utils.timers import NamedTimer
 
+def compute_rollout_metrics_dynamic(
+    rollout_batch: dict[str, torch.Tensor],
+    max_prompt_len: int,
+    response_len: int,
+    data_parallel_group: Optional[ProcessGroup] = None,
+    use_critic: bool = False,
+):
+    """
+    Compute rollout metrics for dynamic multi-turn scenarios.
+
+    Key difference from compute_rollout_metrics:
+    - reward_scores is computed at the TRAJECTORY level instead of turn level
+    - Uses idx_to_traj to map turns to trajectories
+    - Aggregates turn rewards to trajectory level before averaging
+
+    Args:
+        rollout_batch: Batch containing turn-level data with idx_to_traj mapping
+        max_prompt_len: Maximum prompt length
+        response_len: Response length
+        data_parallel_group: Data parallel group for distributed training
+        use_critic: Whether using critic (unused)
+        group_size: Number of trajectories per question
+    """
+    device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    advantages = rollout_batch["advantages"].to(device=device)
+    mask = rollout_batch["response_mask"].to(device=device)
+    prompt_lengths = rollout_batch["prompt_lengths"].clone().to(device=device)
+    response_lengths = rollout_batch["response_lengths"].clone().to(device=device)
+    reward_scores = rollout_batch["rewards"].clone().to(device=device)
+    is_end = rollout_batch["is_end"].clone().float().to(device=device)
+    idx_to_traj = rollout_batch["idx_to_traj"]  # List mapping turn_idx -> traj_idx
+    num_trajectories = max(idx_to_traj) + 1
+
+    dp_world_size = torch.distributed.get_world_size(data_parallel_group)
+
+    prompt_lengths_list: list[list[int]] = [None for _ in range(dp_world_size)]
+    decode_lengths_list: list[list[int]] = [None for _ in range(dp_world_size)]
+    torch.distributed.all_gather_object(
+        prompt_lengths_list,
+        prompt_lengths.tolist(),
+        group=data_parallel_group,
+    )
+    torch.distributed.all_gather_object(
+        decode_lengths_list,
+        response_lengths.tolist(),
+        group=data_parallel_group,
+    )
+
+    total_prompt_lengths = torch.tensor(sum(prompt_lengths_list, []), device=device)
+    total_decode_lengths = torch.tensor(sum(decode_lengths_list, []), device=device)
+
+    # Compute turn-level sums (for metrics that remain at turn level)
+    sum_plen = prompt_lengths.sum().detach().item()
+    sum_rlen = response_lengths.sum().detach().item()
+    sum_turn_rewards = reward_scores.sum().detach().item()
+    sum_end = is_end.sum().detach().item()
+    num_seq = prompt_lengths.numel()  # number of turns
+
+    # Aggregate turn rewards to trajectory level
+    trajectory_rewards = torch.zeros(num_trajectories, dtype=reward_scores.dtype, device=device)
+    trajectory_counts = torch.zeros(num_trajectories, dtype=torch.long, device=device)
+
+    for turn_idx, traj_idx in enumerate(idx_to_traj):
+        trajectory_rewards[traj_idx] += reward_scores[turn_idx]
+        trajectory_counts[traj_idx] += 1
+
+    # Average rewards per trajectory (all turns in a trajectory have same reward, so this is just the reward value)
+    trajectory_rewards = trajectory_rewards / trajectory_counts.clamp(min=1).float()
+
+    # Sum of trajectory rewards for averaging
+    sum_traj_rewards = trajectory_rewards.sum().detach().item()
+    # num_trajs = num_trajectories
+
+    # # Total number of turns (for computing avg turns per trajectory)
+    # total_turns = num_seq  # This is the number of turns on current rank
+
+    # === END TRAJECTORY-LEVEL REWARD COMPUTATION ===
+
+    valid_adv = torch.masked_select(advantages, mask)
+    n_valid_token = mask.sum().detach().item()
+    sum_adv = valid_adv.to(torch.float64).sum().detach().item()
+
+    # Prepare metrics for distributed reduction
+    # Note: sum_traj_rewards and num_trajs are trajectory-level, others are turn-level
+    reduce_metrics = torch.as_tensor(
+        [sum_plen, sum_rlen, sum_traj_rewards, sum_turn_rewards, sum_end, sum_adv, num_seq, n_valid_token, num_trajectories],
+        device=device,
+        dtype=torch.float32,
+    )
+
+    torch.distributed.all_reduce(
+        reduce_metrics,
+        torch.distributed.ReduceOp.SUM,
+        group=data_parallel_group,
+    )
+
+    sum_plen, sum_rlen, sum_traj_rewards, sum_turn_rewards, sum_end, sum_adv, num_seq, n_valid_token, num_trajectories = (
+        reduce_metrics.tolist()
+    )
+
+    adv_max = torch.max(valid_adv).detach().item()
+    adv_min = torch.min(valid_adv).detach().item()
+    reduce_tensor = torch.as_tensor(
+        [-adv_min, adv_max], device=torch.cuda.current_device(), dtype=torch.float32
+    )
+    torch.distributed.all_reduce(
+        reduce_tensor,
+        torch.distributed.ReduceOp.MAX,
+        group=data_parallel_group,
+    )
+    adv_min, adv_max = reduce_tensor.tolist()
+
+    rollout_metrics = {
+        "total_num_sequence": num_seq,
+        "prompt_length": sum_plen / num_seq,
+        "response_length": sum_rlen / num_seq,
+        "total_length": (sum_plen + sum_rlen) / num_seq,
+        "reward_scores_traj": sum_traj_rewards / num_trajectories,  # TRAJECTORY-LEVEL AVERAGE
+        "reward_scores_turn": sum_turn_rewards / num_seq,  # TURN-LEVEL AVERAGE
+        "avg_turns_per_traj": num_seq / num_trajectories,  # AVERAGE TURNS PER TRAJECTORY
+        "fraction_of_samples_properly_ended": sum_end / num_seq,
+        "advantages_mean": sum_adv / n_valid_token,
+        "advantages_max": adv_max,
+        "advantages_min": -adv_min,
+    }
+    return rollout_metrics, total_prompt_lengths, total_decode_lengths
 
 def compute_rollout_metrics(
     rollout_batch: dict[str, torch.Tensor],
@@ -41,9 +167,12 @@ def compute_rollout_metrics(
     device = torch.device(f"cuda:{torch.cuda.current_device()}")
     advantages = rollout_batch["advantages"].to(device=device)
     if debug_right_padding:
-        mask = rollout_batch["attention_mask"].to(device=device)
+        mask = rollout_batch["response_mask"].to(device=device)
     else:
-        mask = rollout_batch["attention_mask"][:, -response_len:].to(device=device)
+        if "response_mask" not in rollout_batch:
+            mask = rollout_batch["attention_mask"][:, -response_len:].to(device=device)
+        else:
+            mask = rollout_batch["response_mask"][:, -response_len:].to(device=device)
     prompt_lengths = rollout_batch["prompt_lengths"].clone().to(device=device)
     response_lengths = rollout_batch["response_lengths"].clone().to(device=device)
     reward_scores = rollout_batch["rewards"].clone().to(device=device)
@@ -391,6 +520,7 @@ class RolloutDataBalance(UserDict):
         dp_rank: int,
         dp_group: Optional[ProcessGroup],
         rollout_batch_pad: dict[str, torch.Tensor],
+        split_fix_chunk: int,
         partitioning_tool: Callable,
     ) -> Self:
         # 0. Check data
@@ -417,7 +547,8 @@ class RolloutDataBalance(UserDict):
         global_batch_size = batch_size = sum(b["input_ids"].size(0) for b in gathered_rollout_batches)
 
         # 2. Merge data and pad data to fixed length
-        pad_size = dp_world_size - (global_batch_size % dp_world_size)
+        pad_size = (dp_world_size * split_fix_chunk) - (global_batch_size % (dp_world_size * split_fix_chunk))
+        # make sure 总样本可以被dp_world_size * split_fix_chunk （dp size * self.num_train_steps * self.cfg.actor.micro_batch_size）整除
         merged_rollout_batches = {}
         for key in rollout_batches.keys():
             merged_rollout_batches[key] = torch.cat([rollout_batches[key] for rollout_batches in gathered_rollout_batches] + [rollout_batch_pad[key]] * pad_size, dim=0)

@@ -18,8 +18,8 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from rlinf.agents.multiturn_demo.fake_tool_worker import FakeToolWorker
-from rlinf.agents.multiturn_demo.multi_role_agent_loop import MultiRoleAgentLoopWorker
+from rlinf.agents.search_r1_multi.searchr1_agent_loop import Searchr1ToolAgentLoopWorker
+from rlinf.agents.search_r1.search_tool_worker import SearchToolWorker
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
@@ -36,6 +36,9 @@ from rlinf.workers.rollout.utils import get_rollout_backend_worker
 """Script to start GRPO training"""
 mp.set_start_method("spawn", force=True)
 
+import os
+print("RAY_DEBUG:", os.environ.get("RAY_DEBUG", None))
+assert os.environ.get("RAY_DEBUG", None) == "1"
 
 @hydra.main(version_base="1.1")
 @output_redirector
@@ -66,7 +69,7 @@ def main(cfg) -> None:
         len(agentloop_placement_strategy._node_ids)
         == component_placement.rollout_dp_size
     ), "agentloop worker num now should be equal to rollout dp size"
-    agentloop_group = MultiRoleAgentLoopWorker.create_group(cfg, component_placement).launch(
+    agentloop_group = Searchr1ToolAgentLoopWorker.create_group(cfg, component_placement).launch(
         cluster,
         name=cfg.agentloop.group_name,
         placement_strategy=agentloop_placement_strategy,
@@ -110,9 +113,9 @@ def main(cfg) -> None:
     # Tool workers group
     singleton_tool_placement = NodePlacementStrategy([0])
     tool_workers = {
-        FakeToolWorker.create_group(cfg).launch(
-            cluster, name="FakeTool", placement_strategy=singleton_tool_placement
-        ): ToolWorkerInfo(tool_names=["fake_tool"], has_session=False),
+        SearchToolWorker.create_group(cfg).launch(
+            cluster, name="search", placement_strategy=singleton_tool_placement
+        ): ToolWorkerInfo(tool_names=["search"], has_session=False),
     }
 
     runner = AgentRunner(

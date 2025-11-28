@@ -10,6 +10,11 @@ cluster:
   num_nodes: 1
   component_placement:
     actor,rollout,reward: all
+    # rollout: 0-1
+    # inference: 2
+    # actor: 3
+    # reward: 0-1
+
 
 runner:
   task_type: reasoning
@@ -19,25 +24,26 @@ runner:
     experiment_name: ${runner.experiment_name}
     logger_backends: ["tensorboard"] # wandb, swanlab
 
-  max_epochs: 5
+  max_epochs: 1
   max_steps: -1
 
-  val_check_interval: 1
-  save_interval: 50
+  val_check_interval: 30
+  save_interval: 30
 
-  seq_length: 8192
+  seq_length: 7096
 
   enable_dynamic_batch_size: False
-  max_tokens_per_mbs: 8192
+  max_tokens_per_mbs: 7096
 
   resume_dir: null
-  experiment_name: multiturn_demo-multi_role-grpo-1.5b
+  # experiment_name: multiturn_demo-grpo-3b-lr1e6-1node-fixlr-manualsplit1
+  experiment_name: search_r1_multi-grpo-3b-default
   output_dir: /mnt/public/zhuchunyang_rl/logs
 
 algorithm:
   group_size: 4
 
-  n_minibatches: 1
+  n_minibatches: 2
   training_batch_size_per_gpu: 1 # micro batch size
   rollout_batch_size_per_gpu: null # If set to null, rollout_batch_size will be evenly divided across all inference instances. You can reduce this parameter if inference consumes too much GPU memory.
 
@@ -47,7 +53,7 @@ algorithm:
   logprob_forward_micro_batch_size: 1 # ${.rollout_batch_size_per_gpu}
 
   # val rollout mbs
-  val_rollout_batch_size_per_gpu: 4 # ${.rollout_batch_size_per_gpu}
+  val_rollout_batch_size_per_gpu: 1 # ${.rollout_batch_size_per_gpu}
 
   recompute_logprobs: False
   shuffle_rollout: False
@@ -55,7 +61,7 @@ algorithm:
   # GRPO loss params
   loss_type: actor
   loss_agg_func: "token-mean"
-  kl_beta: 0.0 # 0.001
+  kl_beta: 0.001 # 0.001
   kl_penalty_type: low_var_kl
   ratio_clip_eps: 0.2
   entropy_bonus: 0.0
@@ -78,6 +84,26 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
+    stop: [
+        "</search>",
+        "?</search>",
+        "?</search>\n",
+        "?</search>\n\n",
+        "?</search><",
+        "?</search><\n",
+        "</search>\n",
+        "</search>\n\n",
+        "</search><",
+        "</search><\n",
+        "</search><think>",
+        "</search><|",
+        "</answer>",
+        "</answer><",
+        "</answer><think>",
+        "</answer>\n",
+        "</answer>\n\n",
+        "<|im_end|>",
+    ]
 
 inference:
   model_arch: ${rollout.model_arch}
@@ -90,29 +116,27 @@ inference:
 
 agentloop:
   group_name: "AgentLoopGroup"
-  max_turns: 5
+  is_dynamic_rollout_batch: True
   print_outputs: True # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
   # demo specific parameters. not used in this demo. you can add your own parameters here.
-  is_dynamic_rollout_batch: True
-  # belows are custom by user-defined agentloop
+  max_user_turns: 3
+  max_assistant_turns: 2
   max_parallel_calls: 2
-  continue_at_tool_failure: True
   max_tool_response_length: 500
+  tool_response_truncate_side: "right"
 
 rollout:
   group_name: "RolloutGroup"
 
-  gpu_memory_utilization: 0.55
+  gpu_memory_utilization: 0.6
 
-  # model_dir: /mnt/public/zhuchunyang_rl/hf_models/Qwen2.5-1.5B-Instruct
-  model_dir: /mnt/public/hf_models/Qwen3-0.6B
-  # model_arch: qwen2.5
-  model_arch: qwen3
+  model_dir: /mnt/public/hf_models/Qwen2.5-3B-Instruct-search
+  model_arch: qwen2.5
   precision: ${actor.model.precision}              # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
   disable_log_stats: False
-  detokenize: False            # Whether to detokenize the output. During RL we actually don't need to detokenize it. Can be set to True for debugging.
+  detokenize: True            # Whether to detokenize the output. During RL we actually don't need to detokenize it. Can be set to True for debugging.
   padding: null               # will be tokenizer.pad_token_id if null. it is used to filter megatron's padding for rollout engine
   eos: null                   # will be tokenizer.eos_token_id if null.
 
@@ -147,9 +171,9 @@ rollout:
 
 data:
   type: math
-  max_prompt_length: 1024
+  max_prompt_length: 4096
   filter_prompt_by_length: True
-  rollout_batch_size: 4
+  rollout_batch_size: 16 #512
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
@@ -158,12 +182,16 @@ data:
   shuffle: True
   validation_shuffle: True
   seed: 1234
-  train_data_paths: ["/mnt/public/wangxiangyuan/dataset/rstar2/train.jsonl"]
-  val_data_paths: ["/mnt/public/wangxiangyuan/dataset/rstar2/train.jsonl"]
+  train_data_paths: ["/mnt/public/liuweilin/nq_hotpotqa_train/split_train.jsonl"]
+  val_data_paths: ["/mnt/public/liuweilin/nq_hotpotqa_train/eval.jsonl"]
 
 # Tools configuration for AgentLoop
 tools:
   mcp_file_system: null
+  maxturn: 2
+  search:
+    server_addr: 0.0.0.0:8000
+    topk: 10
 
 actor:
   group_name: "ActorGroup"
@@ -171,7 +199,7 @@ actor:
   mcore_gpt: True
   spec_name: decoder_gpt
 
-  checkpoint_load_path: /mnt/public/zhuchunyang_rl/logs/multiturn_demo-multi_role-grpo-1.5b/converted_ckpts/actor
+  checkpoint_load_path: /mnt/public/zhuchunyang_rl/logs/search_r1-grpo-3b-default/converted_ckpts/actor
 
   offload_optimizer: True
   offload_weight: True
@@ -183,7 +211,7 @@ actor:
   seed: 1234
 
   model:
-    precision: bf16
+    precision: fp16
     add_bias_linear: False
 
     tensor_model_parallel_size: 1
@@ -218,14 +246,14 @@ actor:
 
   optim:
     optimizer: adam
-    bf16: True
-    fp16: False
-    lr: 2e-05
+    bf16: False
+    fp16: True
+    lr: 1.0e-06
     adam_beta1: 0.9
     adam_beta2: 0.95
     adam_eps: 1.0e-05
-    min_lr: 2.0e-6
-    weight_decay: 0.05
+    min_lr: 0.0
+    weight_decay: 0.01
     use_distributed_optimizer: True
     overlap_grad_reduce: False
     overlap_param_gather: False
@@ -234,30 +262,14 @@ actor:
     clip_grad: 0.8
     loss_scale: 65536
 
-    optimizer_cpu_offload: True
-    use_precision_aware_optimizer: True
-
-  # if this is set, it will override the lr_sched
-  # below parameters equals:
-  # lr_sched:
-  #   lr_warmup_fraction: ${actor.megatron_lr_warmup_fraction}
-  #   lr_warmup_init: ${actor.megatron_lr_warmup_init}
-  #   max_lr: ${actor.optim.lr}
-  #   min_lr: ${actor.megatron_lr_sched_min_lr}
-  #   lr_decay_style: constant
-  #   lr_decay_iters: # max_epochs * len(data_iter) * n_minibatches
-  # megatron_lr_warmup_fraction: 0.1
-  # megatron_lr_warmup_init: 0.0
-  # megatron_lr_sched_min_lr: 0.0
   lr_sched:
-    lr_warmup_fraction: 0.01
+    lr_warmup_fraction: 0.285
     lr_warmup_init: 0.0
     lr_warmup_iters: 0
-    max_lr: 2.0e-5
+    max_lr: 1.0e-06
     min_lr: 0.0
     lr_decay_style: constant
-    lr_decay_iters: 10
-    # lr_decay_iters will be set at runtime. the value is (max_epochs * len(data_iter) * n_minibatches)
+    lr_decay_iters: 662
 
   tokenizer:
     tokenizer_model: ${rollout.model_dir}
@@ -277,8 +289,7 @@ actor:
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor
-      # model: qwen_2.5_1.5b
-      model: Qwen3-0.6B
+      model: qwen_2.5_3b
       model_type: null # will be set by hf model's config if null
       hf_model_path: ${rollout.model_dir} # path to the hf model
       save_path: ${runner.output_dir}/${runner.experiment_name}/converted_ckpts/actor
@@ -307,8 +318,8 @@ actor:
 reward:
   group_name: "RewardGroup"
   use_reward_model: False
-  reward_type: 'math'
-  reward_scale: 5.0
+  reward_type: 'searchr1'
+  reward_scale: 1.0
 
   tokenizer:
     tokenizer_model: ${actor.tokenizer.tokenizer_model}

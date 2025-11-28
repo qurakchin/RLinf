@@ -85,6 +85,11 @@ class AgentLoopWorker(Worker):
         super().__init__()
         self.cfg = cfg
         self.print_outputs = cfg.agentloop.print_outputs
+        self.return_logprobs = not cfg.algorithm.recompute_logprobs
+        self.is_dynamic_rollout_batch = cfg.agentloop.get("is_dynamic_rollout_batch", False)
+        if self.is_dynamic_rollout_batch:
+            assert isinstance(self, MultiTurnAgentLoopWorker), "agent loop worker must be MultiTurnAgentLoopWorker if is_dynamic_rollout_batch is True"
+            # assert not self.return_logprobs, "recompute_logprobs must be False if is_dynamic_rollout_batch is True"
 
         self.tokenizer = AutoTokenizer.from_pretrained(cfg.rollout.model_dir)
 
@@ -226,8 +231,13 @@ class AgentLoopWorker(Worker):
         )
 
         response_mask = None
-        if response_mask is not None:
+        if all([r.response_mask is not None for r in task_results]):
             response_mask = [r.response_mask[:max_resp_len] for r in task_results]
+
+        response_logprobs = None
+        if self.return_logprobs:
+            response_logprobs = [r.response_logprobs[:max_resp_len] for r in task_results]
+
         is_end = [True for _ in task_results]
         answers = [answer] * len(task_results)
         return RolloutResult(
@@ -242,6 +252,7 @@ class AgentLoopWorker(Worker):
             is_end=is_end,
             answers=answers,
             response_mask=response_mask,
+            rollout_logprobs=response_logprobs,
         )
 
     async def run_one_query(self, prompt_ids: list[int], **kwargs) -> AgentLoopOutput:
@@ -252,7 +263,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
 
     async def run_agentloop_rollout_group(
         self,
-        input_dict: dict,
+        input_ids: list[int],
         answer: str,
         group_size: int,
         output_channel: Channel,
@@ -263,35 +274,12 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
         rollout_tasks = []
         # grpo group_size
         for _ in range(group_size):
-            task = asyncio.create_task(self.run_one_query(copy.deepcopy(input_dict)))
+            task = asyncio.create_task(self.run_one_query(copy.deepcopy(input_ids), answer=answer))
             rollout_tasks.append(task)
 
         task_results = await asyncio.gather(*rollout_tasks)
         rollout_result = self.get_rollout_result(task_results, answer)
         await output_channel.put(rollout_result, async_op=True).async_wait()
-
-    async def run_agentloop_rollout(
-        self, input_channel: Channel, output_channel: Channel
-    ):
-        """
-        Run the agent loop for multiple queries.
-        """
-        with self.worker_timer():
-            rollout_request: RolloutRequest = input_channel.get()
-
-            send_output_tasks = []
-            for input_dict, answer in zip(
-                rollout_request.multi_modal_inputs, rollout_request.answers
-            ):
-                send_output_tasks.append(
-                    asyncio.create_task(
-                        self.run_agentloop_rollout_group(
-                            input_dict, answer, rollout_request.n, output_channel
-                        ),
-                    )
-                )
-
-        await asyncio.gather(*send_output_tasks)
 
     def get_rollout_result(
         self, task_results: list[MultiTurnAgentLoopOutput], answer: str
