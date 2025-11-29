@@ -134,7 +134,9 @@ class MegatronCoreWeightReshard:
             if pp_size > 1:
                 reshard_pp_model = True
 
-        if ep_size > 1 or tpe_size > 1 and self.config.model_config.num_moe_experts is not None:
+        if (
+            ep_size > 1 or tpe_size > 1
+        ) and self.config.model_config.num_moe_experts is not None:
             reshard_ep_model = True
             experts_per_chunk = self.config.model_config.num_moe_experts // ep_size
 
