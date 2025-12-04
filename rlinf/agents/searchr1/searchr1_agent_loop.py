@@ -46,10 +46,12 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         self.max_resp_len = max(1, max_total_len - self.max_prompt_len)
 
         # 5 is a magic number in this demo.
-        self.max_turns = self.cfg.agentloop.get("max_turns", 5)
         self.tool_call_start_token: str = "<search>"
         self.tool_call_end_token: str = "</search>"
         self.tool_call_regex = re.compile(r"<search>(.*?)</search>", re.DOTALL)
+        
+        # Inserting tool info requires re-encode token_ids, so the recompute_logprobs must be true.
+        assert self.cfg.algorithm.recompute_logprobs
         
 
     async def state_less_tool_call_with_channel(
@@ -114,7 +116,7 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         orig_prompt_ids = copy.deepcopy(prompt_ids)
         trace_prints = []
         response_mask = []
-        for _ in range(self.cfg.tools.maxturn):
+        for _ in range(self.cfg.agentloop.maxturn):
             # Generate response from LLM
             max_resp_len = self.max_resp_len - (len(prompt_ids) - len(orig_prompt_ids))
             

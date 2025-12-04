@@ -17,7 +17,4 @@ outputs/*
 .venv
 uv.lock
 rlinf/envs/maniskill/assets
-examples/searchr1/launch_local_server-forpr.sh
-examples/searchr1/config/qwen2.5-3b-tool-1node-eval-local.yaml
-examples/searchr1/config/qwen2.5-3b-tool-1node-local.yaml
 examples/results
