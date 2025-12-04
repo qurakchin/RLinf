@@ -628,7 +628,7 @@ class FSDPActor(FSDPModelManager, Worker):
         """
         with self.worker_timer():
             if batch.get("advantages", None) is None:
-                mask = batch["attention_mask"][:, -self.response_len :]
+                mask = batch["response_mask"][:, -self.response_len :]
                 advantages, _ = calculate_adv_and_returns(
                     task_type=self.task_type,
                     adv_type=self.cfg.algorithm.adv_type,
