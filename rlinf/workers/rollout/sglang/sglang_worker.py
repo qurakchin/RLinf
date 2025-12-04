@@ -68,6 +68,7 @@ class SGLangWorker(Worker):
         self._collect_meta_stats = getattr(
             self._cfg.rollout, "collect_meta_stats", False
         )
+        self.is_eval = getattr(self._cfg.rollout, "is_eval", 0) == 1
         self._use_auto_scheduler = self._placement.is_auto
 
         if self._collect_meta_stats:
@@ -240,7 +241,7 @@ class SGLangWorker(Worker):
         self.log_info(f"SGLang worker {self._rank} initialized.")
         if self._cfg.rollout.validate_weight:
             await self._validate_weight_at_first()
-        if self._placement.is_collocated:
+        if self._placement.is_collocated and not self.is_eval:
             await self.offload_engine()
         if self._use_auto_scheduler:
             asyncio.create_task(self._scheduler.main_loop())
@@ -396,7 +397,8 @@ class SGLangWorker(Worker):
                 self._collect_stats(all_rollout_results)
 
             if self._placement.is_collocated or self._placement.is_auto:
-                await self.offload_engine()
+                if not self.is_eval:
+                    await self.offload_engine()
                 if self._use_auto_scheduler:
                     await self._scheduler.report_offloaded()
 
