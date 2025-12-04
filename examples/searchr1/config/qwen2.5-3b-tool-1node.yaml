@@ -86,9 +86,7 @@ algorithm:
 
 agentloop:
   group_name: "AgentLoopGroup"
-  max_user_turns: 3
-  max_assistant_turns: 2
-  max_parallel_calls: 2
+  maxturn: 2
   max_tool_response_length: 500
   tool_response_truncate_side: "right"
   print_outputs: False
@@ -164,8 +162,6 @@ data:
 
 # Tools configuration for AgentLoop
 tools:
-  mcp_file_system: null
-  maxturn: 2
   search:
     server_addr: 0.0.0.0:8000
     topk: 3

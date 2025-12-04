@@ -42,7 +42,7 @@ if typing.TYPE_CHECKING:
 logging.getLogger().setLevel(logging.INFO)
 
 
-class Searchr1ToolAgentEvalRunner(ReasoningRunnerEval):
+class ToolAgentEvalRunner(ReasoningRunnerEval):
     """Runner for agent task RL training."""
 
     def __init__(
