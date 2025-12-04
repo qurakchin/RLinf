@@ -45,6 +45,17 @@ class EmbodiedEvalRunner:
         self.timer = ScopedTimer(reduction="max", sync_cuda=False)
         self.metric_logger = MetricLogger(cfg)
 
+    def _load_eval_policy(self):
+        assert self.cfg.runner.eval_policy_path is not None, (
+            "eval_policy_path must be provided when only_eval is True"
+        )
+        self.rollout.load_checkpoint(self.cfg.runner.eval_policy_path).wait()
+
+    def init_workers(self):
+        self.rollout.init_worker().wait()
+        self.env.init_worker().wait()
+        self._load_eval_policy()
+
     def evaluate(self):
         env_handle: Handle = self.env.evaluate(
             input_channel=self.rollout_channel, output_channel=self.env_channel

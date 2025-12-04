@@ -167,6 +167,7 @@ class EnvManager:
         self,
         cfg: DictConfig,
         rank: int,
+        num_envs: int,
         seed_offset: int,
         total_num_processes: int,
         env_type: str,
@@ -186,6 +187,7 @@ class EnvManager:
         """
         self.cfg = cfg.env.train if not is_eval else cfg.env.eval
         self.rank = rank
+        self.num_envs = num_envs
         self.seed_offset = seed_offset
         self.total_num_processes = total_num_processes
         self.process: Optional[mp.Process] = None
@@ -220,7 +222,9 @@ class EnvManager:
             self.env = None
         else:
             self.env_cls = env_cls
-            self.env = self.env_cls(self.cfg, seed_offset, total_num_processes)
+            self.env = self.env_cls(
+                self.cfg, num_envs, seed_offset, total_num_processes
+            )
 
     @classmethod
     def register_env(cls, env_name: str):
@@ -281,6 +285,7 @@ class EnvManager:
             args=(
                 self.cfg,
                 self.rank,
+                self.num_envs,
                 self.seed_offset,
                 self.total_num_processes,
                 self.env_cls,
@@ -357,6 +362,7 @@ class EnvManager:
         if name in [
             "cfg",
             "rank",
+            "num_envs",
             "seed_offset",
             "total_num_processes",
             "process",
@@ -402,6 +408,7 @@ class EnvManager:
 def _simulator_worker(
     cfg,
     rank,
+    num_envs,
     seed_offset,
     total_num_processes,
     env_cls,
@@ -422,7 +429,7 @@ def _simulator_worker(
     omegaconf_register()
 
     try:
-        simulator = env_cls(cfg, seed_offset, total_num_processes)
+        simulator = env_cls(cfg, num_envs, seed_offset, total_num_processes)
         assert isinstance(simulator, EnvOffloadMixin), (
             f"Environment class {env_cls.__name__} must inherit from EnvOffloadMixin"
         )
