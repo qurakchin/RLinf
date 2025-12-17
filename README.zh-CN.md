@@ -30,6 +30,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 
 
 ## 最新动态
+- [2025/12] 🔥 RLinf支持[Search-R1](https://github.com/PeterGriffinJin/Search-R1)的强化学习微调！ 文档: [Search-R1](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/searchr1.html)。
 - [2025/12] 🔥 基于[RoboCasa](https://github.com/robocasa/robocasa)的强化学习微调已经上线! 文档：[RL on RoboCasa](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/robocasa.html)。
 - [2025/12] 🎉 RLinf正式发布[v0.1](https://github.com/RLinf/RLinf/releases/tag/v0.1)版本。
 - [2025/11] 🔥 基于[CALVIN](https://github.com/mees/calvin)的强化学习微调已经上线! 文档：[RL on CALVIN](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/calvin.html)。
