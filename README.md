@@ -114,8 +114,8 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
           </ul>
           <li><b>SFT</b></li>
           <ul>
-            <li>Full-parameter SFT</li>
-            <li>LoRA SFT</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/fine_tine.html">Full-parameter SFT</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/fine_tine.html">LoRA SFT</a> ✅</li>
           </ul>
         </ul>
       </td>

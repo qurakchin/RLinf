@@ -257,3 +257,4 @@ Thanks to this decoupled design, workers can be flexibly and dynamically schedul
    gr00t
    reasoning
    coding_online_rl
+   sft
