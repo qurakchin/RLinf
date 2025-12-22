@@ -89,6 +89,15 @@ and write its path into `examples/searchr1/config/qwen2.5-3b-tool-1node.yaml`:
 
 .. code-block:: yaml
 
+   data:
+     ……
+     train_data_paths: ["/path/to/train.jsonl"]
+     val_data_paths: ["/path/to/train.jsonl"]
+
+Modify `rollout.model.model_path` in `qwen2.5-3b-tool-1node.yaml`:
+
+.. code-block:: yaml
+
    rollout:
      group_name: "RolloutGroup"
 
@@ -96,15 +105,6 @@ and write its path into `examples/searchr1/config/qwen2.5-3b-tool-1node.yaml`:
      model:
        model_path: /path/to/model/Qwen2.5-3B-Instruct
        model_type: qwen2.5
-
-Modify `rollout.model.model_path` in `qwen2.5-3b-tool-1node.yaml`:
-
-.. code-block:: yaml
-
-   data:
-     ……
-     train_data_paths: ["/path/to/train.jsonl"]
-     val_data_paths: ["/path/to/train.jsonl"]
 
 If you use sampling_params.stop to control model stop and save training time, detokenize should be set to True.
 

@@ -87,6 +87,15 @@ embedding模型，并将之前下载好的wiki文件路径写入examples/searchr
 
 .. code-block:: yaml
 
+   data:
+     ……
+     train_data_paths: ["/path/to/train.jsonl"]
+     val_data_paths: ["/path/to/train.jsonl"]
+
+修改examples/searchr1/config/qwen2.5-3b-tool-1node.yaml中rollout.model.model_path的路径
+
+.. code-block:: yaml
+
    rollout:
      group_name: "RolloutGroup"
 
@@ -94,15 +103,6 @@ embedding模型，并将之前下载好的wiki文件路径写入examples/searchr
      model:
        model_path: /path/to/model/Qwen2.5-3B-Instruct
        model_type: qwen2.5
-
-修改examples/searchr1/config/qwen2.5-3b-tool-1node.yaml中rollout.model.model_path的路径
-
-.. code-block:: yaml
-
-   data:
-     ……
-     train_data_paths: ["/path/to/train.jsonl"]
-     val_data_paths: ["/path/to/train.jsonl"]
 
 如果使用sampling_params.stop来控制模型停止节省训练时间，detokenize应当设置为True
 
