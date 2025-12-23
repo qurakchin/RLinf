@@ -47,7 +47,9 @@ def main(cfg) -> None:
     # Generator group
     rollout_worker_cls = get_rollout_backend_worker(cfg)
     rollout_placement_strategy = component_placement.get_strategy("rollout")
-    rollout_group = rollout_worker_cls.create_group(cfg, component_placement).launch(
+    rollout_group = rollout_worker_cls.create_group(
+        cfg, component_placement, weight_reload=None
+    ).launch(
         cluster,
         name=cfg.rollout.group_name,
         placement_strategy=rollout_placement_strategy,

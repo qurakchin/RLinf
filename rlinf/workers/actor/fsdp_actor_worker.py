@@ -403,7 +403,7 @@ class FSDPActor(FSDPModelManager, Worker):
             if "ref_logprobs" in m_batch:
                 ref_logprobs = m_batch["ref_logprobs"]
 
-            loss_mask = m_batch["attention_mask"][:, -self.response_len :]
+            loss_mask = m_batch["response_mask"][:, -self.response_len :]
 
             clip_ratio = self.cfg.algorithm.ratio_clip_eps
             clip_ratio_low = self.cfg.algorithm.get("clip_ratio_low", None)
@@ -508,7 +508,7 @@ class FSDPActor(FSDPModelManager, Worker):
         if self.cfg.algorithm.normalize_advantages:
 
             def normalize_advantages(batch: dict[str, torch.Tensor]):
-                mask = batch["attention_mask"][:, -self.response_len :]
+                mask = batch["response_mask"][:, -self.response_len :]
                 batch["advantages"] = masked_normalization(batch["advantages"], mask)
                 return batch
 
@@ -567,7 +567,7 @@ class FSDPActor(FSDPModelManager, Worker):
         global_batch = self.compute_advantages_and_returns(global_batch)
 
         if self.cfg.algorithm.normalize_advantages:
-            mask = global_batch["attention_mask"][:, -self.response_len :]
+            mask = global_batch["response_mask"][:, -self.response_len :]
             global_batch["advantages"] = masked_normalization(
                 global_batch["advantages"], mask
             )

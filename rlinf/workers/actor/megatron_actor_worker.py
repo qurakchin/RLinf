@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import time
 from functools import partial
 from typing import Callable, Optional
 
@@ -286,8 +287,10 @@ class MegatronActor(MegatronModelManager, Worker):
         torch.distributed.barrier()
 
     def get_batch(
-        self, channel: Channel
+        self, channel: Channel, tag: Optional[str] = None
     ) -> tuple[dict[str, torch.Tensor], RolloutResult]:
+        if tag is not None:
+            start_time = time.perf_counter()
         if channel.is_local:
             # Local channel, every process will put its own data locally
             # No need to broadcast
@@ -310,16 +313,19 @@ class MegatronActor(MegatronModelManager, Worker):
             self.tokenizer.eos_token_id,
         )
 
+        if tag is not None:
+            duration = time.perf_counter() - start_time
+            self._timer_metrics[tag] = self._timer_metrics.get(tag, 0.0) - duration
         return batch, result
 
     def put_result(self, result: RolloutResult, channel: Channel):
         if channel.is_local:
             # Local channel, every process will put its own data locally
             # No need to broadcast
-            channel.put(result)
+            channel.put(result, async_op=True)
         else:
             if self.is_data_io_rank:
-                channel.put(result)
+                channel.put(result, async_op=True)
 
     def get_forward_step_func(self):
         """Acquire the forward step function for the model."""
@@ -732,7 +738,7 @@ class MegatronActor(MegatronModelManager, Worker):
 
         # Advantage normalization
         if self.cfg.algorithm.normalize_advantages:
-            mask = batch["attention_mask"][:, -self.response_len :]
+            mask = batch["response_mask"][:, -self.response_len :]
             batch["advantages"] = masked_normalization(
                 batch["advantages"],
                 mask,
@@ -798,7 +804,7 @@ class MegatronActor(MegatronModelManager, Worker):
         if self.cfg.algorithm.normalize_advantages:
 
             def normalize_advantages(batch: dict[str, torch.Tensor]):
-                mask = batch["attention_mask"][:, -self.response_len :]
+                mask = batch["response_mask"][:, -self.response_len :]
                 batch["advantages"] = masked_normalization(
                     batch["advantages"],
                     mask,
@@ -1145,18 +1151,30 @@ class MegatronActor(MegatronModelManager, Worker):
             output_channel: The output channel to send results to.
             compute_ref_logprobs: Whether to compute reference logprobs.
         """
-        recv_batch_size = 0
-        while recv_batch_size < self.total_batch_size_per_dp:
-            batch, rollout_result = self.get_batch(input_channel)
-            recv_batch_size += rollout_result.num_sequence
-            # Must be called after batch is retrieved, suggesting that rollout has stopped
-            # Otherwise, loading model might cause OOM in the collocated mode
+        total_recv_batch_size = 0
+        if not self.is_pipeline:
+            inference_split = 1
+        else:
+            inference_split = self.cfg.algorithm.n_minibatches
+        for i in range(inference_split):
+            batches = []
+            rollout_results = []
+            recv_batch_size = 0
+            while recv_batch_size < self.total_batch_size_per_dp // inference_split:
+                batch, rollout_result = self.get_batch(input_channel)
+                batches.append(batch)
+                rollout_results.append(rollout_result)
+                recv_batch_size += rollout_result.num_sequence
+                total_recv_batch_size += rollout_result.num_sequence
+                # Must be called after batch is retrieved, suggesting that rollout has stopped
+                # Otherwise, loading model might cause OOM in the collocated mode
+            batch = RolloutResult.merge_batches(batches)
+            rollout_result = RolloutResult.merge_result_list(rollout_results)
             self._load_weight_and_optimizer()
 
-            # Prev logprobs
             with self.worker_timer():
+                # Prev logprobs
                 prev_logprobs = self.inference_step(batch)
-
                 if rollout_result.rollout_logprobs is not None:
                     # Rollout has returned logprobs, store the recomputed logprobs in recompute_prev_logprobs
                     rollout_result.recompute_prev_logprobs = prev_logprobs.cpu()
@@ -1164,18 +1182,17 @@ class MegatronActor(MegatronModelManager, Worker):
                     # Otherwise, store the logprobs in prev_logprobs (the final logprobs used for training)
                     rollout_result.prev_logprobs = prev_logprobs.cpu()
 
-            # Ref logprobs
-            if compute_ref_logprobs:
-                assert self.ref_policy_state_dict is not None
-                with cpu_weight_swap(self.model[0], self.ref_policy_state_dict):
-                    ref_logprobs = self.inference_step(batch)
-                    rollout_result.ref_logprobs = ref_logprobs.cpu()
+                # Ref logprobs
+                if compute_ref_logprobs:
+                    assert self.ref_policy_state_dict is not None
+                    with cpu_weight_swap(self.model[0], self.ref_policy_state_dict):
+                        ref_logprobs = self.inference_step(batch)
+                        rollout_result.ref_logprobs = ref_logprobs.cpu()
             self.put_result(rollout_result, output_channel)
 
-        assert recv_batch_size == self.total_batch_size_per_dp, (
-            f"Expected {self.total_batch_size_per_dp} sequences from channel, but got {recv_batch_size}"
+        assert total_recv_batch_size == self.total_batch_size_per_dp, (
+            f"Expected {self.total_batch_size_per_dp} sequences from channel, but got {total_recv_batch_size}"
         )
-
         self.scheduler_offload_sync()
 
     # Advantages and returns
