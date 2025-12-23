@@ -845,7 +845,6 @@ def validate_reasoning_eval_cfg(cfg: DictConfig) -> DictConfig:
         assert cfg.runner.seq_length > cfg.data.max_prompt_length, (
             f"runner.seq_length ({cfg.runner.seq_length}) must be greater than data.max_prompt_length ({cfg.data.max_prompt_length})"
         )
-        cfg.rollout.return_logprobs = False
         cfg.rollout = validate_rollout_cfg(cfg.rollout, cfg.algorithm)
     return cfg
 
@@ -922,9 +921,7 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
         cfg = validate_reasoning_eval_cfg(cfg)
         return cfg
 
-    if cfg.algorithm.adv_type in ("grpo", "reinpp_baseline") and not cfg.rollout.get(
-        "is_eval", False
-    ):
+    if cfg.algorithm.adv_type in ("grpo", "reinpp_baseline"):
         assert cfg.algorithm.group_size > 1
 
     assert cfg.actor.training_backend in SUPPORTED_TRAINING_BACKENDS, (

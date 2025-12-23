@@ -15,7 +15,7 @@
 import asyncio
 import copy
 import dataclasses
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from omegaconf import DictConfig
 from sglang.srt.managers.io_struct import (
@@ -51,12 +51,16 @@ class SGLangWorker(Worker):
         self,
         config: DictConfig,
         placement: ModelParallelComponentPlacement,
+        weight_reload: Literal["sync", "cpu", None] = "sync",
         config_rollout: DictConfig = None,
-        sampling_params: DictConfig = None,
     ):
         Worker.__init__(self)
 
         self._cfg = config
+        # 'sync': sync weight from actor;
+        # 'cpu': save weight from cpu and reload weight from cpu
+        # None: no need to reload, only used in eval
+        self.weight_reload = weight_reload
         if config_rollout is None:
             config_rollout = self._cfg.rollout
         self._cfg_rollout = config_rollout
@@ -66,7 +70,9 @@ class SGLangWorker(Worker):
             self._cfg_rollout.model.model_path
         )
         self._return_logprobs = self._cfg_rollout.return_logprobs
-        if sampling_params is None:
+        if config_rollout is None:
+            sampling_params = self._cfg.algorithm.sampling_params
+        else:
             sampling_params = self._cfg.algorithm.sampling_params
         self._sampling_params = SGLangWorker.get_sampling_param_from_config(
             sampling_params
@@ -124,21 +130,30 @@ class SGLangWorker(Worker):
         """
         if cfg_sampling_params.do_sample:
             sampling_params = {
+                "temperature": 0,
+                "max_new_tokens": cfg_sampling_params.max_new_tokens,
+            }
+        else:
+            sampling_params = {
                 "temperature": cfg_sampling_params.temperature,
                 "top_k": cfg_sampling_params.top_k,
                 "top_p": cfg_sampling_params.top_p,
                 "repetition_penalty": cfg_sampling_params.repetition_penalty,
                 "max_new_tokens": cfg_sampling_params.max_new_tokens,
             }
-        else:
-            sampling_params = {
-                "temperature": 0,
-                "max_new_tokens": cfg_sampling_params.max_new_tokens,
-            }
         return sampling_params
 
     def _init_engine(self):
         use_cudagraph = not self._cfg_rollout.enforce_eager
+
+        load_format = "dummy"  # dummy means randomize init weight
+        if self.weight_reload == "sync":
+            if self._cfg_rollout.validate_weight or getattr(
+                self._cfg_rollout, "validate_weight_first_sync", False
+            ):
+                load_format = "auto"
+        else:
+            load_format = "auto"
 
         server_args = ServerArgs(
             model_path=self._cfg_rollout.model.model_path,
@@ -155,10 +170,7 @@ class SGLangWorker(Worker):
                 self._cfg_rollout.sglang.torch_compile_max_bs,
                 self._cfg_rollout.max_running_requests,
             ),
-            load_format="dummy"
-            if not self._cfg_rollout.validate_weight
-            and not getattr(self._cfg_rollout, "validate_weight_first_sync", False)
-            else "auto",
+            load_format=load_format,
             # disable_overlap_schedule=True,
             dtype=torch_dtype_from_precision(self._cfg_rollout.model.precision),
             # sglang will only return text/output_ids when skip_tokenizer_init=False/True
@@ -244,48 +256,55 @@ class SGLangWorker(Worker):
 
     async def init_worker(self):
         self._init_engine()
-        await self._engine.tokenizer_manager.run_task_method(
-            io_struct.TaskMethodInput(
-                method_name="init_rlinf_worker",
-                args=(
-                    self.worker_address,
-                    self._placement,
-                    self._cfg,
-                ),
+        if self.weight_reload == "sync":
+            await self._engine.tokenizer_manager.run_task_method(
+                io_struct.TaskMethodInput(
+                    method_name="init_rlinf_worker",
+                    args=(
+                        self.worker_address,
+                        self.weight_reload,
+                        self._placement,
+                        self._cfg,
+                    ),
+                )
             )
-        )
-        self.log_info(f"SGLang worker {self._rank} initialized.")
-        if self._cfg_rollout.validate_weight:
-            await self._validate_weight_at_first()
-        if self._placement.is_collocated:
-            await self.offload_engine()
-        if self._use_auto_scheduler:
-            asyncio.create_task(self._scheduler.main_loop())
-
-    async def init_worker_no_sync(self):
-        self._init_engine()
-        await self._engine.tokenizer_manager.run_task_method(
-            io_struct.TaskMethodInput(
-                method_name="init_rlinf_worker_no_sync",
-                args=(self.worker_address,),
+            self.log_info(f"SGLang worker {self._rank} initialized.")
+            if self._cfg_rollout.validate_weight:
+                await self._validate_weight_at_first()
+            if self._placement.is_collocated:
+                await self.offload_engine()
+            if self._use_auto_scheduler:
+                asyncio.create_task(self._scheduler.main_loop())
+        elif self.weight_reload == "cpu" or self.weight_reload is None:
+            await self._engine.tokenizer_manager.run_task_method(
+                io_struct.TaskMethodInput(
+                    method_name="init_rlinf_worker",
+                    args=(
+                        self.worker_address,
+                        self.weight_reload,
+                    ),
+                )
             )
-        )
-        self.log_info(f"SGLang worker {self._rank} initialized.")
-        if self._placement.is_collocated:
-            await self.offload_engine()
+            self.log_info(f"SGLang worker {self._rank} initialized.")
+            if self.weight_reload == "cpu" and self._placement.is_collocated:
+                await self.offload_engine()
+        else:
+            assert False
 
     async def offload_engine(self):
         """
-        Offload the model weights from the SGLang engine.
+        Release the model weights from the SGLang engine.
         """
+        assert self.weight_reload is not None
         await self._engine.tokenizer_manager.release_memory_occupation(
             obj=ReleaseMemoryOccupationReqInput()
         )
 
     async def onload_engine(self):
         """
-        Offload the model weights from the SGLang engine.
+        Onload the model weights from cpu to the SGLang engine.
         """
+        assert self.weight_reload == "cpu"
         await self._engine.tokenizer_manager.resume_memory_occupation(
             obj=ResumeMemoryOccupationReqInput()
         )
@@ -338,7 +357,8 @@ class SGLangWorker(Worker):
                         f"exceeding max_new_tokens={self._sampling_params['max_new_tokens']}, "
                         f"it will be truncatured."
                     )
-                    result = copy.deepcopy(seq_group_info.results[idx])
+                    result = seq_group_info.results[idx]
+                    seq_group_info.results[idx] = None
                     result["meta_info"]["finish_reason"]["type"] = "length"
                     seq_group_info.record_sglang_result(idx, result)
                     continue
@@ -431,7 +451,9 @@ class SGLangWorker(Worker):
             if self._collect_meta_stats:
                 self._collect_stats(all_rollout_results)
 
-            if self._placement.is_collocated or self._placement.is_auto:
+            if self.weight_reload is not None and (
+                self._placement.is_collocated or self._placement.is_auto
+            ):
                 await self.offload_engine()
                 if self._use_auto_scheduler:
                     await self._scheduler.report_offloaded()

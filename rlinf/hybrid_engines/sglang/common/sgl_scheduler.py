@@ -14,7 +14,7 @@
 
 import logging
 from importlib.metadata import version
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from omegaconf import DictConfig
@@ -77,8 +77,6 @@ class Scheduler(_Scheduler):
             raise ValueError(f"sglang version not supported: {e}")
         self.patch_return_output_ids = sglang_version < parse("0.5.0")
 
-        self.multi_rollout = True
-
     def cuda_info(self, text: str = ""):
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         free_gpu_memory /= 2**30
@@ -96,51 +94,24 @@ class Scheduler(_Scheduler):
     def release_memory_occupation(self, recv_req: ReleaseMemoryOccupationReqInput):
         assert self.is_weight_offloaded is False, "Weight has been offloaded!"
         self.is_weight_offloaded = True
-        self._rlinf_worker.log_info("Running Scheduler offload")
         return super().release_memory_occupation(recv_req)
 
     def resume_memory_occupation(self, recv_req: ResumeMemoryOccupationReqInput):
         assert self.is_weight_offloaded is True, "Weight has been onloaded!"
         self.is_weight_offloaded = False
-        self._rlinf_worker.log_info("Running Scheduler onload")
         result = super().resume_memory_occupation(recv_req)
-        if not self.is_sync_weight:
+        if self.weight_reload == "cpu":
             model = self.tp_worker.worker.model_runner.model
             model.load_state_dict(self.cpu_state_dict)
-
-            if self.weight_norm_dict is not None:
-                # validate the weight norm dict between load model and first sync.
-                weight_norm_dict_sync = {}
-                for name, value in model.state_dict().items():
-                    weight_norm_dict_sync[name] = posi_norm(value)
-                diff_keys = []
-                for k in weight_norm_dict_sync.keys():
-                    if not torch.allclose(
-                        weight_norm_dict_sync[k],
-                        self.weight_norm_dict[k],
-                        rtol=1e-3,
-                        atol=1e-4,
-                    ):
-                        diff_keys.append(k)
-
-                if len(diff_keys) != 0:
-                    raise RuntimeError(
-                        f"sglang: validate_weight failed in resume. diff_keys = {diff_keys}"
-                    )
-                else:
-                    self._rlinf_worker.log_info(
-                        f"sglang: validate_weight success in resume at rank {self._rlinf_worker.get_parent_rank()}"
-                    )
-                self.weight_norm_dict = None
 
         return result
 
     def batch_load_hf_weight(self, state_dict: dict[str, Any]) -> Any:
-        assert self.is_sync_weight
+        assert self.weight_reload == "sync"
         model = self.tp_worker.worker.model_runner.model
         colocate = self.placement_mode == PlacementMode.COLLOCATED
         batch_weight = []
-        if colocate and not self.multi_rollout:
+        if colocate:
             for name, handle in state_dict.items():
                 func, args = handle
                 list_args = list(args)
@@ -161,7 +132,7 @@ class Scheduler(_Scheduler):
         batch_weight.clear()
 
     def sync_hf_weight(self, recv_req: SyncHFWeightInput):
-        assert self.is_sync_weight
+        assert self.weight_reload == "sync"
         use_cudagraph = not self.cfg.rollout.enforce_eager
         assert use_cudagraph, "use_cudagraph must be True now."
 
@@ -182,7 +153,6 @@ class Scheduler(_Scheduler):
 
         if self.is_weight_offloaded:
             self.resume_memory_occupation(ResumeMemoryOccupationReqInput())
-            self.is_weight_offloaded = False
 
         assert bucket_length > 0, f"bucket_length {bucket_length} is invalid"
 
@@ -205,6 +175,20 @@ class Scheduler(_Scheduler):
 
             state_dict = recv_handle.wait()
             self.batch_load_hf_weight(state_dict)
+
+        if self.weight_norm_dict is not None:
+            # validate the weight norm dict between load model and first sync.
+            model = self.tp_worker.worker.model_runner.model
+            diff_keys = validate_weight_diff(model, self.weight_norm_dict)
+            if len(diff_keys) != 0:
+                raise RuntimeError(
+                    f"sglang: validate_weight failed in first sync. diff_keys = {diff_keys}"
+                )
+            else:
+                self._rlinf_worker.log_info(
+                    f"sglang: validate_weight success at rank {self._rlinf_worker.get_parent_rank()}"
+                )
+            self.weight_norm_dict = None
 
         self.flush_cache()
         return SyncHFWeightOutput()
@@ -239,76 +223,55 @@ class Scheduler(_Scheduler):
     def init_rlinf_worker(
         self,
         parent_address: WorkerAddress,
-        placement: ModelParallelComponentPlacement,
-        config: DictConfig,
+        weight_reload: Literal["sync", "cpu", None] = "sync",
+        placement: ModelParallelComponentPlacement = None,
+        config: DictConfig = None,
     ):
         # WARNNING(wyq): Is world_size == self.tp_size when we enable EP in MoE?
         self._rlinf_worker = Worker(
             parent_address=parent_address, world_size=self.tp_size, rank=self.tp_rank
         )
-        self.is_sync_weight = True
-        self.cfg = config
-        self._actor_group_name = self.cfg.actor.group_name
-        self.placement_mode = placement.placement_mode
-        self.actor_weight_rank = RankMapper.get_rollout_rank_to_actor_rank_map(
-            placement
-        )[(self._rlinf_worker.get_parent_rank(), self._rlinf_worker._rank)]
+        self.weight_reload = weight_reload
+        if weight_reload == "sync":
+            self.cfg = config
+            self._actor_group_name = self.cfg.actor.group_name
+            self.placement_mode = placement.placement_mode
+            self.actor_weight_rank = RankMapper.get_rollout_rank_to_actor_rank_map(
+                placement
+            )[(self._rlinf_worker.get_parent_rank(), self._rlinf_worker._rank)]
 
-        use_presharded_weights = (
-            False if self.cfg.actor.training_backend == "fsdp" else True
-        )
-        # it's important to use load_weight to load resharded weight from megatron
-        for _, module in self.tp_worker.worker.model_runner.model.named_modules():
-            if hasattr(module, "use_presharded_weights"):
-                module.use_presharded_weights = use_presharded_weights
-
-        if self.cfg.rollout.validate_weight_first_sync:
-            # save weight norm when init. used for validate when sync from megatron at the first time.
+            use_presharded_weights = (
+                False if self.cfg.actor.training_backend == "fsdp" else True
+            )
             model = self.tp_worker.worker.model_runner.model
-            weight_norm_dict = {}
-            for key, value in model.state_dict().items():
-                weight_norm_dict[key] = posi_norm(value)
-            self.weight_norm_dict = weight_norm_dict
+            # it's important to use load_weight to load resharded weight from megatron
+            for _, module in model.named_modules():
+                if hasattr(module, "use_presharded_weights"):
+                    module.use_presharded_weights = use_presharded_weights
 
-            # avoid release memory before norm kernel launch (gpu is async from cpu)
+            if self.cfg.rollout.validate_weight_first_sync:
+                self.weight_norm_dict = validate_weight_init(model)
+
+            self._rlinf_worker.log_info(
+                f"Running Scheduler dp rank {self._rlinf_worker.get_parent_rank()}, tp rank {self.tp_rank}, corresponding actor weight rank = {self.actor_weight_rank}"
+            )
+        elif weight_reload == "cpu":
+            # save state dict to cpu
+            model = self.tp_worker.worker.model_runner.model
+            cpu_state_dict = {}
+            for key, value in model.state_dict().items():
+                cpu_state_dict[key] = value.to("cpu", non_blocking=True)
+            self.cpu_state_dict = cpu_state_dict
             torch.cuda.synchronize()
 
-        self._rlinf_worker.log_info(
-            f"Running Scheduler dp rank {self._rlinf_worker.get_parent_rank()}, tp rank {self.tp_rank}, corresponding actor weight rank = {self.actor_weight_rank}"
-        )
-
-    def init_rlinf_worker_no_sync(
-        self,
-        parent_address: WorkerAddress,
-        validate_weight_first_sync=True,
-    ):
-        # WARNNING(wyq): Is world_size == self.tp_size when we enable EP in MoE?
-        self._rlinf_worker = Worker(
-            parent_address=parent_address, world_size=self.tp_size, rank=self.tp_rank
-        )
-        self.is_sync_weight = False
-
-        if validate_weight_first_sync:
-            # save weight norm when init. used for validate when sync from megatron at the first time.
-            model = self.tp_worker.worker.model_runner.model
-            weight_norm_dict = {}
-            for key, value in model.state_dict().items():
-                weight_norm_dict[key] = posi_norm(value)
-            self.weight_norm_dict = weight_norm_dict
-
-            # avoid release memory before norm kernel launch (gpu is async from cpu)
-            torch.cuda.synchronize()
-
-        model = self.tp_worker.worker.model_runner.model
-        cpu_state_dict = {}
-        for key, value in model.state_dict().items():
-            cpu_state_dict[key] = value.to("cpu", non_blocking=True)
-        self.cpu_state_dict = cpu_state_dict
-        torch.cuda.synchronize()
-
-        self._rlinf_worker.log_info(
-            f"Running Scheduler dp rank {self._rlinf_worker.get_parent_rank()}, tp rank {self.tp_rank}, no sync weight"
-        )
+            self._rlinf_worker.log_info(
+                f"Running Scheduler dp rank {self._rlinf_worker.get_parent_rank()}, tp rank {self.tp_rank}, load weight from cpu"
+            )
+        elif weight_reload is None:
+            # save state dict to cpu
+            self._rlinf_worker.log_info(
+                f"Running Scheduler dp rank {self._rlinf_worker.get_parent_rank()}, tp rank {self.tp_rank}, no sync weight"
+            )
 
     def get_scheduler_running_state(self):
         num_used = self.max_total_num_tokens - (
@@ -574,6 +537,36 @@ def posi_norm(tensor: torch.Tensor):
         - 0.5
     )
     return (tensor - posi_tensor).norm()
+
+
+def validate_weight_init(model):
+    weight_norm_dict = {}
+
+    for key, value in model.state_dict().items():
+        weight_norm_dict[key] = posi_norm(value)
+
+    # avoid release memory before norm kernel launch (gpu is async from cpu)
+    torch.cuda.synchronize()
+    return weight_norm_dict
+
+
+def validate_weight_diff(model, weight_norm_dict):
+    weight_norm_dict_sync = {}
+    diff_keys = []
+
+    for name, value in model.state_dict().items():
+        weight_norm_dict_sync[name] = posi_norm(value)
+
+    for k in weight_norm_dict_sync.keys():
+        if not torch.allclose(
+            weight_norm_dict_sync[k],
+            weight_norm_dict[k],
+            rtol=1e-3,
+            atol=1e-4,
+        ):
+            diff_keys.append(k)
+
+    return diff_keys
 
 
 def run_scheduler_process(*args, **kwargs):

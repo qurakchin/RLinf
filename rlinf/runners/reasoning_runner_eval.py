@@ -54,7 +54,6 @@ class ReasoningRunnerEval:
         """"""
         self.cfg = cfg
         self.component_placement = placement
-        self.is_pipeline = self.component_placement.is_pipeline
 
         # Workers
         self.rollout = rollout
@@ -67,6 +66,7 @@ class ReasoningRunnerEval:
         # if inference is not a dedicated worker
         self.reward_channel = Channel.create("Reward")
 
+        # Configurations
         self.consumed_samples = 0
         self.global_steps = 0
 
@@ -141,7 +141,7 @@ class ReasoningRunnerEval:
 
     def init_workers(self):
         # Init workers
-        self.rollout.init_worker_no_sync().wait()
+        self.rollout.init_worker().wait()
         self.reward.init_worker().wait()
 
         if self.cfg.runner.resume_dir is None:
@@ -167,37 +167,17 @@ class ReasoningRunnerEval:
 
     def _compute_flops_metrics(self, time_metrics, act_rollout_metrics) -> dict:
         rollout_time = time_metrics.get("rollout")
-        inference_time = time_metrics.get("inference", -1)
-        training_time = time_metrics.get("training")
 
-        num_gpus_actor = self.component_placement.actor_world_size
         num_gpus_rollout = self.component_placement.rollout_world_size
 
         rollout_tflops = act_rollout_metrics["rollout_tflops"]
-        inference_tflops = act_rollout_metrics["inference_tflops"]
-        training_tflops = act_rollout_metrics["training_tflops"]
 
         flops_metrics = {
             "rollout_tflops_per_gpu": 0.0,
-            "inference_tflops_per_gpu": 0.0,
-            "training_tflops_per_gpu": 0.0,
         }
         if rollout_time > 0 and rollout_tflops > 0:
             flops_metrics["rollout_tflops_per_gpu"] = (
                 rollout_tflops / rollout_time / num_gpus_rollout
-            )
-
-        if inference_time > 0 and inference_tflops > 0:
-            num_gpus_inference = self.component_placement.inference_world_size
-            if num_gpus_inference == 0:
-                num_gpus_inference = self.component_placement.actor_world_size
-            flops_metrics["inference_tflops_per_gpu"] = (
-                inference_tflops / inference_time / num_gpus_inference
-            )
-
-        if training_time > 0 and training_tflops > 0:
-            flops_metrics["training_tflops_per_gpu"] = (
-                training_tflops / training_time / num_gpus_actor
             )
 
         return flops_metrics

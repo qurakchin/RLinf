@@ -359,7 +359,7 @@ class ModelParallelEvalComponentPlacement(ComponentPlacement):
     """
 
     def __init__(self, config: DictConfig, cluster: Cluster):
-        """Initialize ModelParallelComponentPlacement
+        """Initialize ModelParallelEvalComponentPlacement
 
         Args:
             config (DictConfig): The configuration dictionary for the component placement.
@@ -390,15 +390,6 @@ class ModelParallelEvalComponentPlacement(ComponentPlacement):
         )
 
         self._generate_placements()
-
-    def _is_auto(self):
-        return False
-
-    def _is_collocated(self):
-        return True
-
-    def _is_disaggregated(self):
-        return False
 
     def _generate_placements(self):
         assert self._placement_mode == PlacementMode.COLLOCATED

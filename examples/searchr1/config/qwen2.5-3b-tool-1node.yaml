@@ -137,6 +137,7 @@ rollout:
   pipeline_parallel_size: 1
   
   validate_weight: False # whether to send all weights at first for weight comparison.
+  validate_weight_first_sync: True # validate the weight norm between load model and first sync.
   validate_save_dir: null # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
   print_outputs: False         # whether to print the outputs (token ids, texts, etc.) of rollout engine.
 
@@ -172,8 +173,6 @@ actor:
   mcore_gpt: True
   spec_name: decoder_gpt
 
-  checkpoint_load_path: null
-
   offload_optimizer: True
   offload_weight: True
   offload_grad: True
@@ -184,6 +183,7 @@ actor:
   seed: 1234
 
   model:
+    megatron_checkpoint: null
     precision: fp16
     add_bias_linear: False
 
