@@ -18,7 +18,10 @@ import dataclasses
 from typing import Any, Optional
 
 from omegaconf import DictConfig
-from sglang.srt.managers.io_struct import ReleaseMemoryOccupationReqInput
+from sglang.srt.managers.io_struct import (
+    ReleaseMemoryOccupationReqInput,
+    ResumeMemoryOccupationReqInput,
+)
 from sglang.srt.server_args import ServerArgs
 from transformers import AutoTokenizer
 
@@ -44,17 +47,30 @@ from rlinf.workers.rollout.utils import (
 
 
 class SGLangWorker(Worker):
-    def __init__(self, config: DictConfig, placement: ModelParallelComponentPlacement):
+    def __init__(
+        self,
+        config: DictConfig,
+        placement: ModelParallelComponentPlacement,
+        config_rollout: DictConfig = None,
+        sampling_params: DictConfig = None,
+    ):
         Worker.__init__(self)
 
         self._cfg = config
+        if config_rollout is None:
+            config_rollout = self._cfg.rollout
+        self._cfg_rollout = config_rollout
         self._placement = placement
 
         self._tokenizer = AutoTokenizer.from_pretrained(
-            self._cfg.rollout.model.model_path
+            self._cfg_rollout.model.model_path
         )
-        self._return_logprobs = self._cfg.rollout.return_logprobs
-        self._sampling_params = SGLangWorker.get_sampling_param_from_config(self._cfg)
+        self._return_logprobs = self._cfg_rollout.return_logprobs
+        if sampling_params is None:
+            sampling_params = self._cfg.algorithm.sampling_params
+        self._sampling_params = SGLangWorker.get_sampling_param_from_config(
+            sampling_params
+        )
 
         self._validate_sampling_params = {"temperature": 0, "max_new_tokens": 32}
         self._validate_prompts = [
@@ -68,9 +84,8 @@ class SGLangWorker(Worker):
 
         # Initialize meta_stats_collector for async operations
         self._collect_meta_stats = getattr(
-            self._cfg.rollout, "collect_meta_stats", False
+            self._cfg_rollout, "collect_meta_stats", False
         )
-        self.is_eval = getattr(self._cfg.rollout, "is_eval", False)
         self._use_auto_scheduler = self._placement.is_auto
 
         if self._collect_meta_stats:
@@ -89,7 +104,7 @@ class SGLangWorker(Worker):
 
     def _init_meta_stats_collector(self):
         async_stats_file = getattr(
-            self._cfg.rollout,
+            self._cfg_rollout,
             "async_meta_stats_file",
             f"sglang_meta_stats_async_rank_{self._rank}.jsonl",
         )
@@ -103,17 +118,11 @@ class SGLangWorker(Worker):
         self.async_batch_counter += 1
 
     @staticmethod
-    def get_sampling_param_from_config(cfg: DictConfig) -> dict:
+    def get_sampling_param_from_config(cfg_sampling_params: DictConfig) -> dict:
         """
         Get sampling parameters from the configuration.
         """
-        cfg_sampling_params = cfg.algorithm.sampling_params
-        if not cfg_sampling_params.do_sample:
-            sampling_params = {
-                "temperature": 0,
-                "max_new_tokens": cfg_sampling_params.max_new_tokens,
-            }
-        else:
+        if cfg_sampling_params.do_sample:
             sampling_params = {
                 "temperature": cfg_sampling_params.temperature,
                 "top_k": cfg_sampling_params.top_k,
@@ -121,40 +130,45 @@ class SGLangWorker(Worker):
                 "repetition_penalty": cfg_sampling_params.repetition_penalty,
                 "max_new_tokens": cfg_sampling_params.max_new_tokens,
             }
+        else:
+            sampling_params = {
+                "temperature": 0,
+                "max_new_tokens": cfg_sampling_params.max_new_tokens,
+            }
         return sampling_params
 
     def _init_engine(self):
-        use_cudagraph = not self._cfg.rollout.enforce_eager
+        use_cudagraph = not self._cfg_rollout.enforce_eager
 
         server_args = ServerArgs(
-            model_path=self._cfg.rollout.model.model_path,
+            model_path=self._cfg_rollout.model.model_path,
             disable_cuda_graph=not use_cudagraph,
             cuda_graph_max_bs=min(
-                self._cfg.rollout.cuda_graph_max_bs,
-                self._cfg.rollout.max_running_requests,
+                self._cfg_rollout.cuda_graph_max_bs,
+                self._cfg_rollout.max_running_requests,
             ),
-            tp_size=self._cfg.rollout.tensor_parallel_size,
-            mem_fraction_static=self._cfg.rollout.gpu_memory_utilization,
+            tp_size=self._cfg_rollout.tensor_parallel_size,
+            mem_fraction_static=self._cfg_rollout.gpu_memory_utilization,
             enable_memory_saver=use_cudagraph,
-            enable_torch_compile=self._cfg.rollout.sglang.use_torch_compile,
+            enable_torch_compile=self._cfg_rollout.sglang.use_torch_compile,
             torch_compile_max_bs=min(
-                self._cfg.rollout.sglang.torch_compile_max_bs,
-                self._cfg.rollout.max_running_requests,
+                self._cfg_rollout.sglang.torch_compile_max_bs,
+                self._cfg_rollout.max_running_requests,
             ),
             load_format="dummy"
-            if not self._cfg.rollout.validate_weight
-            and not getattr(self._cfg.rollout, "validate_weight_first_sync", False)
+            if not self._cfg_rollout.validate_weight
+            and not getattr(self._cfg_rollout, "validate_weight_first_sync", False)
             else "auto",
             # disable_overlap_schedule=True,
-            dtype=torch_dtype_from_precision(self._cfg.rollout.model.precision),
+            dtype=torch_dtype_from_precision(self._cfg_rollout.model.precision),
             # sglang will only return text/output_ids when skip_tokenizer_init=False/True
             # text is not needed in RL training, so set to True can save time.
-            skip_tokenizer_init=not self._cfg.rollout.detokenize,
+            skip_tokenizer_init=not self._cfg_rollout.detokenize,
             # sglang will print statistics every decode_log_interval decode steps.
-            decode_log_interval=self._cfg.rollout.sglang.decode_log_interval,
-            attention_backend=self._cfg.rollout.sglang.attention_backend,
+            decode_log_interval=self._cfg_rollout.sglang.decode_log_interval,
+            attention_backend=self._cfg_rollout.sglang.attention_backend,
             log_level="info",
-            max_running_requests=self._cfg.rollout.max_running_requests,
+            max_running_requests=self._cfg_rollout.max_running_requests,
             dist_init_addr=f"127.0.0.1:{str(Cluster.find_free_port())}",
         )
 
@@ -241,12 +255,24 @@ class SGLangWorker(Worker):
             )
         )
         self.log_info(f"SGLang worker {self._rank} initialized.")
-        if self._cfg.rollout.validate_weight:
+        if self._cfg_rollout.validate_weight:
             await self._validate_weight_at_first()
-        if self._placement.is_collocated and not self.is_eval:
+        if self._placement.is_collocated:
             await self.offload_engine()
         if self._use_auto_scheduler:
             asyncio.create_task(self._scheduler.main_loop())
+
+    async def init_worker_no_sync(self):
+        self._init_engine()
+        await self._engine.tokenizer_manager.run_task_method(
+            io_struct.TaskMethodInput(
+                method_name="init_rlinf_worker_no_sync",
+                args=(self.worker_address,),
+            )
+        )
+        self.log_info(f"SGLang worker {self._rank} initialized.")
+        if self._placement.is_collocated:
+            await self.offload_engine()
 
     async def offload_engine(self):
         """
@@ -254,6 +280,14 @@ class SGLangWorker(Worker):
         """
         await self._engine.tokenizer_manager.release_memory_occupation(
             obj=ReleaseMemoryOccupationReqInput()
+        )
+
+    async def onload_engine(self):
+        """
+        Offload the model weights from the SGLang engine.
+        """
+        await self._engine.tokenizer_manager.resume_memory_occupation(
+            obj=ResumeMemoryOccupationReqInput()
         )
 
     async def abort_generation(self):
@@ -304,8 +338,7 @@ class SGLangWorker(Worker):
                         f"exceeding max_new_tokens={self._sampling_params['max_new_tokens']}, "
                         f"it will be truncatured."
                     )
-                    result = seq_group_info.results[idx]
-                    seq_group_info.results[idx] = None
+                    result = copy.deepcopy(seq_group_info.results[idx])
                     result["meta_info"]["finish_reason"]["type"] = "length"
                     seq_group_info.record_sglang_result(idx, result)
                     continue
@@ -399,8 +432,7 @@ class SGLangWorker(Worker):
                 self._collect_stats(all_rollout_results)
 
             if self._placement.is_collocated or self._placement.is_auto:
-                if not self.is_eval:
-                    await self.offload_engine()
+                await self.offload_engine()
                 if self._use_auto_scheduler:
                     await self._scheduler.report_offloaded()
 

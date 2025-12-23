@@ -190,7 +190,7 @@ class AgentLoopWorker(Worker):
                     )
         # Clip to model limits to avoid mask/position size mismatch
         max_prompt_len = int(self.cfg.data.max_prompt_length)
-        max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+        max_total_len = int(self.cfg.runner.seq_length)
         max_resp_len = max(1, max_total_len - max_prompt_len)
 
         prompt_ids = [r.prompt_ids for r in task_results]

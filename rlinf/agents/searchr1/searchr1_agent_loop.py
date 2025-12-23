@@ -41,7 +41,7 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
     ):
         super().__init__(cfg, placement)
         self.max_prompt_len = int(self.cfg.data.max_prompt_length)
-        max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+        max_total_len = int(self.cfg.runner.seq_length)
         self.max_resp_len = max(1, max_total_len - self.max_prompt_len)
 
         # 5 is a magic number in this demo.
@@ -50,7 +50,10 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         self.tool_call_regex = re.compile(r"<search>(.*?)</search>", re.DOTALL)
 
         # Inserting tool info requires re-encode token_ids, so the recompute_logprobs must be true.
-        assert self.cfg.algorithm.recompute_logprobs
+        assert (
+            self.cfg.algorithm.get("recompute_logprobs", False)
+            or self.cfg.runner.task_type == "reasoning_eval"
+        )
 
     async def state_less_tool_call_with_channel(
         self,

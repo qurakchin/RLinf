@@ -25,11 +25,10 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from rlinf.data.io_struct import RolloutRequest
 from rlinf.scheduler import Channel
-from rlinf.scheduler.dynamic_scheduler.scheduler_worker import SchedulerWorker
 from rlinf.utils.data_iter_utils import split_list
 from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf.utils.placement import ModelParallelEvalComponentPlacement
 from rlinf.utils.timers import Timer
 from rlinf.workers.reward.reward_worker import RewardWorker
 
@@ -46,12 +45,11 @@ class ReasoningRunnerEval:
     def __init__(
         self,
         cfg: DictConfig,
-        placement: ModelParallelComponentPlacement,
+        placement: ModelParallelEvalComponentPlacement,
         train_dataset: Dataset,
         val_dataset: Dataset,
         rollout: Union["SGLangWorker", "VLLMWorker"],
         reward: RewardWorker,
-        scheduler: SchedulerWorker = None,
     ):
         """"""
         self.cfg = cfg
@@ -62,12 +60,6 @@ class ReasoningRunnerEval:
         self.rollout = rollout
         self.reward = reward
 
-        # Scheduler task
-        self.scheduler = scheduler
-        self.use_pre_process_policy = (scheduler is not None) and getattr(
-            self.cfg.cluster, "use_pre_process_policy", False
-        )
-
         # Data channels
         self.dataloader_channel = Channel.create("DataLoader")
         self.rollout_channel = Channel.create("Rollout")
@@ -75,12 +67,6 @@ class ReasoningRunnerEval:
         # if inference is not a dedicated worker
         self.reward_channel = Channel.create("Reward")
 
-        # Configurations
-        self.compute_ref_logprobs = (
-            self.cfg.algorithm.kl_beta > 0
-            or self.cfg.algorithm.get("reinpp_kl_beta", 0) > 0
-        )
-        self.recompute_logprobs = self.cfg.algorithm.recompute_logprobs
         self.consumed_samples = 0
         self.global_steps = 0
 
@@ -154,24 +140,8 @@ class ReasoningRunnerEval:
         )
 
     def init_workers(self):
-        # Must be done before actor init
-        if self.cfg.runner.resume_dir is None:
-            logging.info("Training from scratch")
-            if (
-                self.cfg.actor.training_backend == "megatron"
-                and self.cfg.actor.megatron.use_hf_ckpt
-            ):
-                from toolkits.ckpt_convertor.convert_hf_to_mg import convert_hf_to_mg
-
-                convert_hf_to_mg(
-                    self.cfg.actor.megatron.ckpt_convertor.hf_model_path,
-                    self.cfg.actor.megatron.ckpt_convertor,
-                )
-
         # Init workers
-        self.rollout.init_worker().wait()
-        if self.use_pre_process_policy:
-            self.rollout.offload_engine().wait()
+        self.rollout.init_worker_no_sync().wait()
         self.reward.init_worker().wait()
 
         if self.cfg.runner.resume_dir is None:

@@ -287,6 +287,7 @@ class ToolAgentEvalRunner(ReasoningRunnerEval):
         )
 
         self.run_timer.start_time()
+        self.rollout.onload_engine().wait()
         self.rollout.rollout_serverless(
             self.generate_input_channel, self.generate_output_channel
         )
