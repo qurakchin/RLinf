@@ -41,8 +41,8 @@ The environment is also configured via conda.
 Wiki Configuration Files
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-The local retrieval files are large; prepare sufficient disk space.  
-Download size is around 60–70GB, and about 132GB after decompression.
+We use the local retrieval files provided by Asearcher.
+The downloaded files are approximately 50–60 GB in size.
 
 .. code-block:: bash
 
@@ -50,11 +50,15 @@ Download size is around 60–70GB, and about 132GB after decompression.
 
    save_path=/the/path/to/save
    python examples/searchr1/download.py --save_path $save_path
-   cat $save_path/part_* > $save_path/e5_Flat.index
-   gzip -d $save_path/wiki-18.jsonl.gz
 
 Download the `flat e5 <https://huggingface.co/intfloat/e5-base-v2>`__ embedding model from HuggingFace,  
-and write the downloaded wiki file paths into `examples/searchr1/launch_local_server.sh`:
+and build the index
+
+.. code-block:: bash
+
+   bash examples/searchr1/build_index.sh
+
+Write the paths to the previously downloaded wiki files and the index into examples/searchr1/launch_local_server.sh
 
 .. code-block:: bash
 
@@ -167,3 +171,5 @@ search-r1: https://github.com/PeterGriffinJin/Search-R1
 
 Search-R1 & veRL-SGLang:  
 https://github.com/zhaochenyang20/Awesome-ML-SYS-Tutorial/blob/main/rlhf/verl/multi-turn/tool_examples/verl-multiturn-searchR1-like_ZH.md
+
+Asearcher: https://github.com/inclusionAI/ASearcher

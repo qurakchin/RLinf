@@ -39,8 +39,7 @@ veRL-SGLang <https://github.com/zhaochenyang20/Awesome-ML-SYS-Tutorial/blob/main
 Wiki配置文件
 ~~~~~~~~~~~~
 
-本地检索文件体积较大，请准备充分的磁盘；下载文件大约 60~70GB，解压后在
-132G 左右
+我们使用Asearcher提供的本地检索文件，下载文件大约 50~60GB
 
 .. code-block:: bash
 
@@ -48,12 +47,14 @@ Wiki配置文件
 
    save_path=/the/path/to/save
    python examples/searchr1/download.py --save_path $save_path
-   cat $save_path/part_* > $save_path/e5_Flat.index
-   gzip -d $save_path/wiki-18.jsonl.gz
 
-从huggingface上下载\ `flat
-e5 <https://huggingface.co/intfloat/e5-base-v2>`__
-embedding模型，并将之前下载好的wiki文件路径写入examples/searchr1/launch_local_server.sh
+从huggingface上下载\ `flat e5 <https://huggingface.co/intfloat/e5-base-v2>`__ embedding模型，并生成index
+
+.. code-block:: bash
+
+   bash examples/searchr1/build_index.sh
+
+将之前下载好的wiki文件路径和index路径等写入examples/searchr1/launch_local_server.sh
 
 .. code-block:: bash
 
@@ -167,3 +168,5 @@ search-r1: https://github.com/PeterGriffinJin/Search-R1
 Search-R1 &
 veRL-SGLang:
 https://github.com/zhaochenyang20/Awesome-ML-SYS-Tutorial/blob/main/rlhf/verl/multi-turn/tool_examples/verl-multiturn-searchR1-like_ZH.md
+
+Asearcher: https://github.com/inclusionAI/ASearcher
