@@ -289,7 +289,9 @@ class SGLangWorker(Worker):
             if self.weight_reload == "cpu" and self._placement.is_collocated:
                 await self.offload_engine()
         else:
-            assert False, f"weight_reload should be in ['sync', 'cpu', None], but now it's {self.weight_reload}"
+            assert False, (
+                f"weight_reload should be in ['sync', 'cpu', None], but now it's {self.weight_reload}"
+            )
 
     async def offload_engine(self):
         """
