@@ -353,7 +353,7 @@ class ModelParallelComponentPlacement(ComponentPlacement):
 class ModelParallelEvalComponentPlacement(ComponentPlacement):
     """Component placement for model-parallel components in eval.
 
-    The components must be rollout and rewrad, whose GPUs must be continuous.
+    The components must be rollout and reward, whose GPUs must be continuous.
 
     This placement only supports collocated mode.
     """

@@ -73,7 +73,7 @@ class SGLangWorker(Worker):
         if config_rollout is None:
             sampling_params = self._cfg.algorithm.sampling_params
         else:
-            sampling_params = self._cfg.algorithm.sampling_params
+            sampling_params = config_rollout.sampling_params
         self._sampling_params = SGLangWorker.get_sampling_param_from_config(
             sampling_params
         )
@@ -289,7 +289,9 @@ class SGLangWorker(Worker):
             if self.weight_reload == "cpu" and self._placement.is_collocated:
                 await self.offload_engine()
         else:
-            assert False
+            assert False, (
+                f"weight_reload should be in ['sync', 'cpu', None], but now it's {self.weight_reload}"
+            )
 
     async def offload_engine(self):
         """
