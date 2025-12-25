@@ -328,8 +328,9 @@ def get_retriever(config):
 class PageAccess:
     def __init__(self, pages_path):
         pages = []
-        for ff in tqdm(open(pages_path, "r")):
-            pages.append(json.loads(ff))
+        with open(pages_path, "r") as f:
+            for ff in tqdm(f):
+                pages.append(json.loads(ff))
         self.pages = {page["url"]: page for page in pages}
 
     def access(self, url):

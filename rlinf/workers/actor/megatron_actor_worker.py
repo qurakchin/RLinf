@@ -290,6 +290,7 @@ class MegatronActor(MegatronModelManager, Worker):
         self, channel: Channel, tag: Optional[str] = None
     ) -> tuple[dict[str, torch.Tensor], RolloutResult]:
         if tag is not None:
+            # for pipeline mode to filter channel communicate time.
             start_time = time.perf_counter()
         if channel.is_local:
             # Local channel, every process will put its own data locally

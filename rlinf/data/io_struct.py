@@ -269,7 +269,7 @@ class RolloutResult:
 
         # Compute the start and end positions of the prompt and response tokens
         prompt_start = max_prompt_len - prompt_lengths  # [B]
-        prompt_end = torch.ones_like(prompt_start) * max_prompt_len  # [B]
+        prompt_end = torch.full_like(prompt_start, max_prompt_len)  # [B]
         response_end = max_prompt_len + response_lengths  # [B]
 
         # Broadcast [B, total_len]
