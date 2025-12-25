@@ -25,7 +25,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from rlinf.data.io_struct import RolloutResult
-from rlinf.runners.reasoning_runner_eval import ReasoningRunnerEval
+from rlinf.runners.reasoning_runner_eval import ReasoningEvalRunner
 from rlinf.scheduler import Channel
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.placement import ModelParallelComponentPlacement
@@ -41,7 +41,7 @@ if typing.TYPE_CHECKING:
 logging.getLogger().setLevel(logging.INFO)
 
 
-class ToolAgentEvalRunner(ReasoningRunnerEval):
+class ToolAgentEvalRunner(ReasoningEvalRunner):
     """Runner for agent task RL training."""
 
     def __init__(

@@ -9,7 +9,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor,rollout,reward: all
+    rollout,reward: all
 
 
 runner:
@@ -64,15 +64,6 @@ agentloop:
   max_tool_response_length: 500
   tool_response_truncate_side: "right"
   print_outputs: False
-
-inference:
-  model_type: ${rollout.model.model_type}
-  group_name: "InferenceGroup"
-  load_from_actor: True
-  model:
-    tensor_model_parallel_size: 1
-    pipeline_model_parallel_size: 1
-    sequence_parallel: False
 
 rollout:
   group_name: "RolloutGroup"
