@@ -152,12 +152,6 @@ class Index_Builder:
         temp_file_path = temp_dir + "/temp.jsonl"
         os.makedirs(temp_dir)
 
-        # if self.have_contents:
-        #     shutil.copyfile(self.corpus_path, temp_file_path)
-        # else:
-        #     with open(temp_file_path, "w") as f:
-        #         for item in self.corpus:
-        #             f.write(json.dumps(item) + "\n")
         shutil.copyfile(self.corpus_path, temp_file_path)
 
         print("Start building bm25 index...")
@@ -216,11 +210,6 @@ class Index_Builder:
         for start_idx in tqdm(
             range(0, len(self.corpus), self.batch_size), desc="Inference Embeddings:"
         ):
-            # for start_idx in tqdm(range(0, 4096, self.batch_size), desc='Inference Embeddings:'):
-
-            # batch_data_title = self.corpus[start_idx:start_idx+self.batch_size]['title']
-            # batch_data_text = self.corpus[start_idx:start_idx+self.batch_size]['text']
-            # batch_data = ['"' + title + '"\n' + text for title, text in zip(batch_data_title, batch_data_text)]
             batch_data = self.corpus[start_idx : start_idx + self.batch_size][
                 "contents"
             ]
