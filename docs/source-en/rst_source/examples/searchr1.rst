@@ -183,7 +183,7 @@ Compared to the original performance (133s per step after response length stabil
 
    <div style="display: flex; justify-content: space-between; gap: 10px;">
      <div style="flex: 1; text-align: center;">
-       <img src="https://github.com/qurakchin/misc/raw/docs/searchr1/pic/searchr1_orig_impl_time.png" style="width: 35%;"/>
+       <img src="https://github.com/RLinf/misc/raw/main/pic/searchr1_orig_impl_time.png" style="width: 35%;"/>
        <p><em>Qwen2.5-3B-Instruct in original implementation at PeterGriffinJin/Search-R1</em></p>
      </div>
    </div>
