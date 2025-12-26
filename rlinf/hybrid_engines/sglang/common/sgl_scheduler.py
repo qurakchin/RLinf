@@ -253,7 +253,7 @@ class Scheduler(_Scheduler):
                 if hasattr(module, "use_presharded_weights"):
                     module.use_presharded_weights = use_presharded_weights
 
-            if self.cfg.rollout.validate_weight_first_sync:
+            if self.cfg.rollout.get("validate_weight_first_sync", False):
                 self.weight_norm_dict = validate_weight_init(model)
 
             self._rlinf_worker.log_info(

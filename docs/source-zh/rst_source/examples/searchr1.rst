@@ -161,7 +161,8 @@ model路径填入examples/searchr1/config/qwen2.5-3b-tool-1node-eval.yaml
 运行examples/searchr1/run_main_searchr1_single_eval.sh启动测试。
 
 训练曲线
--------
+--------
+
 下面展示 reward 曲线和训练时间曲线。
 
 .. raw:: html
