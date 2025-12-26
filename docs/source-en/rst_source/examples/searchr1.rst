@@ -166,6 +166,7 @@ Run `examples/searchr1/run_main_searchr1_single_eval.sh` to start evaluation.
 
 Training Curves
 ---------------
+
 The following shows the reward curves and training time curves.
 
 .. raw:: html
