@@ -165,23 +165,6 @@ class ReasoningEvalRunner:
                 f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch"
             )
 
-    def _compute_flops_metrics(self, time_metrics, act_rollout_metrics) -> dict:
-        rollout_time = time_metrics.get("rollout")
-
-        num_gpus_rollout = self.component_placement.rollout_world_size
-
-        rollout_tflops = act_rollout_metrics["rollout_tflops"]
-
-        flops_metrics = {
-            "rollout_tflops_per_gpu": 0.0,
-        }
-        if rollout_time > 0 and rollout_tflops > 0:
-            flops_metrics["rollout_tflops_per_gpu"] = (
-                rollout_tflops / rollout_time / num_gpus_rollout
-            )
-
-        return flops_metrics
-
     def _set_max_steps(self):
         self.num_steps_per_epoch = len(self.train_dataloader)
         self.max_steps = self.num_steps_per_epoch * self.cfg.runner.max_epochs

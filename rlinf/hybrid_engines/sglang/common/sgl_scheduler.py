@@ -107,7 +107,9 @@ class Scheduler(_Scheduler):
         return result
 
     def batch_load_hf_weight(self, state_dict: dict[str, Any]) -> Any:
-        assert self.weight_reload == "sync"
+        assert self.weight_reload == "sync", (
+            "only sglang with 'sync' can run 'batch_load_hf_weight'"
+        )
         model = self.tp_worker.worker.model_runner.model
         colocate = self.placement_mode == PlacementMode.COLLOCATED
         batch_weight = []
@@ -132,7 +134,9 @@ class Scheduler(_Scheduler):
         batch_weight.clear()
 
     def sync_hf_weight(self, recv_req: SyncHFWeightInput):
-        assert self.weight_reload == "sync"
+        assert self.weight_reload == "sync", (
+            "only sglang with 'sync' can run 'sync_hf_weight'"
+        )
         use_cudagraph = not self.cfg.rollout.enforce_eager
         assert use_cudagraph, "use_cudagraph must be True now."
 

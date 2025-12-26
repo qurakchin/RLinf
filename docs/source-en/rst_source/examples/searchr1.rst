@@ -164,6 +164,30 @@ Modify the evaluation dataset path:
 
 Run `examples/searchr1/run_main_searchr1_single_eval.sh` to start evaluation.
 
+Training Curves
+---------------
+The following shows the reward curves and training time curves.
+
+.. raw:: html
+
+   <div style="display: flex; justify-content: space-between; gap: 10px;">
+     <div style="flex: 1; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/searchr1.png" style="width: 100%;"/>
+       <p><em>Qwen2.5-3B-Instruct in RLinf</em></p>
+     </div>
+   </div>
+
+Compared to the original performance (133s per step after response length stabilizes), we achieved a 55% speedup while maintaining consistent reward curves and evaluation results.
+
+.. raw:: html
+
+   <div style="display: flex; justify-content: space-between; gap: 10px;">
+     <div style="flex: 1; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/searchr1_orig_impl_time.png" style="width: 35%;"/>
+       <p><em>Qwen2.5-3B-Instruct in original implementation at PeterGriffinJin/Search-R1</em></p>
+     </div>
+   </div>
+
 References
 ----------
 

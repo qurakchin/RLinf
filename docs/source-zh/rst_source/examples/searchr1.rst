@@ -160,6 +160,30 @@ model路径填入examples/searchr1/config/qwen2.5-3b-tool-1node-eval.yaml
 
 运行examples/searchr1/run_main_searchr1_single_eval.sh启动测试。
 
+训练曲线
+-------
+下面展示 reward 曲线和训练时间曲线。
+
+.. raw:: html
+
+   <div style="display: flex; justify-content: space-between; gap: 10px;">
+     <div style="flex: 1; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/searchr1.png" style="width: 100%;"/>
+       <p><em>Qwen2.5-3B-Instruct in RLinf</em></p>
+     </div>
+   </div>
+
+相较于原版性能( response length 稳定后，单 step 133s)，我们加速了 55%，同时 reward 曲线和 eval 结果保持一致。
+
+.. raw:: html
+
+   <div style="display: flex; justify-content: space-between; gap: 10px;">
+     <div style="flex: 1; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/searchr1_orig_impl_time.png" style="width: 35%;"/>
+       <p><em>Qwen2.5-3B-Instruct in original implementation at PeterGriffinJin/Search-R1</em></p>
+     </div>
+   </div>
+
 References
 ----------
 
