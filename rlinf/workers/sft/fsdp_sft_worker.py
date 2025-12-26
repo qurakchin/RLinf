@@ -130,8 +130,8 @@ class FSDPSftWorker(FSDPModelManager, Worker):
 
                 with self.amp_context:
                     losses = self.model(
+                        forward_type="sft_forward",
                         data={"observation": observation, "actions": actions},
-                        mode="sft",
                     )
                     if isinstance(losses, (list, tuple)):
                         losses = torch.stack(losses)
