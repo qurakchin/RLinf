@@ -23,7 +23,7 @@ from rlinf.agents.searchr1.searchr1_agent_loop import Searchr1ToolAgentLoopWorke
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
-from rlinf.runners.tool_agent_eval_runner import ToolAgentEvalRunner
+from rlinf.runners.agent_eval_runner import AgentEvalRunner
 from rlinf.scheduler import Cluster, NodePlacementStrategy
 from rlinf.utils.placement import ModelParallelEvalComponentPlacement
 from rlinf.utils.utils import output_redirector
@@ -94,7 +94,7 @@ def main(cfg) -> None:
         ): ToolWorkerInfo(tool_names=["search"], has_session=False),
     }
 
-    runner = ToolAgentEvalRunner(
+    runner = AgentEvalRunner(
         cfg=cfg,
         placement=component_placement,
         train_dataset=train_ds,

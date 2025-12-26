@@ -141,8 +141,12 @@ class SearchToolWorker(ToolWorker):
                 async_op=True
             ).async_wait()
             # self.logger.info("SearchToolWorker._process_requests: got request")
-            assert request.request_type == "execute"
-            assert request.tool_name == "search"
+            assert request.request_type == "execute", (
+                "SearchToolWorker has no session, so only get 'execute' request_type"
+            )
+            assert request.tool_name == "search", (
+                "SearchToolWorker only execute tool_name 'search'"
+            )
             asyncio.create_task(
                 generate_and_send(request.session_id, request.tool_args)
             )

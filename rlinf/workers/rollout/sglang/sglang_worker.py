@@ -70,10 +70,11 @@ class SGLangWorker(Worker):
             self._cfg_rollout.model.model_path
         )
         self._return_logprobs = self._cfg_rollout.return_logprobs
-        if config_rollout is None:
+        sampling_params = None
+        if config_rollout is not None:
+            sampling_params = config_rollout.get("sampling_params", None)
+        if sampling_params is None:
             sampling_params = self._cfg.algorithm.sampling_params
-        else:
-            sampling_params = config_rollout.sampling_params
         self._sampling_params = SGLangWorker.get_sampling_param_from_config(
             sampling_params
         )
@@ -128,7 +129,7 @@ class SGLangWorker(Worker):
         """
         Get sampling parameters from the configuration.
         """
-        if cfg_sampling_params.do_sample:
+        if not cfg_sampling_params.do_sample:
             sampling_params = {
                 "temperature": 0,
                 "max_new_tokens": cfg_sampling_params.max_new_tokens,

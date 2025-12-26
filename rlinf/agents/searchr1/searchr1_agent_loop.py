@@ -51,7 +51,9 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
 
         # Inserting tool info requires re-encode token_ids, so the recompute_logprobs must be true.
         if self.cfg.runner.task_type != "reasoning_eval":
-            assert self.cfg.algorithm.recompute_logprobs
+            assert self.cfg.algorithm.recompute_logprobs, (
+                "search r1 must use recompute_logprobs"
+            )
 
     async def state_less_tool_call_with_channel(
         self,
