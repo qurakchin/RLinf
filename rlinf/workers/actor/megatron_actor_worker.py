@@ -219,6 +219,10 @@ class MegatronActor(MegatronModelManager, Worker):
             and self.use_pre_process_policy
         )
 
+        if self.use_auto_scheduler:
+            assert HAVE_RESHARDING, (
+                "params_resharding is not installed, resharding is not supported"
+            )
         if self.use_auto_scheduler and self._rank == 0:
             self.schedule_channel = self.connect_channel(
                 get_scheduler_channel(role, self._rank)
@@ -318,6 +322,97 @@ class MegatronActor(MegatronModelManager, Worker):
             duration = time.perf_counter() - start_time
             self._timer_metrics[tag] = self._timer_metrics.get(tag, 0.0) - duration
         return batch, result
+
+    def all_reduce_dp_min(
+        self,
+        obj: int,
+    ):
+        obj_tensor = torch.tensor(
+            [obj], dtype=torch.long, device=torch.cuda.current_device()
+        )
+        torch.distributed.all_reduce(
+            obj_tensor,
+            torch.distributed.ReduceOp.MIN,
+            group=parallel_state.get_data_parallel_group(),
+        )
+        return obj_tensor.item()
+
+    def get_dynamic_batch_as_much(
+        self,
+        input_channel: Channel,
+        min_result_len: int,
+        max_result_len: int,
+        cliped_results=[],
+        unfinished_result=None,
+    ):
+        assert not input_channel.is_local
+        rollout_results = cliped_results
+        if self.is_data_io_rank:
+            # get min_result_len
+            while len(rollout_results) < min_result_len:
+                if unfinished_result is not None:
+                    rollout_result: RolloutResult = unfinished_result.wait()
+                    unfinished_result = None
+                else:
+                    rollout_result: RolloutResult = input_channel.get()
+                rollout_results.append(rollout_result)
+
+            # try to get result as much
+            # get result in every 0.1s and do all reduce to get the min result between dp (result_len)
+            # stop at: the min result between dp (result_len) is same as the last min result
+            last_result_len = 0
+            result_len = len(rollout_results)
+            time_until = time.time() + 0.1
+            while last_result_len < result_len:
+                if len(rollout_results) < max_result_len:
+                    if unfinished_result is None:
+                        unfinished_result = input_channel.get(async_op=True)
+                    else:
+                        time.sleep(0.001)
+                    if unfinished_result.done():
+                        rollout_results.append(unfinished_result.wait())
+                        unfinished_result = None
+                    if time.time() >= time_until:
+                        last_result_len = result_len
+                        result_len = self.all_reduce_dp_min(len(rollout_results))
+                        if last_result_len < result_len:
+                            time_until = time.time() + 0.1
+                else:
+                    last_result_len = result_len
+                    result_len = self.all_reduce_dp_min(len(rollout_results))
+
+        # broadcast to other ranks
+        if not self.is_data_io_rank:
+            result_len = None
+        self.broadcast(result_len, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS)
+        self.broadcast(result_len, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS)
+        if self.is_data_io_rank:
+            cliped_results = list(rollout_results[result_len:])
+            rollout_results = rollout_results[:result_len]
+        else:
+            rollout_results = [None for _ in range(result_len)]
+        for i in range(result_len):
+            rollout_result = rollout_results[i]
+            rollout_result = self.broadcast(
+                rollout_result, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS
+            )
+            rollout_result = self.broadcast(
+                rollout_result, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS
+            )
+            rollout_results[i] = rollout_result
+
+        batches = []
+        for rollout_result in rollout_results:
+            batch = rollout_result.to_actor_batch(
+                self.cfg.data.max_prompt_length,
+                self.cfg.actor.model.encoder_seq_length,
+                self.tokenizer.eos_token_id,
+            )
+            batches.append(batch)
+
+        batch = RolloutResult.merge_batches(batches)
+        rollout_result = RolloutResult.merge_result_list(rollout_results)
+        return batch, rollout_result, result_len, cliped_results, unfinished_result
 
     def put_result(self, result: RolloutResult, channel: Channel):
         if channel.is_local:
@@ -946,9 +1041,6 @@ class MegatronActor(MegatronModelManager, Worker):
 
     def init_trainer_resharding(self, first_world_size: int = -1):
         """Init resharding func."""
-        assert HAVE_RESHARDING, (
-            "params_resharding is not installed, resharding is not supported"
-        )
         from megatron.core import __version__ as megatron_version
         from packaging import version
 
@@ -1152,30 +1244,45 @@ class MegatronActor(MegatronModelManager, Worker):
             output_channel: The output channel to send results to.
             compute_ref_logprobs: Whether to compute reference logprobs.
         """
-        total_recv_batch_size = 0
-        if not self.is_pipeline:
-            inference_split = 1
-        else:
-            inference_split = self.cfg.actor.get("inference_split", None)
-            if inference_split is None:
+        inference_split = self.cfg.inference.get("inference_split", None)
+        if inference_split is None:
+            if not self.is_pipeline:
+                inference_split = 1
+            else:
                 inference_split = self.cfg.algorithm.n_minibatches
-            assert self.total_batch_size_per_dp % inference_split == 0, (
-                f"MegatronActor: total_batch_size_per_dp[{self.total_batch_size_per_dp}] should be divisible by inference_split[{inference_split}]"
+        assert self.total_batch_size_per_dp % inference_split == 0, (
+            f"MegatronActor: total_batch_size_per_dp[{self.total_batch_size_per_dp}] should be divisible by inference_split[{inference_split}]"
+        )
+
+        min_result_len = 1
+        max_result_len = (
+            self.cfg.data.rollout_batch_size
+            // parallel_state.get_data_parallel_world_size()
+            // inference_split
+        )
+        if not self.is_pipeline:
+            min_result_len = max_result_len
+            coll_rollout_results = []
+        total_result_len = 0
+        total_result_len_per_dp = (
+            self.cfg.data.rollout_batch_size
+            // parallel_state.get_data_parallel_world_size()
+        )
+        cliped_results, unfinished_result = [], None
+        while total_result_len < total_result_len_per_dp:
+            batch, rollout_result, result_len, cliped_results, unfinished_result = (
+                self.get_dynamic_batch_as_much(
+                    input_channel,
+                    min(min_result_len, total_result_len_per_dp - total_result_len),
+                    min(max_result_len, total_result_len_per_dp - total_result_len),
+                    cliped_results,
+                    unfinished_result,
+                )
             )
-        for i in range(inference_split):
-            batches = []
-            rollout_results = []
-            recv_batch_size = 0
-            while recv_batch_size < self.total_batch_size_per_dp // inference_split:
-                batch, rollout_result = self.get_batch(input_channel)
-                batches.append(batch)
-                rollout_results.append(rollout_result)
-                recv_batch_size += rollout_result.num_sequence
-                total_recv_batch_size += rollout_result.num_sequence
-                # Must be called after batch is retrieved, suggesting that rollout has stopped
-                # Otherwise, loading model might cause OOM in the collocated mode
-            batch = RolloutResult.merge_batches(batches)
-            rollout_result = RolloutResult.merge_result_list(rollout_results)
+            total_result_len += result_len
+            self.log_info(
+                f"[dynamic inference rank-{self._rank}] inference result_len={result_len}, total_result_len={total_result_len}/{total_result_len_per_dp}"
+            )
             self._load_weight_and_optimizer()
 
             with self.worker_timer():
@@ -1194,10 +1301,25 @@ class MegatronActor(MegatronModelManager, Worker):
                     with cpu_weight_swap(self.model[0], self.ref_policy_state_dict):
                         ref_logprobs = self.inference_step(batch)
                         rollout_result.ref_logprobs = ref_logprobs.cpu()
-            self.put_result(rollout_result, output_channel)
+            if self.is_pipeline:
+                # for pipeline mode, send after inference to reduce latency.
+                # should do split to ensure actor won't get too much batches.
+                split_results = RolloutResult.split_results(rollout_result, result_len)
+                for split_result in split_results:
+                    self.put_result(split_result, output_channel)
+            else:
+                coll_rollout_results.append(rollout_result)
 
-        assert total_recv_batch_size == self.total_batch_size_per_dp, (
-            f"Expected {self.total_batch_size_per_dp} sequences from channel, but got {total_recv_batch_size}"
+        if not self.is_pipeline:
+            # for coll mode, merge results to reduce send time.
+            rollout_result = RolloutResult.merge_result_list(coll_rollout_results)
+            split_results = RolloutResult.split_results(
+                rollout_result, self.cfg.algorithm.n_minibatches
+            )
+            for split_result in split_results:
+                self.put_result(split_result, output_channel)
+        assert total_result_len == total_result_len_per_dp, (
+            f"Expected {total_result_len_per_dp} sequences from channel, but got {total_result_len}"
         )
         self.scheduler_offload_sync()
 
