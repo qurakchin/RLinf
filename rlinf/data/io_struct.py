@@ -1019,6 +1019,7 @@ class RolloutResult:
 
         return split_results
 
+
 class BatchResizingIterator:
     """The iterator for handling getting a batch and split it as a batch iterator with optional dynamic batch size."""
 

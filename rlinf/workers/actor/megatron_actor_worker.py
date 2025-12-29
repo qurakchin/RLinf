@@ -219,7 +219,7 @@ class MegatronActor(MegatronModelManager, Worker):
             and self.use_pre_process_policy
         )
 
-        if self.use_auto_scheduler: 
+        if self.use_auto_scheduler:
             assert HAVE_RESHARDING, (
                 "params_resharding is not installed, resharding is not supported"
             )
@@ -327,8 +327,14 @@ class MegatronActor(MegatronModelManager, Worker):
         self,
         obj: int,
     ):
-        obj_tensor = torch.tensor([obj], dtype=torch.long, device=torch.cuda.current_device())
-        torch.distributed.all_reduce(obj_tensor, torch.distributed.ReduceOp.MIN, group=parallel_state.get_data_parallel_group())
+        obj_tensor = torch.tensor(
+            [obj], dtype=torch.long, device=torch.cuda.current_device()
+        )
+        torch.distributed.all_reduce(
+            obj_tensor,
+            torch.distributed.ReduceOp.MIN,
+            group=parallel_state.get_data_parallel_group(),
+        )
         return obj_tensor.item()
 
     def get_dynamic_batch_as_much(
@@ -336,8 +342,8 @@ class MegatronActor(MegatronModelManager, Worker):
         input_channel: Channel,
         min_result_len: int,
         max_result_len: int,
-        cliped_results = [],
-        unfinished_result = None,
+        cliped_results=[],
+        unfinished_result=None,
     ):
         assert not input_channel.is_local
         rollout_results = cliped_results
@@ -375,16 +381,11 @@ class MegatronActor(MegatronModelManager, Worker):
                     last_result_len = result_len
                     result_len = self.all_reduce_dp_min(len(rollout_results))
 
-
         # broadcast to other ranks
         if not self.is_data_io_rank:
             result_len = None
-        self.broadcast(
-            result_len, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS
-        )
-        self.broadcast(
-            result_len, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS
-        )
+        self.broadcast(result_len, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS)
+        self.broadcast(result_len, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS)
         if self.is_data_io_rank:
             cliped_results = list(rollout_results[result_len:])
             rollout_results = rollout_results[:result_len]
@@ -1269,12 +1270,14 @@ class MegatronActor(MegatronModelManager, Worker):
         )
         cliped_results, unfinished_result = [], None
         while total_result_len < total_result_len_per_dp:
-            batch, rollout_result, result_len, cliped_results, unfinished_result = self.get_dynamic_batch_as_much(
-                input_channel,
-                min(min_result_len, total_result_len_per_dp - total_result_len),
-                min(max_result_len, total_result_len_per_dp - total_result_len),
-                cliped_results,
-                unfinished_result,
+            batch, rollout_result, result_len, cliped_results, unfinished_result = (
+                self.get_dynamic_batch_as_much(
+                    input_channel,
+                    min(min_result_len, total_result_len_per_dp - total_result_len),
+                    min(max_result_len, total_result_len_per_dp - total_result_len),
+                    cliped_results,
+                    unfinished_result,
+                )
             )
             total_result_len += result_len
             self.log_info(
@@ -1310,7 +1313,9 @@ class MegatronActor(MegatronModelManager, Worker):
         if not self.is_pipeline:
             # for coll mode, merge results to reduce send time.
             rollout_result = RolloutResult.merge_result_list(coll_rollout_results)
-            split_results = RolloutResult.split_results(rollout_result, self.cfg.algorithm.n_minibatches)
+            split_results = RolloutResult.split_results(
+                rollout_result, self.cfg.algorithm.n_minibatches
+            )
             for split_result in split_results:
                 self.put_result(split_result, output_channel)
         assert total_result_len == total_result_len_per_dp, (
