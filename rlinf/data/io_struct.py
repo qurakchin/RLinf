@@ -890,6 +890,134 @@ class RolloutResult:
                 raise ValueError(f"Unsupported batch key type: {type(batches[0][key])}")
         return merged_batch
 
+    @staticmethod
+    def split_results(
+        rollout_result: "RolloutResult",
+        split_num: int,
+    ) -> list["RolloutResult"]:
+        """
+        Split a single RolloutResult into multiple RolloutResult objects by group_size.
+
+        Args:
+            rollout_result: The RolloutResult to be split
+
+        Returns:
+            list of split RolloutResult objects
+        """
+        group_size = rollout_result.group_size
+        num_sequence = rollout_result.num_sequence
+
+        assert num_sequence % (rollout_result.group_size * split_num) == 0, (
+            f"num_sequence ({num_sequence}) must be divisible by split_num ({split_num}) and group_size ({rollout_result.group_size})"
+        )
+
+        split_results = []
+
+        # Split list fields
+        prompt_lengths_split = split_list(rollout_result.prompt_lengths, split_num)
+        prompt_ids_split = split_list(rollout_result.prompt_ids, split_num)
+        response_lengths_split = split_list(rollout_result.response_lengths, split_num)
+        response_ids_split = split_list(rollout_result.response_ids, split_num)
+        is_end_split = split_list(rollout_result.is_end, split_num)
+
+        # Handle optional fields
+        answers_split = None
+        if rollout_result.answers is not None:
+            answers_split = split_list(rollout_result.answers, split_num)
+
+        image_data_split = None
+        if rollout_result.image_data is not None:
+            image_data_split = split_list(rollout_result.image_data, split_num)
+
+        multi_modal_inputs_split = None
+        if rollout_result.multi_modal_inputs is not None:
+            multi_modal_inputs_split = split_list(
+                rollout_result.multi_modal_inputs, split_num
+            )
+
+        prompt_texts_split = None
+        if rollout_result.prompt_texts is not None:
+            prompt_texts_split = split_list(rollout_result.prompt_texts, split_num)
+
+        response_texts_split = None
+        if rollout_result.response_texts is not None:
+            response_texts_split = split_list(rollout_result.response_texts, split_num)
+
+        rollout_logprobs_split = None
+        if rollout_result.rollout_logprobs is not None:
+            rollout_logprobs_split = split_list(
+                rollout_result.rollout_logprobs, split_num
+            )
+
+        # Handle tensor fields
+        rewards_split = None
+        if rollout_result.rewards is not None:
+            if isinstance(rollout_result.rewards, torch.Tensor):
+                rewards_split = torch.chunk(rollout_result.rewards, split_num, dim=0)
+            else:
+                rewards_split = split_list(rollout_result.rewards, split_num)
+
+        advantages_split = None
+        if rollout_result.advantages is not None:
+            if isinstance(rollout_result.advantages, torch.Tensor):
+                advantages_split = torch.chunk(
+                    rollout_result.advantages, split_num, dim=0
+                )
+            else:
+                advantages_split = split_list(rollout_result.advantages, split_num)
+
+        prev_logprobs_split = None
+        if rollout_result.prev_logprobs is not None:
+            prev_logprobs_split = torch.chunk(
+                rollout_result.prev_logprobs, split_num, dim=0
+            )
+
+        ref_logprobs_split = None
+        if rollout_result.ref_logprobs is not None:
+            ref_logprobs_split = torch.chunk(
+                rollout_result.ref_logprobs, split_num, dim=0
+            )
+
+        # Create split RolloutResult objects
+        for i in range(split_num):
+            split_result = RolloutResult(
+                num_sequence=num_sequence // split_num,
+                group_size=group_size,
+                prompt_lengths=prompt_lengths_split[i],
+                prompt_ids=prompt_ids_split[i],
+                response_lengths=response_lengths_split[i],
+                response_ids=response_ids_split[i],
+                is_end=is_end_split[i],
+                answers=answers_split[i] if answers_split is not None else None,
+                image_data=image_data_split[i]
+                if image_data_split is not None
+                else None,
+                multi_modal_inputs=multi_modal_inputs_split[i]
+                if multi_modal_inputs_split is not None
+                else None,
+                prompt_texts=prompt_texts_split[i]
+                if prompt_texts_split is not None
+                else None,
+                response_texts=response_texts_split[i]
+                if response_texts_split is not None
+                else None,
+                rollout_logprobs=rollout_logprobs_split[i]
+                if rollout_logprobs_split is not None
+                else None,
+                rewards=rewards_split[i] if rewards_split is not None else None,
+                advantages=advantages_split[i]
+                if advantages_split is not None
+                else None,
+                prev_logprobs=prev_logprobs_split[i]
+                if prev_logprobs_split is not None
+                else None,
+                ref_logprobs=ref_logprobs_split[i]
+                if ref_logprobs_split is not None
+                else None,
+            )
+            split_results.append(split_result)
+
+        return split_results
 
 class BatchResizingIterator:
     """The iterator for handling getting a batch and split it as a batch iterator with optional dynamic batch size."""
