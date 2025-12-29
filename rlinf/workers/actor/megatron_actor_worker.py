@@ -384,8 +384,12 @@ class MegatronActor(MegatronModelManager, Worker):
         # broadcast to other ranks
         if not self.is_data_io_rank:
             result_len = None
-        self.broadcast(result_len, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS)
-        self.broadcast(result_len, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS)
+        result_len = self.broadcast(
+            result_len, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS
+        )
+        result_len = self.broadcast(
+            result_len, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS
+        )
         if self.is_data_io_rank:
             cliped_results = list(rollout_results[result_len:])
             rollout_results = rollout_results[:result_len]
