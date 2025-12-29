@@ -1244,7 +1244,7 @@ class MegatronActor(MegatronModelManager, Worker):
             output_channel: The output channel to send results to.
             compute_ref_logprobs: Whether to compute reference logprobs.
         """
-        inference_split = self.cfg.inference.get("inference_split", None)
+        inference_split = self.cfg.actor.get("inference_split", None)
         if inference_split is None:
             if not self.is_pipeline:
                 inference_split = 1
