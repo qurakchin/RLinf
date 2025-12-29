@@ -384,8 +384,12 @@ class MegatronActor(MegatronModelManager, Worker):
         # broadcast to other ranks
         if not self.is_data_io_rank:
             result_len = None
-        self.broadcast(result_len, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS)
-        self.broadcast(result_len, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS)
+        result_len = self.broadcast(
+            result_len, ranks=parallel_state._MODEL_PARALLEL_GLOBAL_RANKS
+        )
+        result_len = self.broadcast(
+            result_len, ranks=parallel_state._CONTEXT_PARALLEL_GLOBAL_RANKS
+        )
         if self.is_data_io_rank:
             cliped_results = list(rollout_results[result_len:])
             rollout_results = rollout_results[:result_len]
@@ -1314,7 +1318,8 @@ class MegatronActor(MegatronModelManager, Worker):
             # for coll mode, merge results to reduce send time.
             rollout_result = RolloutResult.merge_result_list(coll_rollout_results)
             split_results = RolloutResult.split_results(
-                rollout_result, self.cfg.algorithm.n_minibatches
+                rollout_result,
+                min(total_result_len, self.cfg.algorithm.n_minibatches),
             )
             for split_result in split_results:
                 self.put_result(split_result, output_channel)
