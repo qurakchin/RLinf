@@ -1318,7 +1318,8 @@ class MegatronActor(MegatronModelManager, Worker):
             # for coll mode, merge results to reduce send time.
             rollout_result = RolloutResult.merge_result_list(coll_rollout_results)
             split_results = RolloutResult.split_results(
-                rollout_result, self.cfg.algorithm.n_minibatches
+                rollout_result,
+                min(total_result_len, self.cfg.algorithm.n_minibatches),
             )
             for split_result in split_results:
                 self.put_result(split_result, output_channel)
