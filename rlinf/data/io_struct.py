@@ -29,6 +29,8 @@ from rlinf.data.utils import batch_pad_to_fixed_len
 from rlinf.scheduler import Channel
 from rlinf.utils.data_iter_utils import (
     get_iterator_k_split,
+    merge_list,
+    merge_tensor,
     split_list,
 )
 from rlinf.utils.nested_dict_process import (
@@ -259,7 +261,6 @@ class RolloutResult:
     def _get_attention_masks_and_position_ids(
         prompt_lengths: torch.Tensor,
         response_lengths: torch.Tensor,
-        response_mask: torch.Tensor | None,
         max_prompt_len: int,
         total_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -274,33 +275,15 @@ class RolloutResult:
 
         # Compute the start and end positions of the prompt and response tokens
         prompt_start = max_prompt_len - prompt_lengths  # [B]
+        prompt_end = torch.full_like(prompt_start, max_prompt_len)  # [B]
         response_end = max_prompt_len + response_lengths  # [B]
 
         # Broadcast [B, total_len]
         prompt_start = prompt_start.unsqueeze(1)
+        prompt_end = prompt_end.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
-        if response_mask is not None:
-            max_response_len = total_len - max_prompt_len
-            response_mask = batch_pad_to_fixed_len(
-                [torch.as_tensor(ids, dtype=torch.long) for ids in response_mask],
-                max_batch_len=max_response_len,
-                pad_token=0,
-            )
-
-            attention_mask = torch.cat(
-                [
-                    (
-                        torch.arange(max_prompt_len)
-                        .unsqueeze(0)
-                        .expand(response_mask.size(0), -1)
-                        >= prompt_start
-                    ),
-                    response_mask,
-                ],
-                dim=1,
-            ).bool()
-        else:
-            attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
+        attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
+        response_mask = (arange_ids >= prompt_end) & (arange_ids < response_end)
 
         # =========================
         # Position IDs
@@ -311,7 +294,24 @@ class RolloutResult:
             ps = prompt_start[i].item()
             position_ids[i, ps:] = torch.arange(total_len - ps)
 
-        return attention_mask, position_ids
+        return attention_mask, response_mask, position_ids
+
+    @staticmethod
+    def _get_response_masks(
+        response_mask: list[list[int]],  # [[0 / 1] * response len] * group size
+        max_prompt_len: int,
+        total_len: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        response_mask = batch_pad_to_fixed_len(
+            [
+                torch.as_tensor([0] * max_prompt_len + ids, dtype=torch.long)
+                for ids in response_mask
+            ],
+            max_batch_len=total_len,
+            pad_token=0,
+        ).bool()
+
+        return response_mask
 
     @staticmethod
     def from_vllm_results(
@@ -471,35 +471,16 @@ class RolloutResult:
             is_end=[],
         )
 
-        def merge_tensor(dst_tensor: torch.Tensor, src_tensor: torch.Tensor):
-            assert dst_tensor is None or torch.is_tensor(dst_tensor), (
-                f"Expected tensor, got {type(dst_tensor)}"
-            )
-            assert torch.is_tensor(src_tensor), (
-                f"Expected tensor, got {type(src_tensor)}"
-            )
-            if dst_tensor is None:
-                return src_tensor
-            else:
-                return torch.cat([dst_tensor, src_tensor], dim=0)
-
-        def merge_list(dst_list: list, src_list: list):
-            assert dst_list is None or isinstance(dst_list, list), (
-                f"Expected list, got {type(dst_list)}"
-            )
-            assert isinstance(src_list, list), f"Expected list, got {type(src_list)}"
-            if dst_list is None:
-                return src_list
-            else:
-                dst_list.extend(src_list)
-                return dst_list
-
         for res in rollout_results:
             merged_result.prompt_lengths.extend(res.prompt_lengths)
             merged_result.prompt_ids.extend(res.prompt_ids)
             merged_result.response_lengths.extend(res.response_lengths)
             merged_result.response_ids.extend(res.response_ids)
             merged_result.is_end.extend(res.is_end)
+            if res.response_mask is not None:
+                merged_result.response_mask = merge_list(
+                    merged_result.response_mask, res.response_mask
+                )
             if res.answers is not None:
                 merged_result.answers = merge_list(merged_result.answers, res.answers)
             if res.advantages is not None:
@@ -724,7 +705,14 @@ class RolloutResult:
                 shape ``[batch_size, training_seq_length]``.
 
             attention_mask (torch.Tensor):
-                Attention mask for the input sequence,
+                Attention mask for the whole input sequence,
+                Value: True for or prompt_ids and response_ids, False for others
+                shape ``[batch_size, training_seq_length]``.
+
+            response_mask (torch.Tensor):
+                Mask participate in adv and loss calculation for the whole input sequence,
+                To filter ids not generated by llm,
+                Value: True for or response_ids generated by llm, False for others
                 shape ``[batch_size, training_seq_length]``.
 
             is_end (torch.Tensor):
@@ -748,11 +736,16 @@ class RolloutResult:
                 shape ``[batch_size, training_seq_length - data_seq_length]``.
         """
 
-        # len = training_seq_length: input_ids, attention_mask, position_ids
-        #           [prompt_padding, prompt_ids,    response_ids, ... ,response_padding]
+        # len = training_seq_length: input_ids, attention_mask, position_ids, response_mask
+        # each row: [prompt_padding, prompt_ids,    response_ids, ... ,response_padding]
         #           |<-- padding -->|<-- pmp len -->|<-- resp len --->|<-- padding --->|
         #           |<---- cfg.data.seq_length ---->|
         #           |<------------------ cfg.runner.seq_length --------------------->|
+        # each row: [response_mask]
+        #           |<------- padding ------->|<- llm resp ->|<- tool resp ->|<- llm resp ->|<- padding ->|
+        #           |<-------- False -------->|<--- True --->|<--- False --->|<--- True --->|<-- False -->|
+        #           |<- cfg.data.seq_length ->|<------ cfg.runner.seq_length - cfg.data.seq_length ------>|
+        #           |<------------------------------ cfg.runner.seq_length ------------------------------>|
 
         # len = training_seq_length - data_seq_length: advantage, prev_logprobs, ref_logprobs
         # each row: [response_ids, ...,                , response_padding]
@@ -765,13 +758,20 @@ class RolloutResult:
         response_lengths = torch.tensor(self.response_lengths)
         is_end = torch.tensor(self.is_end, dtype=torch.bool)
 
-        attention_mask, position_ids = self._get_attention_masks_and_position_ids(
-            prompt_lengths=prompt_lengths,
-            response_lengths=response_lengths,
-            response_mask=self.response_mask,
-            max_prompt_len=data_seq_length,
-            total_len=training_seq_length,
+        attention_mask, response_mask, position_ids = (
+            self._get_attention_masks_and_position_ids(
+                prompt_lengths=prompt_lengths,
+                response_lengths=response_lengths,
+                max_prompt_len=data_seq_length,
+                total_len=training_seq_length,
+            )
         )
+        if self.response_mask is not None:
+            response_mask = self._get_response_masks(
+                self.response_mask,
+                max_prompt_len=data_seq_length,
+                total_len=training_seq_length,
+            )
 
         prompt_ids = batch_pad_to_fixed_len(
             [torch.as_tensor(ids, dtype=torch.long) for ids in self.prompt_ids],
@@ -792,6 +792,7 @@ class RolloutResult:
         batch = {
             "input_ids": input_ids.cuda(),
             "attention_mask": attention_mask.cuda(),
+            "response_mask": response_mask.cuda(),
             "is_end": is_end.cuda(),
             "position_ids": position_ids.cuda(),
             "prompt_lengths": prompt_lengths.cuda(),
@@ -836,7 +837,7 @@ class RolloutResult:
                     for logprobs in self.rollout_logprobs
                 ],
                 max_batch_len=max_response_len,
-                pad_token=pad_token,
+                pad_token=0,
             )
             batch["prev_logprobs"] = logprobs.cuda()
 
@@ -863,6 +864,114 @@ class RolloutResult:
             else:
                 raise ValueError(f"Unsupported batch key type: {type(batches[0][key])}")
         return merged_batch
+
+    @staticmethod
+    def split_results(
+        rollout_result: "RolloutResult",
+        split_num: int,
+    ) -> list["RolloutResult"]:
+        """
+        Split a single RolloutResult into multiple RolloutResult objects by group_size.
+
+        Args:
+            rollout_result: The RolloutResult to be split
+
+        Returns:
+            list of split RolloutResult objects
+        """
+        group_size = rollout_result.group_size
+        num_sequence = rollout_result.num_sequence
+
+        assert num_sequence % (rollout_result.group_size * split_num) == 0, (
+            f"num_sequence ({num_sequence}) must be divisible by split_num ({split_num}) and group_size ({rollout_result.group_size})"
+        )
+
+        list_none = [None for _ in range(split_num)]
+        fields_split = {}
+        # Split list fields
+        list_fields = [
+            "prompt_lengths",
+            "prompt_ids",
+            "response_lengths",
+            "response_ids",
+            "is_end",
+        ]
+        for k in list_fields:
+            v = getattr(rollout_result, k)
+            fields_split[k] = split_list(v, split_num)
+
+        # Split optional list fields
+        list_fields = [
+            "answers",
+            "image_data",
+            "multi_modal_inputs",
+            "prompt_texts",
+            "response_texts",
+            "rollout_logprobs",
+            "recompute_prev_logprobs",
+            "response_mask",
+        ]
+        for k in list_fields:
+            v = getattr(rollout_result, k)
+            if v is not None:
+                fields_split[k] = split_list(v, split_num)
+            else:
+                fields_split[k] = list_none
+
+        # Split optional tensor or list fields
+        optional_tensor_fields = [
+            "prev_logprobs",
+            "ref_logprobs",
+        ]
+        for k in optional_tensor_fields:
+            v = getattr(rollout_result, k)
+            if v is not None:
+                fields_split[k] = torch.chunk(v, split_num, dim=0)
+            else:
+                fields_split[k] = list_none
+
+        # Split optional tensor or list fields
+        optional_tensor_list_fields = [
+            "rewards",
+            "advantages",
+        ]
+        for k in optional_tensor_list_fields:
+            v = getattr(rollout_result, k)
+            if v is not None:
+                if isinstance(v, torch.Tensor):
+                    fields_split[k] = torch.chunk(v, split_num, dim=0)
+                else:
+                    fields_split[k] = split_list(v, split_num)
+            else:
+                fields_split[k] = list_none
+
+        # Create split RolloutResult objects
+        split_results = []
+        for i in range(split_num):
+            split_result = RolloutResult(
+                num_sequence=num_sequence // split_num,
+                group_size=group_size,
+                prompt_lengths=fields_split["prompt_lengths"][i],
+                prompt_ids=fields_split["prompt_ids"][i],
+                response_lengths=fields_split["response_lengths"][i],
+                response_ids=fields_split["response_ids"][i],
+                is_end=fields_split["is_end"][i],
+                rewards=fields_split["rewards"][i],
+                advantages=fields_split["advantages"][i],
+                prompt_texts=fields_split["prompt_texts"][i],
+                response_texts=fields_split["response_texts"][i],
+                answers=fields_split["answers"][i],
+                image_data=fields_split["image_data"][i],
+                multi_modal_inputs=fields_split["multi_modal_inputs"][i],
+                response_mask=fields_split["response_mask"][i],
+                rollout_logprobs=fields_split["rollout_logprobs"][i],
+                recompute_prev_logprobs=fields_split["recompute_prev_logprobs"][i],
+                prev_logprobs=fields_split["prev_logprobs"][i],
+                ref_logprobs=fields_split["ref_logprobs"][i],
+            )
+            split_results.append(split_result)
+
+        return split_results
 
 
 class BatchResizingIterator:
