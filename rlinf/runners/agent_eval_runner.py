@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import typing
-from typing import Union
+from typing import Optional, Union
 
 from omegaconf import OmegaConf
 from omegaconf.dictconfig import DictConfig
@@ -51,7 +51,7 @@ class AgentEvalRunner(ReasoningEvalRunner):
         train_dataset: Dataset,
         val_dataset: Dataset,
         rollout: Union["SGLangWorker", "VLLMWorker"],
-        reward: RewardWorker,
+        reward: Optional[RewardWorker],
         agent_loop: AgentLoopWorker,
         tool_workers: dict[ToolWorker, ToolWorkerInfo] = {},
     ):
@@ -297,14 +297,18 @@ class AgentEvalRunner(ReasoningEvalRunner):
                     )
 
                     # Rewards
-                    reward_handle: Handle = self.reward.compute_rewards(
-                        input_channel=self.rollout_channel,
-                        output_channel=self.reward_channel,
-                    )
+                    if self.reward is not None:
+                        reward_handle: Handle = self.reward.compute_rewards(
+                            input_channel=self.rollout_channel,
+                            output_channel=self.reward_channel,
+                        )
+                        eval_input_channel = self.reward_channel
+                    else:
+                        eval_input_channel = self.rollout_channel
 
                     # Log evaluation
                     batch_accuracy, batch_count = self.log_eval(
-                        input_channel=self.reward_channel
+                        input_channel=eval_input_channel
                     )
 
                     # Wait for all handles to complete

@@ -15,7 +15,7 @@
 import logging
 import os
 import typing
-from typing import Union
+from typing import Optional, Union
 
 import pandas as pd
 import torch
@@ -49,7 +49,7 @@ class ReasoningEvalRunner:
         train_dataset: Dataset,
         val_dataset: Dataset,
         rollout: Union["SGLangWorker", "VLLMWorker"],
-        reward: RewardWorker,
+        reward: Optional[RewardWorker],
     ):
         """"""
         self.cfg = cfg
@@ -64,7 +64,10 @@ class ReasoningEvalRunner:
         self.rollout_channel = Channel.create("Rollout")
         # Create a local channel (i.e., a channel that is different in every process)
         # if inference is not a dedicated worker
-        self.reward_channel = Channel.create("Reward")
+        if self.reward is not None:
+            self.reward_channel = Channel.create("Reward")
+        else:
+            self.reward_channel = self.rollout_channel
 
         # Configurations
         self.consumed_samples = 0
@@ -142,7 +145,8 @@ class ReasoningEvalRunner:
     def init_workers(self):
         # Init workers
         self.rollout.init_worker().wait()
-        self.reward.init_worker().wait()
+        if self.reward is not None:
+            self.reward.init_worker().wait()
 
         if self.cfg.runner.resume_dir is None:
             return
@@ -202,18 +206,3 @@ class ReasoningEvalRunner:
             )
             self.dataloader_channel.put(request, async_op=True)
 
-    def run(self):
-        epoch_iter = range(self.epoch, self.cfg.runner.max_epochs)
-        if len(epoch_iter) <= 0:
-            # epoch done
-            return
-
-        self.run_timer.start_time()
-        for _ in epoch_iter:
-            for batch in self.train_dataloader:
-                with self.timer("step"):
-                    with self.timer("prepare_data"):
-                        self._put_batch(batch)
-
-                    with self.timer("sync_weights"):
-                        self._sync_weights()
