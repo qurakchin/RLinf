@@ -136,7 +136,7 @@ class AgentLoopWorker(Worker):
     async def run_agentloop_rollout_group(
         self,
         input_ids: list[int],
-        answers: list[Any],
+        answer: str,
         group_size: int,
         output_channel: Channel,
     ):
@@ -150,7 +150,7 @@ class AgentLoopWorker(Worker):
             rollout_tasks.append(task)
 
         task_results = await asyncio.gather(*rollout_tasks)
-        rollout_result = self.get_rollout_result(task_results, answers)
+        rollout_result = self.get_rollout_result(task_results, answer)
         await output_channel.put(rollout_result, async_op=True).async_wait()
 
     async def run_agentloop_rollout(
@@ -163,13 +163,13 @@ class AgentLoopWorker(Worker):
             rollout_request: RolloutRequest = input_channel.get()
 
             send_output_tasks = []
-            for input_ids, answers in zip(
+            for input_ids, answer in zip(
                 rollout_request.input_ids, rollout_request.answers
             ):
                 send_output_tasks.append(
                     asyncio.create_task(
                         self.run_agentloop_rollout_group(
-                            input_ids, answers, rollout_request.n, output_channel
+                            input_ids, answer, rollout_request.n, output_channel
                         ),
                     )
                 )
@@ -177,7 +177,7 @@ class AgentLoopWorker(Worker):
             await asyncio.gather(*send_output_tasks)
 
     def get_rollout_result(
-        self, task_results: list[AgentLoopOutput], answers
+        self, task_results: list[AgentLoopOutput], answer: str
     ) -> RolloutResult:
         """
         Collect group task results into a RolloutResult.
@@ -212,7 +212,7 @@ class AgentLoopWorker(Worker):
         )
 
         is_end = [True for _ in task_results]
-        answers = [answers] * len(task_results)
+        answers = [answer] * len(task_results)
         return RolloutResult(
             num_sequence=len(task_results),
             group_size=len(task_results),
