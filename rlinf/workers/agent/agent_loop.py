@@ -109,12 +109,14 @@ class AgentLoopWorker(Worker):
 
     def print_agent_outputs(
         self,
-        prompt_texts: str,
+        prompt_texts: Optional[str],
         trace_prints: list[Any],
     ):
-        print_texts = [
-            f"{green('Prompt')}         : {prompt_texts!r}",
-        ]
+        print_texts = []
+        if prompt_texts is not None:
+            print_texts = [
+                f"{green('Prompt')}         : {prompt_texts!r}",
+            ]
         for trace_print in trace_prints:
             print_texts.append(f"{green('Trace print')}    : {trace_print!r}")
         print(*print_texts, sep="\n")
