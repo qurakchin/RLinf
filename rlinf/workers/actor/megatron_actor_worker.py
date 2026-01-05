@@ -209,9 +209,7 @@ class MegatronActor(MegatronModelManager, Worker):
         self._init_auto_scheduler(role)
 
     def _init_auto_scheduler(self, role: str):
-        self.use_auto_scheduler = (
-            self.placement_mode == PlacementMode.AUTO
-        )
+        self.use_auto_scheduler = self.placement_mode == PlacementMode.AUTO
         self.use_pre_process_policy = (
             getattr(self.cfg.cluster, "use_pre_process_policy", False)
             and self.use_auto_scheduler
@@ -866,7 +864,10 @@ class MegatronActor(MegatronModelManager, Worker):
             self._setup_valid_token_scale(batch)
 
         # DP batch load balance
-        if self.cfg.actor.get("enable_dp_load_balance", False) and parallel_state.get_data_parallel_world_size() > 1:
+        if (
+            self.cfg.actor.get("enable_dp_load_balance", False)
+            and parallel_state.get_data_parallel_world_size() > 1
+        ):
             batch = self._dp_load_balance(batch)
 
         if self.use_profiler:
@@ -1429,8 +1430,12 @@ class MegatronActor(MegatronModelManager, Worker):
             if self.placement_mode == PlacementMode.COLLOCATED:
                 send_handle = None
                 for bucket_weight in model_bucket_list:
-                    reshard_state_dict = self._get_rollout_model_state_dict(bucket_weight)
-                    buffer = {k: reduce_tensor(v) for k, v in reshard_state_dict.items()}
+                    reshard_state_dict = self._get_rollout_model_state_dict(
+                        bucket_weight
+                    )
+                    buffer = {
+                        k: reduce_tensor(v) for k, v in reshard_state_dict.items()
+                    }
                     if send_handle is not None:
                         send_handle.wait()
                     else:
@@ -1447,7 +1452,9 @@ class MegatronActor(MegatronModelManager, Worker):
             else:
                 send_handle_bucket = []
                 for bucket_weight in model_bucket_list:
-                    reshard_state_dict = self._get_rollout_model_state_dict(bucket_weight)
+                    reshard_state_dict = self._get_rollout_model_state_dict(
+                        bucket_weight
+                    )
 
                     if len(send_handle_bucket) != 0:
                         for send_handle in send_handle_bucket:

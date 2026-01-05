@@ -215,7 +215,9 @@ class AgentLoopWorker(Worker):
         )
         response_logprobs = None
         if self.return_logprobs:
-            response_logprobs = [r.response_logprobs[:max_resp_len] for r in task_results]
+            response_logprobs = [
+                r.response_logprobs[:max_resp_len] for r in task_results
+            ]
         is_end = [True for _ in task_results]
         answers = [answer] * len(task_results)
         return RolloutResult(

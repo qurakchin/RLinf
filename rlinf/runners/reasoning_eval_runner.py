@@ -205,4 +205,3 @@ class ReasoningEvalRunner:
                 multi_modal_inputs=multi_modal_inputs,
             )
             self.dataloader_channel.put(request, async_op=True)
-
