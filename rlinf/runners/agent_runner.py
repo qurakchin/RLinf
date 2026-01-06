@@ -108,7 +108,7 @@ class AgentRunner(ReasoningRunner):
         self.tool_output_channel = Channel.create("ToolOutput")
 
     def init_rollout_workers(self):
-        # Init workers
+        """init rollout workers, tool workers and agent loop worker."""
         rollout_handles = [self.rollout.init_worker()]
         for solid_rollout in self.solid_rollouts.values():
             rollout_handle = solid_rollout.init_worker()

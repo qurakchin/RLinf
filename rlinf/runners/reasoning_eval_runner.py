@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import logging
-import os
 import typing
 from typing import Optional, Union
 
@@ -142,32 +141,20 @@ class ReasoningEvalRunner:
             f"{len(self.val_dataloader)}"
         )
 
-    def init_workers(self):
-        # Init workers
+    def init_rollout_workers(self):
+        """init rollout worker."""
         self.rollout.init_worker().wait()
+
+    def init_actor_workers(self):
+        """init reward worker."""
         if self.reward is not None:
             self.reward.init_worker().wait()
 
-        if self.cfg.runner.resume_dir is None:
-            return
+        assert self.cfg.runner.resume_dir is None, "resume_dir is not need in eval mode"
 
-        # Resume from checkpoint
-        logging.info(f"Load from checkpoint folder: {self.cfg.runner.resume_dir}")
-        # set global step
-        self.global_steps = int(self.cfg.runner.resume_dir.split("global_step_")[-1])
-        logging.info(f"Setting global step to {self.global_steps}")
-
-        # load data
-        dataloader_local_path = os.path.join(self.cfg.runner.resume_dir, "data/data.pt")
-        if os.path.exists(dataloader_local_path):
-            dataloader_state_dict = torch.load(
-                dataloader_local_path, weights_only=False
-            )
-            self.train_dataloader.load_state_dict(dataloader_state_dict)
-        else:
-            logging.warning(
-                f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch"
-            )
+    def init_workers(self):
+        self.init_rollout_workers()
+        self.init_actor_workers()
 
     def _set_max_steps(self):
         self.num_steps_per_epoch = len(self.train_dataloader)

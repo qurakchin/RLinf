@@ -170,7 +170,7 @@ class ReasoningRunner:
         )
 
     def init_rollout_workers(self):
-        # Init workers
+        """init rollout worker."""
         rollout_handle = self.rollout.init_worker()
 
         # Must be done before actor init
@@ -192,6 +192,7 @@ class ReasoningRunner:
             self.rollout.offload_engine().wait()
 
     def init_actor_workers(self):
+        """init actor worker and reward worker."""
         if self.reward is not None:
             self.reward.init_worker().wait()
 

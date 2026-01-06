@@ -70,7 +70,10 @@ class AgentLoopWorker(Worker):
         super().__init__()
         self.cfg = cfg
         self.print_outputs = cfg.agentloop.print_outputs
-        self.return_logprobs = not cfg.algorithm.recompute_logprobs
+        if cfg.runner.task_type == "reasoning_eval":
+            self.return_logprobs = False
+        else:
+            self.return_logprobs = not cfg.algorithm.recompute_logprobs
 
         self.tokenizer = AutoTokenizer.from_pretrained(cfg.rollout.model.model_path)
 
@@ -81,6 +84,7 @@ class AgentLoopWorker(Worker):
         tool_channel_info_map: dict[str, ToolChannelInfo],
         tool_name_map: dict[str, str],
         tool_worker_output_channel: Channel,
+        solid_generate_input_channels: dict[str, Channel] = {},
     ):
         self.generate_input_channel = generate_input_channel
         self.generate_output_channel = generate_output_channel
@@ -89,6 +93,9 @@ class AgentLoopWorker(Worker):
         # tool name to tool worker. a tool worker may have multiple tools.
         self.tool_name_map = tool_name_map
         self.tool_worker_output_channel = tool_worker_output_channel
+        # for multi agent model, use a different agent with no training.
+        # such as a 8b planner with training and a 4b worker without training.
+        self.solid_generate_input_channels = solid_generate_input_channels
 
     async def generate(
         self, prompt_ids: list[int], sampling_params: Optional[dict] = None
