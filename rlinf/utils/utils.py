@@ -60,11 +60,7 @@ def retrieve_model_state_dict_in_cpu(model, offloaded_buffer=None):
             if name in offloaded_buffer:
                 offloaded_buffer[name].copy_(item.detach(), non_blocking=True)
             else:
-                item = (
-                    item.detach()
-                    .to(device="cpu", non_blocking=True, copy=True)
-                    .pin_memory()
-                )
+                item = item.detach().to(device="cpu", non_blocking=True, copy=True).pin_memory()
                 offloaded_buffer[name] = item
         else:
             offloaded_buffer[name] = item
@@ -74,9 +70,7 @@ def retrieve_model_state_dict_in_cpu(model, offloaded_buffer=None):
 
 
 @torch.no_grad()
-def swap_dict(
-    resident_model, cpu_weights, offload_onto_cpu=True, offloaded_buffer=None
-):
+def swap_dict(resident_model, cpu_weights, offload_onto_cpu=True, offloaded_buffer=None):
     """swap the state dict with a specified state dict, and offload the current state dict onto CPU
     if needed
     """
@@ -84,9 +78,7 @@ def swap_dict(
         offloaded_buffer = {}
 
     if offload_onto_cpu:
-        offloaded_buffer = retrieve_model_state_dict_in_cpu(
-            resident_model, offloaded_buffer
-        )
+        offloaded_buffer = retrieve_model_state_dict_in_cpu(resident_model, offloaded_buffer)
 
     resident_model.load_state_dict(cpu_weights)
     return offloaded_buffer
@@ -95,9 +87,7 @@ def swap_dict(
 @contextmanager
 def cpu_weight_swap(resident_model, cpu_weights, offloaded_buffer=None):
     """swap the weights into GPU, and then swap it out once return"""
-    offloaded_buffer = swap_dict(
-        resident_model, cpu_weights, offloaded_buffer=offloaded_buffer
-    )
+    offloaded_buffer = swap_dict(resident_model, cpu_weights, offloaded_buffer=offloaded_buffer)
 
     try:
         yield

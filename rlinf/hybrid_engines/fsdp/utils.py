@@ -587,3 +587,277 @@ def get_backward_prefetch_strategy(
         f"Unknown backward prefetch strategy: {prefetch_str}"
     )
     return BACKWARD_PREFETCH_STRATEGIES[prefetch_str]
+
+
+def _tensor_nbytes(t: torch.Tensor) -> int:
+    return t.numel() * t.element_size()
+
+
+def save_state_dict_sharded_safetensors(
+    state_dict: dict,
+    out_dir: str,
+    base_name: str = "model",
+    max_shard_size: float | int = 4 * 1024**3,
+) -> tuple[int, int]:
+    """
+    Save the state dict in sharded safetensors format. It will
+    first record every tensor that needs to be stored, and create shard plan.
+    After this, it will use thread pool to write to safetensors according
+    to the sharded plan.
+
+    Args:
+        state_dict(dict[str,torch.tensor]): The state dict to save.
+        out_dir(str): where to save the sharded safetensors files.
+        base_name(str): The base name for the sharded files.
+        max_shard_size(int|float): The maximum size of each shard in bytes. Default is 4GB.
+
+    Returns:
+        tuple[int,int]: number of shards created and total size in bytes.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    items = [(k, v) for k, v in state_dict.items() if torch.is_tensor(v)]
+    items.sort(key=lambda kv: kv[0])
+
+    # Plan shards
+    shards_plan = []
+    current_shard_keys = []
+    current_shard_bytes = 0
+
+    def flush_plan():
+        nonlocal current_shard_keys, current_shard_bytes
+        if not current_shard_keys:
+            return
+        shards_plan.append((current_shard_keys, current_shard_bytes))
+        current_shard_keys = []
+        current_shard_bytes = 0
+
+    for name, t in items:
+        # Calculate size without moving to CPU
+        nbytes = _tensor_nbytes(t)
+
+        if nbytes > max_shard_size:
+            flush_plan()
+            current_shard_keys.append(name)
+            current_shard_bytes = nbytes
+            flush_plan()
+            continue
+
+        if current_shard_bytes + nbytes > max_shard_size and current_shard_keys:
+            flush_plan()
+
+        current_shard_keys.append(name)
+        current_shard_bytes += nbytes
+
+    flush_plan()
+
+    num_shards = len(shards_plan)
+    total_size = sum(b for _, b in shards_plan)
+    weight_map = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = []
+
+        for idx, (keys, _) in enumerate(shards_plan):
+            shard_idx = idx + 1
+            shard_dict = {}
+
+            # (CPU transfer happens here)
+            for k in keys:
+                t = state_dict[k]
+                t = t.detach()
+                if t.device.type != "cpu":
+                    t = t.cpu()
+                if not t.is_contiguous():
+                    t = t.contiguous()
+                shard_dict[k] = t
+
+            fname = f"{base_name}-{shard_idx:05d}-of-{num_shards:05d}.safetensors"
+            fpath = os.path.join(out_dir, fname)
+
+            future = executor.submit(
+                save_file, shard_dict, fpath, metadata={"format": "pt"}
+            )
+            futures.append(future)
+
+            for k in keys:
+                weight_map[k] = fname
+
+        # Wait for all tasks to complete and check for exceptions
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
+    index = {"metadata": {"total_size": total_size}, "weight_map": weight_map}
+    with open(
+        os.path.join(out_dir, f"{base_name}.safetensors.index.json"),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(index, f, ensure_ascii=False, indent=2)
+
+    return num_shards, total_size
+
+
+def copy_model_config_and_code(
+    model_path: str,
+    save_path: str,
+    suffixes: tuple[str, ...] = (
+        ".py",
+        ".json",
+        ".md",
+    ),
+) -> None:
+    """
+    Recursively copies files with specific suffixes from model_path to save_path.
+    """
+    if not os.path.exists(model_path):
+        return
+
+    os.makedirs(save_path, exist_ok=True)
+
+    for root, _, files in os.walk(model_path):
+        for file in files:
+            if file.endswith(suffixes):
+                src_file = os.path.join(root, file)
+                rel_path = os.path.relpath(src_file, model_path)
+                dst_file = os.path.join(save_path, rel_path)
+
+                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+
+
+def pack_sequences(
+    input_tensor: torch.Tensor,  # [B, seq_len]
+    idx_starts: list[int],  # [B]
+    idx_ends: list[int],  # [B]
+    max_seq_len: int,
+    pad_val,
+):
+    assert len(input_tensor.shape) == 2
+    assert input_tensor.shape[0] == len(idx_starts) == len(idx_ends)
+    assert sum(idx_ends) - sum(idx_starts) <= max_seq_len
+    pad_len = max_seq_len - (sum(idx_ends) - sum(idx_starts))
+
+    input_tensors_rm_pad = []
+    for idx in range(input_tensor.shape[0]):
+        input_tensors_rm_pad.append(input_tensor[idx, idx_starts[idx] : idx_ends[idx]])
+
+    if pad_len > 0:
+        pad_tensor = torch.full(
+            (pad_len,), pad_val, dtype=input_tensor.dtype, device=input_tensor.device
+        )
+        input_tensors_rm_pad.append(pad_tensor)
+
+    # [1, max_seq_len]
+    output_tensor = torch.cat(input_tensors_rm_pad)
+    return output_tensor
+
+
+def unpack_sequences(
+    input_tensor: torch.Tensor,  # [1, max_seq_len]
+    idx_starts: list[int],  # [B]
+    idx_ends: list[int],  # [B]
+    max_seq_len: int,
+    pad_val,
+):
+    assert len(input_tensor.shape) == 2
+    assert input_tensor.shape[0] == 1
+    assert len(idx_starts) == len(idx_ends)
+    assert sum(idx_ends) - sum(idx_starts) <= input_tensor.shape[1]
+
+    input_tensors_splits = []
+    cu_len = 0
+    for idx_start, idx_end in zip(idx_starts, idx_ends):
+        length = idx_end - idx_start
+        input_tensors_splits.append(input_tensor[0, cu_len : cu_len + length])
+        cu_len += length
+
+    # [B, max_seq_len]
+    output_tensor = torch.stack(
+        [
+            torch.cat(
+                [
+                    torch.full(
+                        (idx_start,),
+                        pad_val,
+                        dtype=input_tensor.dtype,
+                        device=input_tensor.device,
+                    ),
+                    input_split,
+                    torch.full(
+                        (max_seq_len - idx_end,),
+                        pad_val,
+                        dtype=input_tensor.dtype,
+                        device=input_tensor.device,
+                    ),
+                ]
+            )
+            for idx_start, idx_end, input_split in zip(
+                idx_starts, idx_ends, input_tensors_splits
+            )
+        ]
+    )
+    return output_tensor
+
+
+def prepare_pack_fsdp(
+    m_batch: dict,
+    max_prompt_len,
+):
+    idx_starts = (max_prompt_len - m_batch["prompt_lengths"]).tolist()
+    idx_ends = (max_prompt_len + m_batch["response_lengths"]).tolist()
+    return idx_starts, idx_ends
+
+
+def pack_fsdp(
+    input_ids,
+    position_ids,
+    *,
+    idx_starts,
+    idx_ends,
+    max_seq_len_pack,
+    eos_token_id,
+):
+    input_ids = pack_sequences(
+        input_ids, idx_starts, idx_ends, max_seq_len_pack, eos_token_id
+    ).unsqueeze(0)
+    position_ids = pack_sequences(
+        position_ids, idx_starts, idx_ends, max_seq_len_pack, 0
+    ).unsqueeze(0)
+    # force set attention_mask to None, and transformer will generate cu_seqlens from position_ids
+    # only available in fsdp using flash-attn
+    attention_mask = None
+    return input_ids, position_ids, attention_mask
+
+
+def unpack_fsdp(
+    logits,
+    input_ids,
+    *,
+    idx_starts,
+    idx_ends,
+    max_seq_len_unpack,
+    eos_token_id,
+    compute_logprobs_fn,
+):
+    responses = torch.cat(
+        [
+            input_ids[:, 1:],
+            torch.full(
+                (1, 1), eos_token_id, dtype=input_ids.dtype, device=input_ids.device
+            ),
+        ],
+        dim=1,
+    )
+    logprobs = compute_logprobs_fn(logits, responses)
+    logprobs = torch.cat(
+        [
+            torch.zeros((1, 1), dtype=logits.dtype, device=logits.device),
+            logprobs[:, :-1],
+        ],
+        dim=-1,
+    )
+    logprobs = unpack_sequences(
+        logprobs, idx_starts, idx_ends, max_seq_len_unpack, pad_val=0
+    )
+    return logprobs
