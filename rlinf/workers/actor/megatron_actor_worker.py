@@ -436,7 +436,6 @@ class MegatronActor(MegatronModelManager, Worker):
 
             input_ids = batch["input_ids"]
             attention_mask = batch["attention_mask"]
-            response_mask = batch["response_mask"]
             position_ids = batch["position_ids"]
 
             response_len = self.response_len
@@ -1311,7 +1310,11 @@ class MegatronActor(MegatronModelManager, Worker):
                 # Ref logprobs
                 if compute_ref_logprobs:
                     assert self.ref_policy_state_dict is not None
-                    with cpu_weight_swap(self.model[0], self.ref_policy_state_dict, self.offload_model_buffer):
+                    with cpu_weight_swap(
+                        self.model[0],
+                        self.ref_policy_state_dict,
+                        self.offload_model_buffer,
+                    ):
                         ref_logprobs = self.inference_step(batch).cpu()
                         rollout_result.ref_logprobs = ref_logprobs
             if self.is_pipeline:
