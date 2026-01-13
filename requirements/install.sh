@@ -123,7 +123,7 @@ parse_args() {
 setup_mirror() {
     if [ "$USE_MIRRORS" -eq 1 ]; then
         export UV_PYTHON_INSTALL_MIRROR=https://ghfast.top/https://github.com/astral-sh/python-build-standalone/releases/download
-        export UV_DEFAULT_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+        export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple
         export HF_ENDPOINT=https://hf-mirror.com
         export GITHUB_PREFIX="https://ghfast.top/"
         git config --global url."${GITHUB_PREFIX}github.com/".insteadOf "https://github.com/"
@@ -544,6 +544,25 @@ install_franka_env() {
 }
 
 install_robotwin_env() {
+    # Set TORCH_CUDA_ARCH_LIST based on the CUDA version
+    local nvcc_exe
+    if [ -x "$(command -v nvcc)" ]; then
+        nvcc_exe=$(which nvcc)
+    elif [ -x /usr/local/cuda/bin/nvcc ]; then
+        nvcc_exe="/usr/local/cuda/bin/nvcc"
+    else
+        echo "nvcc not found. Cannot build robotwin environment."
+        exit 1
+    fi
+    local cuda_major=$("$nvcc_exe" --version | grep 'Cuda compilation tools' | awk '{print $5}' | awk -F '.' '{print $1}')
+    local cuda_minor=$("$nvcc_exe" --version | grep 'Cuda compilation tools' | awk '{print $5}' | awk -F '.' '{print $2}')
+    if [ "$cuda_major" -gt 12 ] || { [ "$cuda_major" -eq 12 ] && [ "$cuda_minor" -ge 8 ]; }; then
+        # Include Blackwell support for CUDA 12.8+
+        export TORCH_CUDA_ARCH_LIST="7.0;8.0;9.0;10.0"
+    else
+        export TORCH_CUDA_ARCH_LIST="7.0;8.0;9.0"
+    fi
+
     uv pip install mplib==0.2.1
     uv pip install gymnasium==0.29.1
 
