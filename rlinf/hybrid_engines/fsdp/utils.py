@@ -588,6 +588,7 @@ def get_backward_prefetch_strategy(
     )
     return BACKWARD_PREFETCH_STRATEGIES[prefetch_str]
 
+
 def pack_sequences(
     input_tensor: torch.Tensor,  # [B, seq_len]
     idx_starts: list[int],  # [B]

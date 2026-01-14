@@ -555,7 +555,7 @@ class MegatronActor(MegatronModelManager, Worker):
                 torch.distributed.all_reduce(
                     _imp,
                     torch.distributed.ReduceOp.AVG,
-                    group=parallel_state.get_data_parallel_group()
+                    group=parallel_state.get_data_parallel_group(),
                 )
 
                 # Early stopping.

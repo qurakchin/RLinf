@@ -352,6 +352,7 @@ class FSDPModelManager:
         To use grad scaler in fp16
         """
         from torch.amp.grad_scaler import OptState
+
         if not grad_scaler._enabled:
             return
 
@@ -373,7 +374,9 @@ class FSDPModelManager:
             if grad_scaler._scale.device != torch.device("mps:0")
             else grad_scaler._scale.reciprocal()
         )
-        found_inf = torch.full((), 0.0, dtype=torch.float32, device=grad_scaler._scale.device)
+        found_inf = torch.full(
+            (), 0.0, dtype=torch.float32, device=grad_scaler._scale.device
+        )
 
         optimizer_state["found_inf_per_device"] = grad_scaler._unscale_grads_(
             optimizer, inv_scale, found_inf, True
