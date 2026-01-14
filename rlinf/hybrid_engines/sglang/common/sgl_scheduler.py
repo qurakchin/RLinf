@@ -158,6 +158,7 @@ class Scheduler(_Scheduler):
 
         if self.is_weight_offloaded:
             self.resume_memory_occupation(ResumeMemoryOccupationReqInput())
+
         self.batch_load_hf_weight(state_dict)
         if bucket_length > 1:
             recv_handle = self._rlinf_worker.recv(
@@ -177,7 +178,7 @@ class Scheduler(_Scheduler):
 
             state_dict = recv_handle.wait()
             self.batch_load_hf_weight(state_dict)
-        state_dict.clear()
+        state_dict = None
 
         if self.weight_norm_dict is not None:
             # validate the weight norm dict between load model and first sync.
