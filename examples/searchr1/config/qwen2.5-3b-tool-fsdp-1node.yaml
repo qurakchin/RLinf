@@ -10,10 +10,6 @@ cluster:
   num_nodes: 1
   component_placement:
     actor,rollout,reward: all
-    # rollout: 0-1
-    # inference: 2
-    # actor: 3
-    # reward: 0-1
 
 
 runner:
@@ -33,14 +29,14 @@ runner:
   seq_length: 7096
 
   enable_dynamic_batch_size: True
-  max_tokens_per_mbs: 7096
+  max_tokens_per_mbs: 11008
 
   resume_dir: null
   experiment_name: searchr1-grpo-qwen2.5-3b-ins-fsdp
   output_dir: ../results
 
 algorithm:
-  entropy_op_type: torch
+  entropy_op_type: liger_kernel
   group_size: 4
   n_minibatches: 2
   training_batch_size_per_gpu: 1 # micro batch size
@@ -49,7 +45,7 @@ algorithm:
   # mbs to do log prob inference, can be set to
   # lower than rollout_batch_size_per_gpu to reduce
   # memory usage
-  logprob_forward_micro_batch_size: 1 # ${.rollout_batch_size_per_gpu}
+  logprob_forward_micro_batch_size: 16 # ${.rollout_batch_size_per_gpu}
 
   # val rollout mbs
   val_rollout_batch_size_per_gpu: 1 # ${.rollout_batch_size_per_gpu}
@@ -170,22 +166,23 @@ tools:
 actor:
   group_name: "ActorGroup"
   training_backend: fsdp
+  calculate_flops: False
+  seed: 1234
 
+  # fsdp config
   enable_offload: True
   sync_precision: ${rollout.model.precision}
 
-  calculate_flops: False
-
-  seed: 1234
-
   model:
-    model_type: ${rollout.model.model_type}
-    model_path: ${rollout.model.model_path}
     precision: fp32
-    is_lora: False
 
     seq_length: ${runner.seq_length}
     encoder_seq_length: ${runner.seq_length}
+
+    # fsdp config
+    model_type: ${rollout.model.model_type}
+    model_path: ${rollout.model.model_path}
+    is_lora: False
 
   optim:
     optimizer: adam
@@ -196,13 +193,8 @@ actor:
     min_lr: 0.0
     weight_decay: 0.01
     clip_grad: 0.8
-    use_distributed_optimizer: True
-    overlap_grad_reduce: False
-    overlap_param_gather: False
-    optimizer_enable_pin: False
-    overlap_param_gather_with_optimizer_step: False
-    loss_scale: 65536
 
+    # fsdp optim config
     total_training_steps: 662
     lr_warmup_steps_ratio: 0.285
 
@@ -222,6 +214,7 @@ actor:
     # "no_shard" (no sharding)
     sharding_strategy: "full_shard" 
 
+    gradient_checkpointing: True
     cpu_offload: False           # whether to offload parameters and gradients to CPU when not in use，if True, actor's enable_offload should be True too.
     offload_pin_memory: True    # whether FSDP2's CPU offload policy should pin memory when cpu_offload is True
     reshard_after_forward: True  # if True, FSDP2 will reshard parameters after forward pass to save memory
@@ -231,7 +224,7 @@ actor:
     limit_all_gathers: False            # if True, FSDP will synchronizes CPU threads to limit the number of concurrent all-gathers. Only affects strategies that schedule all-gathers
     backward_prefetch: null             # options are null, 'pre', 'post'. if 'pre', FSDP will prefetch the next upcoming all-gather while computing gradients. if 'post', FSDP will prefetch the next all-gather until current gradient is computed.
     use_orig_params: False              # if True, FSDP will use module's original parameters, it means it will expose nn.Module.named_parameters rather than FlatParameter
-    use_liger_kernel: False             # if True, liger_kernel will be used for FSDP, note that currently supported models in RLinf are [qwen2.5, qwen2.5-vl], for more details, see liger_kernel's doc
+    use_liger_kernel: True             # if True, liger_kernel will be used for FSDP, note that currently supported models in RLinf are [qwen2.5, qwen2.5-vl], for more details, see liger_kernel's doc
 
     fsdp_size: -1               # Number of GPUs per FSDP group for hybrid sharding. -1 means use all available GPUs in a single FSDP group
 

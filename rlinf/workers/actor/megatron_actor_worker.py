@@ -551,18 +551,12 @@ class MegatronActor(MegatronModelManager, Worker):
                     loss = loss + kl_loss * self.kl_beta
 
                 # Logging and early stopping according to KL (logp vs ref) or importance ratio (new logp vs old logp).
-                _imp: torch.Tensor = metrics_data["actor/ratio"]
-                _imp = _imp.clone()
+                _imp: torch.Tensor = metrics_data["actor/ratio"].clone()
                 torch.distributed.all_reduce(
                     _imp,
                     torch.distributed.ReduceOp.AVG,
                     group=parallel_state.get_data_parallel_group()
                 )
-                # _n_valid_tokens = mask.count_nonzero().clone()
-                # torch.distributed.all_reduce(
-                #     _n_valid_tokens, group=parallel_state.get_data_parallel_group()
-                # )
-                # _imp /= _n_valid_tokens
 
                 # Early stopping.
                 if (
@@ -1330,7 +1324,11 @@ class MegatronActor(MegatronModelManager, Worker):
                 # Ref logprobs
                 if compute_ref_logprobs:
                     assert self.ref_policy_state_dict is not None
-                    with cpu_weight_swap(self.model[0], self.ref_policy_state_dict, self.offload_model_buffer):
+                    with cpu_weight_swap(
+                        self.model[0],
+                        self.ref_policy_state_dict,
+                        self.offload_model_buffer,
+                    ):
                         ref_logprobs = self.inference_step(batch).cpu()
                         rollout_result.ref_logprobs = ref_logprobs
             if self.is_pipeline:

@@ -443,14 +443,6 @@ class FSDPActor(FSDPModelManager, Worker):
                 max_tokens_per_mbs=max_tokens_per_mbs,
                 microbatch_group_size_per_vp_stage=1,
             )
-            # zcy dbg
-            micro_batches = list(micro_batches_iter)
-            for m_batch in micro_batches:
-                if (
-                    m_batch["prompt_lengths"] + m_batch["response_lengths"]
-                ).sum() > max_tokens_per_mbs:
-                    breakpoint()
-            micro_batches_iter = iter(micro_batches)
         else:
             micro_batch_cnt = split_num
             micro_batches_iter = get_iterator_k_split(batch, micro_batch_cnt)
@@ -509,7 +501,9 @@ class FSDPActor(FSDPModelManager, Worker):
             )
 
         if self.enable_dynamic_batch_size:
-            logits = outputs.logits
+            logits: torch.Tensor = outputs.logits
+            if logits.dtype != torch.float32:
+                logits = logits.to(torch.float32)
             logits = logits / self.cfg.algorithm.sampling_params.temperature
 
             def compute_logprobs_fn(logits, target):
@@ -530,7 +524,9 @@ class FSDPActor(FSDPModelManager, Worker):
             )
             logprobs = logprobs[:, -max_response_len:]
         else:
-            logits = outputs.logits[:, -self.response_len - 1 : -1, :]
+            logits: torch.Tensor = outputs.logits[:, -self.response_len - 1 : -1, :]
+            if logits.dtype != torch.float32:
+                logits = logits.to(torch.float32)
             logits = logits / self.cfg.algorithm.sampling_params.temperature
 
             responses = input_ids[:, -self.response_len :]
@@ -680,13 +676,13 @@ class FSDPActor(FSDPModelManager, Worker):
             assert global_batch_size % self.micro_batch_size == 0, (
                 f"global batch size {global_batch_size} can not divide micro_batch_size {self.micro_batch_size}"
             )
-            self.gradient_accumulation = global_batch_size // self.micro_batch_size
             micro_batches_iter, micro_batch_cnt, _ = self._split_to_micro_batch(
                 batch,
                 self.enable_dynamic_batch_size,
                 max_tokens_per_mbs = self.max_tokens_per_mbs,
                 split_num=global_batch_size // self.micro_batch_size,
             )
+            self.gradient_accumulation = micro_batch_cnt
         else:
             global_batch_size = self.total_batch_size_per_dp // self.n_mini_batches
             micro_batch_cnt = global_batch_size // self.micro_batch_size
@@ -750,6 +746,8 @@ class FSDPActor(FSDPModelManager, Worker):
                 )
 
             logits: torch.Tensor = output.logits
+            if logits.dtype != torch.float32:
+                logits = logits.to(torch.float32)
             logits.div_(self.cfg.algorithm.sampling_params.temperature)
             if self.enable_dynamic_batch_size:
                 def compute_logprobs_fn(logits, target):
