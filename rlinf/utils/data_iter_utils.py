@@ -641,13 +641,6 @@ def get_iterator_dynamic(
             if valid_max_token == 0:
                 num_micro_batches += 1
     n_micro_batch = len(microbatches)
-    # TODO: zcy dbg
-    for m_batch in microbatches:
-        if (
-            sum(m_batch["prompt_lengths"]) + sum(m_batch["response_lengths"])
-            > max_tokens_per_mbs
-        ):
-            breakpoint()
     return itertools.chain(microbatches), partitions, n_micro_batch
 
 
