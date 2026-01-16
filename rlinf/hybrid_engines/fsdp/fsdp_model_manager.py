@@ -19,7 +19,7 @@ from typing import ContextManager, Union
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
-from torch.amp.grad_scaler import GradScaler
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
@@ -346,43 +346,6 @@ class FSDPModelManager:
         self._strategy.onload_optimizer(self.optimizer, device_id)
         self.is_optimizer_offloaded = False
 
-    @staticmethod
-    def _unscale_patch(grad_scaler: GradScaler, optimizer: torch.optim.Optimizer):
-        """
-        To use grad scaler in fp16
-        """
-        from torch.amp.grad_scaler import OptState
-
-        if not grad_scaler._enabled:
-            return
-
-        grad_scaler._check_scale_growth_tracker("unscale_")
-
-        optimizer_state = grad_scaler._per_optimizer_states[id(optimizer)]
-
-        if optimizer_state["stage"] is OptState.UNSCALED:
-            raise RuntimeError(
-                "unscale_() has already been called on this optimizer since the last update()."
-            )
-        elif optimizer_state["stage"] is OptState.STEPPED:
-            raise RuntimeError("unscale_() is being called after step().")
-
-        # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
-        assert grad_scaler._scale is not None
-        inv_scale = (
-            grad_scaler._scale.double().reciprocal().float()
-            if grad_scaler._scale.device != torch.device("mps:0")
-            else grad_scaler._scale.reciprocal()
-        )
-        found_inf = torch.full(
-            (), 0.0, dtype=torch.float32, device=grad_scaler._scale.device
-        )
-
-        optimizer_state["found_inf_per_device"] = grad_scaler._unscale_grads_(
-            optimizer, inv_scale, found_inf, True
-        )
-        optimizer_state["stage"] = OptState.UNSCALED
-
     def optimizer_step(self) -> tuple[float, list[float]]:
         """
         Perform optimizer step using its optimizer, lr_scheduler and grad_scaler.
@@ -391,7 +354,7 @@ class FSDPModelManager:
             A tuple of (grad_norm, lr_list), lr_list contains learning rates for all param groups.
         """
         self.optimizer_steps += 1
-        self._unscale_patch(self.grad_scaler, self.optimizer)
+        self.grad_scaler.unscale_(self.optimizer)
         grad_norm = self._strategy.clip_grad_norm_(
             model=self.model,
         )
@@ -517,7 +480,7 @@ class FSDPModelManager:
         warmup_optimizer_state(optimizer)
         return optimizer
 
-    def build_grad_scaler(self, enabled: bool) -> GradScaler:
+    def build_grad_scaler(self, enabled: bool) -> ShardedGradScaler:
         """
         Build the gradient scaler based on the configuration.
 
@@ -525,9 +488,9 @@ class FSDPModelManager:
             enabled (bool): Whether to enable gradient scaling.
 
         Returns:
-            GradScaler: The gradient scaler.
+            ShardedGradScaler: The gradient scaler.
         """
-        return GradScaler(enabled=enabled)
+        return ShardedGradScaler(enabled=enabled)
 
     def before_micro_batch(
         self, model: Union[FSDP, FSDPModule], is_last_micro_batch: bool
