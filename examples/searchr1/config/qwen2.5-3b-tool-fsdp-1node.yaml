@@ -39,7 +39,6 @@ runner:
 
 
 algorithm:
-  entropy_op_type: liger_kernel
   group_size: 4
   n_minibatches: 2
   training_batch_size_per_gpu: 1 # micro batch size

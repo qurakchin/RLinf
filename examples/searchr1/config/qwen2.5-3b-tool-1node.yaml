@@ -190,6 +190,7 @@ actor:
 
     # megatron config
     megatron_checkpoint: null
+
     # megatron model config
     activation: swiglu
     normalization: rmsnorm
