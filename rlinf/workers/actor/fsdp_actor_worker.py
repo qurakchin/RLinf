@@ -173,7 +173,7 @@ class FSDPActor(FSDPModelManager, Worker):
         self.micro_batch_size = self.cfg.actor.micro_batch_size
         self.n_mini_batches = self.cfg.algorithm.n_minibatches
         self.task_type = self.cfg.runner.task_type
-        self.entropy_op_type = self.cfg.algorithm.get("entropy_op_type", "liger_kernel")
+        self.entropy_op_type = self.cfg.algorithm.get("entropy_op_type", "flash_attn")
         self.enable_dp_load_balance = self.cfg.actor.get(
             "enable_dp_load_balance", False
         )
@@ -508,8 +508,6 @@ class FSDPActor(FSDPModelManager, Worker):
 
         if self.enable_dynamic_batch_size:
             logits: torch.Tensor = outputs.logits
-            if logits.dtype != torch.float32:
-                logits = logits.to(torch.float32)
             logits = logits / self.cfg.algorithm.sampling_params.temperature
 
             def compute_logprobs_fn(logits, target):
@@ -531,8 +529,6 @@ class FSDPActor(FSDPModelManager, Worker):
             logprobs = logprobs[:, -max_response_len:]
         else:
             logits: torch.Tensor = outputs.logits[:, -self.response_len - 1 : -1, :]
-            if logits.dtype != torch.float32:
-                logits = logits.to(torch.float32)
             logits = logits / self.cfg.algorithm.sampling_params.temperature
 
             responses = input_ids[:, -self.response_len :]
@@ -752,8 +748,6 @@ class FSDPActor(FSDPModelManager, Worker):
                 )
 
             logits: torch.Tensor = output.logits
-            if logits.dtype != torch.float32:
-                logits = logits.to(torch.float32)
             logits.div_(self.cfg.algorithm.sampling_params.temperature)
             if self.enable_dynamic_batch_size:
 
