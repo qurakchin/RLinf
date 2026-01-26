@@ -111,7 +111,6 @@ inference:
 
 rollout:
   group_name: "RolloutGroup"
-
   gpu_memory_utilization: 0.75
   model:
     model_path: /path/to/model/Qwen2.5-3B-Instruct
@@ -228,14 +227,28 @@ actor:
     clip_grad: 0.8
 
     # megatron config
-    bf16: False
-    fp16: False
     use_distributed_optimizer: True
     overlap_grad_reduce: False
     overlap_param_gather: False
     optimizer_enable_pin: False
     overlap_param_gather_with_optimizer_step: False
-    loss_scale: 65536
+
+    # megatron grad scale config
+    # 1. use loss_scale: constant grad scale
+    #    args of constant grad scale:
+    #        loss_scale: 2**32
+    # 2. no loss_scale, bf16 true, fp16 false: no grad scale
+    # 3. no loss_scale, bf16 false, fp16 true: dynamic grad scale
+    #    args of dynamic grad scale:
+    #        initial_loss_scale: 2**32
+    #        min_loss_scale:     1
+    #        loss_scale_window:  1000
+    #        hysteresis:         2
+
+    bf16: False
+    fp16: True
+    initial_loss_scale: 65536
+    loss_scale_window:  1000
 
   lr_sched:
     lr_warmup_fraction: 0.285

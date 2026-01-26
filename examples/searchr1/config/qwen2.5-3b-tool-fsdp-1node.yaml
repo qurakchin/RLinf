@@ -111,7 +111,6 @@ inference:
 
 rollout:
   group_name: "RolloutGroup"
-
   gpu_memory_utilization: 0.5
   model:
     model_path: /path/to/model/Qwen2.5-3B-Instruct
