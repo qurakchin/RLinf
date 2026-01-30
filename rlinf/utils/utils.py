@@ -254,7 +254,7 @@ def logprobs_from_logits_liger_kernel(
 def compute_logprobs_from_logits(
     logits: torch.Tensor,
     target: torch.Tensor,
-    op_type: Literal["torch", "flash_attn", "liger_kernel"] = "flash_attn",
+    op_type: Literal["torch", "flash_attn", "liger_kernel"] = "torch",
 ) -> torch.Tensor:
     """
     Compute logprobs by logits.
@@ -263,7 +263,8 @@ def compute_logprobs_from_logits(
         logits(torch.Tensor): [B, seq-len, vocab-size]
         target(torch.Tensor): [B, seq-len]
         op_type(str): the type of logprobs computation method, options are "torch", "flash_attn", "liger_kernel"
-            default is "torch"
+            default is "torch".
+            flash_attn calc in fp32, torch and liger_kernel calc in logits.dtype.
 
     Returns:
         logprobs(torch.Tensor): [B, seq-len]

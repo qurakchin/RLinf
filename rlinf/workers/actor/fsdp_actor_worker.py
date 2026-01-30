@@ -36,9 +36,9 @@ from rlinf.hybrid_engines.fsdp.fsdp_model_manager import (
     FSDPModelManager,
 )
 from rlinf.hybrid_engines.fsdp.utils import (
-    pack_fsdp,
+    pack_fsdp_input,
     prepare_pack_fsdp,
-    unpack_fsdp,
+    unpack_fsdp_logprobs,
 )
 from rlinf.models import get_model
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
@@ -51,6 +51,7 @@ from rlinf.utils.data_iter_utils import (
 from rlinf.utils.distributed import (
     RolloutDataBalance,
     all_reduce_dict,
+    all_reduce_int,
     masked_normalization,
 )
 from rlinf.utils.distributed import (
@@ -359,19 +360,6 @@ class FSDPActor(FSDPModelManager, Worker):
         )
         return batch, result
 
-    def all_reduce_dp_min(
-        self,
-        obj: int,
-    ):
-        obj_tensor = torch.tensor(
-            [obj], dtype=torch.long, device=torch.cuda.current_device()
-        )
-        torch.distributed.all_reduce(
-            obj_tensor,
-            torch.distributed.ReduceOp.MIN,
-        )
-        return obj_tensor.item()
-
     def get_dynamic_batch_as_much(
         self,
         input_channel: Channel,
@@ -408,12 +396,12 @@ class FSDPActor(FSDPModelManager, Worker):
                     unfinished_result = None
                 if time.time() >= time_until:
                     last_result_len = result_len
-                    result_len = self.all_reduce_dp_min(len(rollout_results))
+                    result_len = all_reduce_int(len(rollout_results))
                     if last_result_len < result_len:
                         time_until = time.time() + 0.1
             else:
                 last_result_len = result_len
-                result_len = self.all_reduce_dp_min(len(rollout_results))
+                result_len = all_reduce_int(len(rollout_results))
 
         batches = []
         for rollout_result in rollout_results:
@@ -488,7 +476,7 @@ class FSDPActor(FSDPModelManager, Worker):
             max_response_len = max_seq_len_unpack - max_prompt_len
             idx_starts, idx_ends = prepare_pack_fsdp(batch, max_prompt_len)
 
-            input_ids, position_ids, attention_mask = pack_fsdp(
+            input_ids, position_ids, attention_mask = pack_fsdp_input(
                 input_ids,
                 position_ids,
                 idx_starts=idx_starts,
@@ -517,7 +505,7 @@ class FSDPActor(FSDPModelManager, Worker):
                     op_type=self.entropy_op_type,
                 )
 
-            logprobs = unpack_fsdp(
+            logprobs = unpack_fsdp_logprobs(
                 logits,
                 input_ids,
                 idx_starts=idx_starts,
@@ -729,7 +717,7 @@ class FSDPActor(FSDPModelManager, Worker):
                 max_prompt_len = self.cfg.data.max_prompt_length
                 max_response_len = max_seq_len_unpack - max_prompt_len
                 idx_starts, idx_ends = prepare_pack_fsdp(m_batch, max_prompt_len)
-                input_ids, position_ids, attention_mask = pack_fsdp(
+                input_ids, position_ids, attention_mask = pack_fsdp_input(
                     input_ids,
                     position_ids,
                     idx_starts=idx_starts,
@@ -756,7 +744,7 @@ class FSDPActor(FSDPModelManager, Worker):
                         logits, target, op_type=self.entropy_op_type
                     )
 
-                logprobs = unpack_fsdp(
+                logprobs = unpack_fsdp_logprobs(
                     logits,
                     input_ids,
                     idx_starts=idx_starts,
