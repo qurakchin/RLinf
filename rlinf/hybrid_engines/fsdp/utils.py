@@ -596,6 +596,19 @@ def pack_sequences(
     max_seq_len: int,
     pad_val,
 ):
+    """Concatenate valid segments of multiple sequences into one contiguous sequence (no padding).
+
+    For each sample takes [idx_starts[i]:idx_ends[i]], concatenates in order to length max_seq_len,
+    pads at end with pad_val if needed. Used for efficient FSDP forward.
+
+    Args:
+        input_tensor: [B, seq_len], may contain padding.
+        idx_starts, idx_ends: Valid range per sample (length B); idx_ends is exclusive.
+        max_seq_len: Target packed length. pad_val: Fill value for padding.
+
+    Returns:
+        1D tensor of shape (max_seq_len). Use unsqueeze(0) for [1, max_seq_len].
+    """
     assert len(input_tensor.shape) == 2
     assert input_tensor.shape[0] == len(idx_starts) == len(idx_ends)
     assert sum(idx_ends) - sum(idx_starts) <= max_seq_len
@@ -623,6 +636,19 @@ def unpack_sequences(
     max_seq_len: int,
     pad_val,
 ):
+    """Restore a packed sequence from pack_sequences back to padded batch format.
+
+    Slices by idx_starts/idx_ends into B segments, places each at [idx_start, idx_end) per row,
+    fills the rest with pad_val. Same 2D layout as before packing for per-sample loss/metrics.
+
+    Args:
+        input_tensor: Packed sequence [1, packed_len].
+        idx_starts, idx_ends: Start/end (exclusive) in packed sequence per sample (length B).
+        max_seq_len: Sequence length per sample after unpacking. pad_val: Fill for non-valid positions.
+
+    Returns:
+        Tensor [B, max_seq_len]; valid content in [idx_start, idx_end), rest pad_val.
+    """
     assert len(input_tensor.shape) == 2
     assert input_tensor.shape[0] == 1
     assert len(idx_starts) == len(idx_ends)
@@ -667,12 +693,24 @@ def prepare_pack_fsdp(
     m_batch: dict,
     max_prompt_len,
 ):
+    """Compute segment indices for pack/unpack from batch prompt and response lengths.
+
+    Assumes each sample is left-aligned [prompt | response]. Uses prompt_lengths and
+    response_lengths to get [start, end) in the packed sequence per sample.
+
+    Args:
+        m_batch: Dict with "prompt_lengths" and "response_lengths", shape (B,) each.
+        max_prompt_len: Max prompt length in batch (shared left-padding width).
+
+    Returns:
+        idx_starts, idx_ends: Lists of length B; start and end (exclusive) of each sample in packed sequence.
+    """
     idx_starts = (max_prompt_len - m_batch["prompt_lengths"]).tolist()
     idx_ends = (max_prompt_len + m_batch["response_lengths"]).tolist()
     return idx_starts, idx_ends
 
 
-def pack_fsdp(
+def pack_fsdp_input(
     input_ids,
     position_ids,
     *,
@@ -681,6 +719,18 @@ def pack_fsdp(
     max_seq_len_pack,
     eos_token_id,
 ):
+    """Pack FSDP training input_ids and position_ids from [B, seq_len] to [1, max_seq_len_pack].
+
+    Uses pack_sequences to remove padding; sets attention_mask=None so flash-attn can derive
+    cu_seqlens from position_ids.
+
+    Args:
+        input_ids, position_ids: [B, seq_len]. idx_starts, idx_ends: From prepare_pack_fsdp.
+        max_seq_len_pack: Packed length. eos_token_id: Pad value for input_ids end.
+
+    Returns:
+        input_ids, position_ids: [1, max_seq_len_pack]. attention_mask: None.
+    """
     input_ids = pack_sequences(
         input_ids, idx_starts, idx_ends, max_seq_len_pack, eos_token_id
     ).unsqueeze(0)
@@ -693,7 +743,7 @@ def pack_fsdp(
     return input_ids, position_ids, attention_mask
 
 
-def unpack_fsdp(
+def unpack_fsdp_logprobs(
     logits,
     input_ids,
     *,
@@ -703,6 +753,19 @@ def unpack_fsdp(
     eos_token_id,
     compute_logprobs_fn,
 ):
+    """Compute logprobs from packed model output and unpack to per-sample [B, max_seq_len_unpack].
+
+    Builds response targets from input_ids (shift right + eos), calls compute_logprobs_fn(logits, responses),
+    then unpack_sequences with idx_starts/idx_ends. Non-valid positions are 0.
+
+    Args:
+        logits: Model logits in packed format. input_ids: Packed [1, packed_len], for building targets.
+        idx_starts, idx_ends: From prepare_pack_fsdp. max_seq_len_unpack: Seq length per sample after unpack.
+        eos_token_id: Appended when building targets. compute_logprobs_fn: (logits, response_ids) -> logprobs.
+
+    Returns:
+        Logprobs [B, max_seq_len_unpack]; valid positions = log prob, rest = 0.
+    """
     responses = torch.cat(
         [
             input_ids[:, 1:],
