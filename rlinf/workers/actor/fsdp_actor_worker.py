@@ -178,6 +178,9 @@ class FSDPActor(FSDPModelManager, Worker):
         self.enable_dp_load_balance = self.cfg.actor.get(
             "enable_dp_load_balance", False
         )
+        self.lr_sched_sync_with_optim = self.cfg.actor.get(
+            "lr_sched_sync_with_optim", True
+        )
         self.enable_dynamic_batch_size = cfg.runner.get(
             "enable_dynamic_batch_size", False
         )
@@ -454,18 +457,25 @@ class FSDPActor(FSDPModelManager, Worker):
             if self.is_optimizer_offloaded:
                 self.load_optimizer(self.device)
 
-    @torch.no_grad()
-    def inference_step(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
-        self.model.eval()
-        input_ids = batch["input_ids"]
-        attention_mask = batch["attention_mask"]
-        position_ids = batch["position_ids"]
+    def compute_logprobs(self, logits, target):
+        return compute_logprobs_from_logits(
+            logits,
+            target,
+            op_type=self.entropy_op_type,
+        )
+
+    def forward_batch(
+        self, m_batch: dict[str, torch.Tensor], calculate_entropy: bool = False
+    ) -> torch.Tensor:
+        input_ids = m_batch["input_ids"]
+        attention_mask = m_batch["attention_mask"]
+        position_ids = m_batch["position_ids"]
 
         multi_modal_inputs = {}
-        if "multi_modal_inputs" in batch.keys():
-            for key in batch["multi_modal_inputs"][0].keys():
+        if "multi_modal_inputs" in m_batch.keys():
+            for key in m_batch["multi_modal_inputs"][0].keys():
                 multi_modal_inputs[key] = torch.cat(
-                    [inputs[key] for inputs in batch["multi_modal_inputs"]],
+                    [inputs[key] for inputs in m_batch["multi_modal_inputs"]],
                     dim=0,
                 ).cuda()
 
@@ -474,7 +484,7 @@ class FSDPActor(FSDPModelManager, Worker):
             max_seq_len_unpack = self.cfg.actor.model.encoder_seq_length
             max_prompt_len = self.cfg.data.max_prompt_length
             max_response_len = max_seq_len_unpack - max_prompt_len
-            idx_starts, idx_ends = prepare_pack_fsdp(batch, max_prompt_len)
+            idx_starts, idx_ends = prepare_pack_fsdp(m_batch, max_prompt_len)
 
             input_ids, position_ids, attention_mask = pack_fsdp_input(
                 input_ids,
@@ -494,17 +504,9 @@ class FSDPActor(FSDPModelManager, Worker):
                 **multi_modal_inputs,
             )
 
+        logits: torch.Tensor = outputs.logits
+        logits.div_(self.cfg.algorithm.sampling_params.temperature)
         if self.enable_dynamic_batch_size:
-            logits: torch.Tensor = outputs.logits
-            logits = logits / self.cfg.algorithm.sampling_params.temperature
-
-            def compute_logprobs_fn(logits, target):
-                return compute_logprobs_from_logits(
-                    logits,
-                    target,
-                    op_type=self.entropy_op_type,
-                )
-
             logprobs = unpack_fsdp_logprobs(
                 logits,
                 input_ids,
@@ -512,18 +514,76 @@ class FSDPActor(FSDPModelManager, Worker):
                 idx_ends=idx_ends,
                 max_seq_len_unpack=max_seq_len_unpack,
                 eos_token_id=self.tokenizer.eos_token_id,
-                compute_logprobs_fn=compute_logprobs_fn,
+                compute_logprobs_fn=self.compute_logprobs,
             )
             logprobs = logprobs[:, -max_response_len:]
         else:
-            logits: torch.Tensor = outputs.logits[:, -self.response_len - 1 : -1, :]
-            logits = logits / self.cfg.algorithm.sampling_params.temperature
-
+            # (bsz, response_length, vocab_size)
+            logits = logits[:, -self.response_len - 1 : -1, :]
             responses = input_ids[:, -self.response_len :]
-            logprobs = compute_logprobs_from_logits(
-                logits=logits, target=responses, op_type=self.entropy_op_type
-            )
+            logprobs = self.compute_logprobs(logits, responses)
+        if calculate_entropy:
+            entropy = compute_entropy_from_logits(logits)
+            return logprobs, entropy
         return logprobs
+
+    def inference_step(
+        self,
+        batch: dict[str, torch.Tensor],
+        rollout_result: RolloutResult,
+        compute_ref_logprobs: bool,
+    ):
+        micro_batches_iter, _, dbs_indices = self._split_to_micro_batch(
+            batch,
+            self.enable_dynamic_batch_size,
+            max_tokens_per_mbs=self.max_tokens_per_mbs,
+            split_num=rollout_result.num_sequence
+            // self.cfg.algorithm.logprob_forward_micro_batch_size,
+        )
+        if self.enable_dynamic_batch_size:
+            indices = sum(dbs_indices, [])
+            revert_indices = torch.tensor(
+                get_reverse_idx(indices),
+                dtype=torch.long,
+            )
+        micro_batches = list(micro_batches_iter)
+
+        prev_logprobs, ref_logprobs = None, None
+
+        # Prev logprobs
+        prev_logprobs = torch.cat(
+            [self.forward_batch(batch) for batch in micro_batches]
+        ).cpu()
+
+        if self.enable_dynamic_batch_size:
+            assert len(indices) == prev_logprobs.size(0), (
+                f"Dynamic batch size indices length {len(indices)} does not equal "
+                f"output length {prev_logprobs.size(0)}"
+            )
+            prev_logprobs = prev_logprobs[revert_indices]
+
+        # Ref logprobs
+        if compute_ref_logprobs:
+            assert self.ref_policy_state_dict is not None, (
+                "Reference policy state dict is None but compute_ref_logprobs is True"
+            )
+            with cpu_weight_swap(
+                self.model,
+                self.ref_policy_state_dict,
+                self.offload_model_buffer,
+            ):
+                ref_logprobs = torch.cat(
+                    [self.forward_batch(batch) for batch in micro_batches]
+                ).cpu()
+
+                if self.enable_dynamic_batch_size:
+                    assert len(indices) == ref_logprobs.size(0), (
+                        f"Dynamic batch size indices length {len(indices)} does not equal "
+                        f"output length {ref_logprobs.size(0)}"
+                    )
+                    ref_logprobs = ref_logprobs[revert_indices]
+
+        return prev_logprobs, ref_logprobs
 
     def run_inference(
         self,
@@ -574,35 +634,13 @@ class FSDPActor(FSDPModelManager, Worker):
                 f"[dynamic inference rank-{self._rank}] inference result_len={result_len}, total_result_len={total_result_len}/{total_result_len_per_dp}"
             )
             self._load_weight_and_optimizer()
-
-            micro_batches_iter, _, dbs_indices = self._split_to_micro_batch(
-                batch,
-                self.enable_dynamic_batch_size,
-                max_tokens_per_mbs=self.max_tokens_per_mbs,
-                split_num=rollout_result.num_sequence
-                // self.cfg.algorithm.logprob_forward_micro_batch_size,
-            )
-            if self.enable_dynamic_batch_size:
-                indices = sum(dbs_indices, [])
-                revert_indices = torch.tensor(
-                    get_reverse_idx(indices),
-                    dtype=torch.long,
-                )
-            micro_batches = list(micro_batches_iter)
+            self.model.eval()
 
             with self.worker_timer():
-                # Prev logprobs
-                prev_logprobs_list = []
-                for micro_batch in micro_batches:
-                    prev_logprobs_list.append(self.inference_step(micro_batch).cpu())
-                prev_logprobs = torch.cat(prev_logprobs_list)
-
-                if self.enable_dynamic_batch_size:
-                    assert len(indices) == prev_logprobs.size(0), (
-                        f"Dynamic batch size indices length {len(indices)} does not equal "
-                        f"output length {prev_logprobs.size(0)}"
+                with torch.no_grad():
+                    prev_logprobs, ref_logprobs = self.inference_step(
+                        batch, rollout_result, compute_ref_logprobs
                     )
-                    prev_logprobs = prev_logprobs[revert_indices]
 
                 if rollout_result.rollout_logprobs is not None:
                     # Rollout has returned logprobs, store the recomputed logprobs in recompute_prev_logprobs
@@ -613,29 +651,8 @@ class FSDPActor(FSDPModelManager, Worker):
 
                 # Ref logprobs
                 if compute_ref_logprobs:
-                    assert self.ref_policy_state_dict is not None, (
-                        "Reference policy state dict is None but compute_ref_logprobs is True"
-                    )
-                    with cpu_weight_swap(
-                        self.model,
-                        self.ref_policy_state_dict,
-                        self.offload_model_buffer,
-                    ):
-                        ref_logprobs_list = []
-                        for micro_batch in micro_batches:
-                            ref_logprobs_list.append(
-                                self.inference_step(micro_batch).cpu()
-                            )
-                        ref_logprobs = torch.cat(ref_logprobs_list)
+                    rollout_result.ref_logprobs = ref_logprobs
 
-                        if self.enable_dynamic_batch_size:
-                            assert len(indices) == ref_logprobs.size(0), (
-                                f"Dynamic batch size indices length {len(indices)} does not equal "
-                                f"output length {ref_logprobs.size(0)}"
-                            )
-                            ref_logprobs = ref_logprobs[revert_indices]
-
-                        rollout_result.ref_logprobs = ref_logprobs
             if self.is_pipeline:
                 # for pipeline mode, send after inference to reduce latency.
                 # should do split to ensure actor won't get too much batches.
@@ -693,17 +710,10 @@ class FSDPActor(FSDPModelManager, Worker):
             for k, v in m_batch.items():
                 m_batch[k] = v.cuda() if isinstance(v, torch.Tensor) else v
 
-            multi_modal_inputs = {}
-            if "multi_modal_inputs" in m_batch.keys():
-                for key in m_batch["multi_modal_inputs"][0].keys():
-                    multi_modal_inputs[key] = torch.cat(
-                        [inputs[key] for inputs in m_batch["multi_modal_inputs"]],
-                        dim=0,
-                    ).cuda()
+            # batch for forward
+            logprobs, entropy = self.forward_batch(m_batch, True)
 
-            input_ids = m_batch["input_ids"]
-            attention_mask = m_batch["attention_mask"]
-            position_ids = m_batch["position_ids"]
+            # batch for backward
             prev_logprobs = m_batch["prev_logprobs"]
             advantages = m_batch["advantages"]
             ref_logprobs = None
@@ -711,57 +721,6 @@ class FSDPActor(FSDPModelManager, Worker):
                 ref_logprobs = m_batch["ref_logprobs"]
 
             loss_mask = m_batch["response_mask"][:, -self.response_len :]
-            if self.enable_dynamic_batch_size:
-                max_seq_len_pack = self.max_tokens_per_mbs
-                max_seq_len_unpack = self.cfg.actor.model.encoder_seq_length
-                max_prompt_len = self.cfg.data.max_prompt_length
-                max_response_len = max_seq_len_unpack - max_prompt_len
-                idx_starts, idx_ends = prepare_pack_fsdp(m_batch, max_prompt_len)
-                input_ids, position_ids, attention_mask = pack_fsdp_input(
-                    input_ids,
-                    position_ids,
-                    idx_starts=idx_starts,
-                    idx_ends=idx_ends,
-                    max_seq_len_pack=max_seq_len_pack,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                )
-
-            with self.amp_context:
-                output = self.model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    **multi_modal_inputs,
-                    use_cache=False,
-                )
-
-            logits: torch.Tensor = output.logits
-            logits.div_(self.cfg.algorithm.sampling_params.temperature)
-            if self.enable_dynamic_batch_size:
-
-                def compute_logprobs_fn(logits, target):
-                    return compute_logprobs_from_logits(
-                        logits, target, op_type=self.entropy_op_type
-                    )
-
-                logprobs = unpack_fsdp_logprobs(
-                    logits,
-                    input_ids,
-                    idx_starts=idx_starts,
-                    idx_ends=idx_ends,
-                    max_seq_len_unpack=max_seq_len_unpack,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    compute_logprobs_fn=compute_logprobs_fn,
-                )
-                logprobs = logprobs[:, -max_response_len:]
-            else:
-                logits = logits[
-                    :, -self.response_len - 1 : -1, :
-                ]  # (bsz, response_length, vocab_size)
-                responses = input_ids[:, -self.response_len :]
-                logprobs = compute_logprobs_from_logits(
-                    logits, responses, op_type=self.entropy_op_type
-                )
 
             clip_ratio = self.cfg.algorithm.ratio_clip_eps
             clip_ratio_low = self.cfg.algorithm.get("clip_ratio_low", None)
@@ -797,10 +756,6 @@ class FSDPActor(FSDPModelManager, Worker):
 
             entropy_loss = torch.tensor(0.0, device=torch.cuda.current_device())
             if self.calculate_entropy:
-                entropy = compute_entropy_from_logits(
-                    logits,
-                )
-
                 entropy_loss = self.loss_agg_func(entropy, mask=loss_mask)
                 if self.calculate_entropy_loss:
                     loss = loss - self.cfg.algorithm.entropy_bonus * entropy_loss
@@ -830,8 +785,8 @@ class FSDPActor(FSDPModelManager, Worker):
 
         grad_norm, lr_list = self.optimizer_step()
 
-        # put lr scheduler step here
-        self.lr_scheduler.step()
+        if self.lr_sched_sync_with_optim:
+            self.lr_scheduler.step()
 
         # aggregate metrics across micro-batches
         mean_metric_dict = {
@@ -875,6 +830,8 @@ class FSDPActor(FSDPModelManager, Worker):
             for _ in range(self.n_mini_batches):
                 mean_metric_dict = self.training_step(batch=train_batch_iterator)
                 training_metrics_list.append(mean_metric_dict)
+        if not self.lr_sched_sync_with_optim:
+            self.lr_scheduler.step()
 
         # Rollout metrics
         batch = train_batch_iterator.get_all_batches()
