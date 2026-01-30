@@ -524,6 +524,10 @@ class FSDPActor(FSDPModelManager, Worker):
             logprobs = self.compute_logprobs(logits, responses)
         if calculate_entropy:
             entropy = compute_entropy_from_logits(logits)
+            if self.enable_dynamic_batch_size:
+                entropy = unpack_sequences(
+                    entropy, idx_starts, idx_ends, max_seq_len_unpack, pad_val=0
+                )
             return logprobs, entropy
         return logprobs
 
