@@ -553,7 +553,8 @@ def get_iterator_dynamic(
                 ):
                     valid_max_token = 0
                     print(
-                        "error 1! max len > max_tokens_per_mbs! "
+                        "[Warning] get_iterator_dynamic: "
+                        f"max len > max_tokens_per_mbs in dict batch! "
                         f"prompt_lengths: {curr_batch['prompt_lengths'].tolist()}, "
                         f"response_lengths: {curr_batch['response_lengths'].tolist()}, "
                         f"max_tokens_per_mbs: {max_tokens_per_mbs}"
@@ -629,7 +630,8 @@ def get_iterator_dynamic(
                 ):
                     valid_max_token = 0
                     print(
-                        "error 2! max len > max_tokens_per_mbs! "
+                        "[Warning] get_iterator_dynamic: "
+                        f"max len > max_tokens_per_mbs in iterator batch! "
                         f"prompt_lengths: {curr_batch['prompt_lengths'].tolist()}, "
                         f"response_lengths: {curr_batch['response_lengths'].tolist()}, "
                         f"max_tokens_per_mbs: {max_tokens_per_mbs}"
