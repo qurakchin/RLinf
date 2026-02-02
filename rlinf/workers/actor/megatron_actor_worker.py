@@ -368,14 +368,15 @@ class MegatronActor(MegatronModelManager, Worker):
                         last_result_len = result_len
                         result_len = all_reduce_int(
                             len(rollout_results),
-                            parallel_state.get_data_parallel_group(),
+                            group=parallel_state.get_data_parallel_group(),
                         )
                         if last_result_len < result_len:
                             time_until = time.time() + 0.1
                 else:
                     last_result_len = result_len
                     result_len = all_reduce_int(
-                        len(rollout_results), parallel_state.get_data_parallel_group()
+                        len(rollout_results),
+                        group=parallel_state.get_data_parallel_group(),
                     )
 
         # broadcast to other ranks
