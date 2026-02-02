@@ -330,7 +330,9 @@ class FSDPActor(FSDPModelManager, Worker):
             model_bucket_list = self.divide_model_to_bucket(
                 self.rollout_state_dict, has_visual
             )
-            print(f"length of model_bucket_list: {len(model_bucket_list)}")
+            self.log_debug(
+                f"[sync_model_to_rollout rank-{self._rank}] length of model_bucket_list: {len(model_bucket_list)}"
+            )
             for bucket_idx, model_bucket in enumerate(model_bucket_list):
                 buffer = {}
                 for k, v in model_bucket.items():
@@ -528,7 +530,7 @@ class FSDPActor(FSDPModelManager, Worker):
             if self.enable_dynamic_batch_size:
                 entropy = unpack_sequences(
                     entropy, idx_starts, idx_ends, max_seq_len_unpack, pad_val=0
-                )
+                )[:, -self.response_len :]
             return logprobs, entropy
         return logprobs
 
@@ -835,8 +837,8 @@ class FSDPActor(FSDPModelManager, Worker):
             for _ in range(self.n_mini_batches):
                 mean_metric_dict = self.training_step(batch=train_batch_iterator)
                 training_metrics_list.append(mean_metric_dict)
-        if not self.lr_sched_sync_with_optim:
-            self.lr_scheduler.step()
+            if not self.lr_sched_sync_with_optim:
+                self.lr_scheduler.step()
 
         # Rollout metrics
         batch = train_batch_iterator.get_all_batches()
@@ -912,6 +914,8 @@ class FSDPActor(FSDPModelManager, Worker):
             for mini_batch in mini_batches:
                 mean_metric_dict = self.training_step(batch=mini_batch)
                 training_metrics_list.append(mean_metric_dict)
+            if not self.lr_sched_sync_with_optim:
+                self.lr_scheduler.step()
 
         # Rollout metrics
         rollout_metrics, _, _ = compute_math_rollout_metrics(
