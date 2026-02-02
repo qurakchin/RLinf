@@ -15,12 +15,13 @@
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Union
 
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizer
 
 from rlinf.data.datasets.item import DatasetItem
 from rlinf.data.utils import batch_pad_to_fixed_len
@@ -31,7 +32,7 @@ class MathDataset(Dataset):
         self,
         data_paths: Union[str, list[str]],
         config: DictConfig,
-        tokenizer: AutoTokenizer,
+        tokenizer: PreTrainedTokenizer,
     ):
         """
         Initialize the MathDataset.
@@ -75,29 +76,43 @@ class MathDataset(Dataset):
         self.prompt_key = config.data.prompt_key
         self.answer_key = config.data.answer_key
         self.apply_chat_template = config.data.apply_chat_template
+        self.filter_prompt_by_length = config.data.get("filter_prompt_by_length", False)
+        self.process_workers = config.data.get("process_workers", 16)
 
         self.data = self._load_data()
-        if config.data.get("filter_prompt_by_length", False):
+        if self.apply_chat_template or self.filter_prompt_by_length:
             total = len(self.data)
-            filtered = []
-            failed = 0
+            batch_size = 256
+            batches = [
+                self.data[i : i + batch_size]
+                for i in range((total + batch_size - 1) // batch_size)
+            ]
+            self.data = []
+            all_failed = 0
+            if self.process_workers > 1:
+                with ThreadPoolExecutor(self.process_workers) as pool:
+                    handles = [
+                        pool.submit(self._load_post_process, batch) for batch in batches
+                    ]
+                    for handle in handles:
+                        result, failed = handle.result()
+                        self.data.extend(result)
+                        all_failed += failed
+            else:
+                for batch in batches:
+                    assert tokenizer.is_fast
+                    result, failed = self._load_post_process(batch)
+                    result, failed = self._load_post_process(
+                        batch,
+                        self.tokenizer,
+                        self.prompt_key,
+                        self.apply_chat_template,
+                        self.filter_prompt_by_length,
+                        self.max_prompt_length,
+                    )
+                    self.data.extend(result)
+                    all_failed += failed
 
-            for item in self.data:
-                try:
-                    prompt = item[self.prompt_key]
-                    if self.apply_chat_template:
-                        prompt = self.tokenizer.apply_chat_template(
-                            prompt, tokenize=False, add_generation_prompt=True
-                        )
-                        # save the convert data
-                        item[self.prompt_key] = prompt
-                    _, L = self.encode(prompt)
-                    if L <= self.max_prompt_length:
-                        filtered.append(item)
-                except Exception:
-                    failed += 1
-
-            self.data = filtered
             assert len(self.data) > 0, (
                 f"No samples found within max_prompt_length={self.max_prompt_length}. "
                 "Please check your dataset or increase max_prompt_length."
@@ -108,6 +123,31 @@ class MathDataset(Dataset):
                     f"{failed} samples were skipped due to format issues "
                     f"(kept {len(self.data)} / {total})."
                 )
+
+    def _load_post_process(self, batch):
+        result = batch
+        failed = 0
+        try:
+            prompts = (item[self.prompt_key] for item in batch)
+            if self.apply_chat_template:
+                prompts = self.tokenizer.self.apply_chat_template(
+                    prompts, tokenize=False, add_generation_prompt=True
+                )
+                for item, prompt in zip(batch, prompts):
+                    item[self.prompt_key] = prompt
+            if self.filter_prompt_by_length:
+                prompt_ids = self.tokenizer.batch_encode_plus(list(prompts))[
+                    "input_ids"
+                ]
+                result = []
+                for item, prompt_id in zip(batch, prompt_ids):
+                    prompt_length = len(prompt_id)
+                    if prompt_length <= self.max_prompt_length:
+                        result.append(item)
+        except Exception:
+            result = []
+            failed += len(batch)
+        return result, failed
 
     def _load_data(self) -> list[Any]:
         """
