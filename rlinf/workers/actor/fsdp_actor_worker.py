@@ -39,6 +39,7 @@ from rlinf.hybrid_engines.fsdp.utils import (
     pack_fsdp_input,
     prepare_pack_fsdp,
     unpack_fsdp_logprobs,
+    unpack_sequences,
 )
 from rlinf.models import get_model
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
