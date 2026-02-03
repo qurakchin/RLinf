@@ -80,7 +80,9 @@ class MathDataset(Dataset):
         self.process_workers = config.data.get("process_workers", 16)
         assert self.process_workers > 0, "data.process_workers must be greater than 0"
         self.process_batch_size = config.data.get("process_batch_size", 256)
-        assert self.process_batch_size > 0, "data.process_batch_size must be greater than 0"
+        assert self.process_batch_size > 0, (
+            "data.process_batch_size must be greater than 0"
+        )
 
         self.data = self._load_data()
         if self.apply_chat_template or self.filter_prompt_by_length:
