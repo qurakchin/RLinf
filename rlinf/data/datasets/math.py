@@ -78,11 +78,14 @@ class MathDataset(Dataset):
         self.apply_chat_template = config.data.apply_chat_template
         self.filter_prompt_by_length = config.data.get("filter_prompt_by_length", False)
         self.process_workers = config.data.get("process_workers", 16)
+        assert self.process_workers > 0, "data.process_workers must be greater than 0"
+        self.process_batch_size = config.data.get("process_batch_size", 256)
+        assert self.process_batch_size > 0, "data.process_batch_size must be greater than 0"
 
         self.data = self._load_data()
         if self.apply_chat_template or self.filter_prompt_by_length:
             total = len(self.data)
-            batch_size = 256
+            batch_size = self.process_batch_size
             batches = [
                 self.data[i : i + batch_size]
                 for i in range((total + batch_size - 1) // batch_size)
