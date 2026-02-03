@@ -124,7 +124,10 @@ def process_nested_dict_for_train(nested_dict, shuffle_id):
 
 class FSDPActor(FSDPModelManager, Worker):
     def __init__(
-        self, cfg: DictConfig, placement: ModelParallelComponentPlacement
+        self,
+        cfg: DictConfig,
+        placement: ModelParallelComponentPlacement,
+        cfg_fsdp: Optional[DictConfig] = None,
     ) -> None:
         """
         FSDPActor worker used to train the model with data from rollout workers.
@@ -133,8 +136,10 @@ class FSDPActor(FSDPModelManager, Worker):
             cfg (DictConfig): The global yaml configuration.
             placement (ModelParallelComponentPlacement): The accelerator placement for actor worker.
         """
+        if cfg_fsdp is None:
+            cfg_fsdp = cfg.actor
         Worker.__init__(self)
-        super().__init__(cfg.actor, self._world_size, self._rank)
+        super().__init__(cfg_fsdp, self._world_size, self._rank)
 
         self.cfg = cfg
 
@@ -147,6 +152,8 @@ class FSDPActor(FSDPModelManager, Worker):
         )
         self.kl_beta = self.cfg.algorithm.kl_beta
         self.kl_penalty_type = self.cfg.algorithm.kl_penalty_type
+        self.reinpp_kl_beta = cfg.algorithm.get("reinpp_kl_beta", 0.0)
+        self.combine_reference_model = cfg.actor.get("combine_reference_model", True)
 
         self.total_batch_size_per_dp = (
             self.cfg.data.rollout_batch_size
@@ -205,9 +212,9 @@ class FSDPActor(FSDPModelManager, Worker):
         doing a handshake with inference workers.
         """
         self.setup_model_and_optimizer()
-        if self.cfg.algorithm.kl_beta > 0 and self.cfg.actor.get(
-            "combine_reference_model", True
-        ):
+        if (
+            self.kl_beta > 0 or self.reinpp_kl_beta > 0
+        ) and self.combine_reference_model:
             self.ref_policy_state_dict = retrieve_model_state_dict_in_cpu(self.model)
             self.offload_model_buffer = {}
 
@@ -323,7 +330,7 @@ class FSDPActor(FSDPModelManager, Worker):
         )
 
         has_visual = any("visual." in k for k in self.rollout_state_dict.keys())
-        if len(self._weight_dst_rank_in_rollout) > 0:
+        if self._weight_dst_rank_in_rollout is not None:
             rollout_dtype = None
             if self._cfg.get("sync_precision", None) is not None:
                 rollout_dtype = torch_dtype_from_precision(self._cfg.sync_precision)
@@ -345,12 +352,19 @@ class FSDPActor(FSDPModelManager, Worker):
                     buffer[k] = v
                 if bucket_idx == 0:
                     buffer["bucket_length"] = len(model_bucket_list)
-                self.send(
-                    buffer,
-                    self._rollout_group_name,
-                    self._weight_dst_rank_in_rollout,
-                    async_op=False,
-                )
+                if not self.is_pipeline:
+                    self.send(
+                        buffer,
+                        self._rollout_group_name,
+                        self._weight_dst_rank_in_rollout,
+                    )
+                else:
+                    for weight_dst_rank in self._weight_dst_rank_in_rollout:
+                        self.send(
+                            buffer,
+                            self._rollout_group_name,
+                            weight_dst_rank,
+                        )
         if self.enable_offload and not self.is_weight_offloaded:
             self.offload_param_and_grad()
 
@@ -833,7 +847,7 @@ class FSDPActor(FSDPModelManager, Worker):
 
         self._load_weight_and_optimizer()
         training_metrics_list = []
-        with self.worker_timer():
+        with self.worker_timer("run_training"):
             for _ in range(self.n_mini_batches):
                 mean_metric_dict = self.training_step(batch=train_batch_iterator)
                 training_metrics_list.append(mean_metric_dict)
@@ -940,7 +954,7 @@ class FSDPActor(FSDPModelManager, Worker):
                     rewards=batch["rewards"].cuda(),
                     loss_mask=mask.cuda(),
                     group_size=self.cfg.algorithm.group_size,
-                    kl_beta=self.cfg.algorithm.get("reinpp_kl_beta", 0.0),
+                    kl_beta=self.reinpp_kl_beta,
                     kl_penalty_type=self.kl_penalty_type,
                     logprob=batch["prev_logprobs"].cuda()
                     if "prev_logprobs" in batch
