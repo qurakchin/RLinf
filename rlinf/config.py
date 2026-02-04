@@ -87,7 +87,9 @@ SUPPORTED_TRAINING_BACKENDS = ["megatron", "fsdp"]
 __all__ = ["build_config"]
 
 
-def torch_dtype_from_precision(precision: Union[int, str]) -> torch.dtype:
+def torch_dtype_from_precision(
+    precision: Union[int, str, None],
+) -> Optional[torch.dtype]:
     if precision in ["bf16", "bf16-mixed"]:
         return torch.bfloat16
     elif precision in [16, "16", "fp16", "16-mixed"]:
@@ -304,9 +306,18 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
 
 def validate_fsdp_cfg(cfg: DictConfig, resume_dir: Optional[str] = None) -> DictConfig:
     def validate_amp_cfg(config: DictConfig) -> DictConfig:
+        use_fsdp_mixed_precision = not (
+            mixed_precision_config.param_dtype is None
+            and mixed_precision_config.reduce_dtype is None
+            and mixed_precision_config.buffer_dtype is None
+        )
         if "amp" not in config:
             config.amp = {}
         config.amp.enabled = config.amp.get("enabled", False)
+        if config.amp.enabled and use_fsdp_mixed_precision:
+            assert False, (
+                "amp autocast should not be enabled when fsdp mixed_precision is enabled"
+            )
         config.amp.precision = config.amp.get("precision", "bf16")
         assert config.amp.precision in ["fp16", "bf16", "fp32"], (
             "fsdp.amp.precision must be one of ['fp16', 'bf16', 'fp32']"
@@ -335,7 +346,6 @@ def validate_fsdp_cfg(cfg: DictConfig, resume_dir: Optional[str] = None) -> Dict
         cfg.fsdp_config.use_liger_kernel = cfg.fsdp_config.get(
             "use_liger_kernel", False
         )
-        cfg.fsdp_config = validate_amp_cfg(cfg.fsdp_config)
 
         cfg.fsdp_config.cpu_offload = cfg.fsdp_config.get("cpu_offload", False)
         cfg.fsdp_config.offload_pin_memory = cfg.fsdp_config.get(
@@ -364,14 +374,15 @@ def validate_fsdp_cfg(cfg: DictConfig, resume_dir: Optional[str] = None) -> Dict
 
         mixed_precision_config = cfg.fsdp_config.mixed_precision
         mixed_precision_config.param_dtype = mixed_precision_config.get(
-            "param_dtype", "bf16"
+            "param_dtype", None
         )
         mixed_precision_config.reduce_dtype = mixed_precision_config.get(
-            "reduce_dtype", "bf16"
+            "reduce_dtype", None
         )
         mixed_precision_config.buffer_dtype = mixed_precision_config.get(
-            "buffer_dtype", "fp32"
+            "buffer_dtype", None
         )
+        cfg.fsdp_config = validate_amp_cfg(cfg.fsdp_config)
 
     return cfg
 
@@ -544,6 +555,18 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
             "use_tokenizer_model_from_checkpoint_args", False
         )
 
+        # cfg.model
+        assert (
+            cfg.model.get("precision", None) is not None
+            and torch_dtype_from_precision(cfg.model.precision) is not None
+        ), "model.precision is required"
+        if cfg.model.get("mix_precision", None) is not None:
+            assert torch_dtype_from_precision(cfg.model.mix_precision) is not None(
+                "model.precision is required"
+            )
+        else:
+            cfg.model.mix_precision = "fp32"
+
         cfg.model.tensor_model_parallel_size = cfg.model.get(
             "tensor_model_parallel_size", 1
         )
@@ -606,12 +629,15 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.model.variable_seq_lengths = cfg.model.get("variable_seq_lengths", True)
         cfg.model.add_bias_linear = cfg.model.get("add_bias_linear", False)
 
-        cfg.optim.fp16 = (
-            torch_dtype_from_precision(cfg.model.precision) == torch.float16
-        )
-        cfg.optim.bf16 = (
-            torch_dtype_from_precision(cfg.model.precision) == torch.bfloat16
-        )
+        # optimizer config
+        if cfg.optim.get("fp16", None) is None:
+            cfg.optim.fp16 = (
+                torch_dtype_from_precision(cfg.model.precision) == torch.float16
+            )
+        if cfg.optim.get("bf16", None) is None:
+            cfg.optim.bf16 = (
+                torch_dtype_from_precision(cfg.model.precision) == torch.bfloat16
+            )
         cfg.optim.weight_decay = cfg.optim.get("weight_decay", 0.01)
         cfg.optim.overlap_param_gather_with_optimizer_step = cfg.optim.get(
             "overlap_param_gather_with_optimizer_step", False
