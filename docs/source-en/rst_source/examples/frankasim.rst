@@ -128,6 +128,38 @@ Option 2: Custom environment
    bash requirements/install.sh embodied --model openvla --env frankasim
    source .venv/bin/activate
 
+Model Download
+--------------
+
+If you are training the CNN policy (skip this section for the MLP policy), you need to first download the ResNet checkpoint we provided.
+
+**ResNet Checkpoint Download**
+
+.. code:: bash
+
+   # Download the ResNet checkpoint (choose either method)
+   # Method 1: Using git clone
+   git lfs install
+   git clone https://huggingface.co/RLinf/RLinf-ResNet10-pretrained
+
+   # Method 2: Using huggingface-hub
+   # For mainland China users, you can use the following for better download speed:
+   # export HF_ENDPOINT=https://hf-mirror.com
+   pip install huggingface-hub
+   hf download RLinf/RLinf-ResNet10-pretrained --local-dir RLinf-ResNet10-pretrained
+
+After downloading, make sure the `model_path` in the config yaml points to this directory. 
+Update ``actor.model.model_path`` and ``rollout.model.model_path`` to the path of the model directory as follows.
+
+.. code-block:: yaml
+
+   rollout:
+      model:
+         model_path: Pathto/RLinf/RLinf-ResNet10-pretrained
+   actor:
+      model:
+         model_path: Pathto/RLinf/RLinf-ResNet10-pretrained
+
 Running the Script
 -------------------
 
