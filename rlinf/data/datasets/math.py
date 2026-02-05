@@ -86,56 +86,57 @@ class MathDataset(Dataset):
 
         self.data = self._load_data()
         if self.apply_chat_template or self.filter_prompt_by_length:
-            total = len(self.data)
-            batch_size = self.process_batch_size
-            batches = [
-                self.data[i : i + batch_size]
-                for i in range((total + batch_size - 1) // batch_size)
-            ]
-            self.data = []
-            all_failed = 0
-            if self.process_workers > 1:
-                with ThreadPoolExecutor(self.process_workers) as pool:
-                    handles = [
-                        pool.submit(self._load_post_process, batch) for batch in batches
-                    ]
-                    for handle in handles:
-                        result, failed = handle.result()
-                        self.data.extend(result)
-                        all_failed += failed
-            else:
-                for batch in batches:
-                    assert tokenizer.is_fast
-                    result, failed = self._load_post_process(batch)
-                    result, failed = self._load_post_process(
-                        batch,
-                        self.tokenizer,
-                        self.prompt_key,
-                        self.apply_chat_template,
-                        self.filter_prompt_by_length,
-                        self.max_prompt_length,
-                    )
-                    self.data.extend(result)
-                    all_failed += failed
-
-            assert len(self.data) > 0, (
-                f"No samples found within max_prompt_length={self.max_prompt_length}. "
-                "Please check your dataset or increase max_prompt_length."
+            if not self.tokenizer.is_fast:
+                logging.warning(
+                    "[MathDataset] self.tokenizer.is_fast is False. use fast implement to speedup."
+                )
+            self.data = self.load_post_process(
+                self.data, self.process_workers, self.process_batch_size
             )
 
-            if failed > 0:
-                logging.warning(
-                    f"{failed} samples were skipped due to format issues "
-                    f"(kept {len(self.data)} / {total})."
-                )
+    def load_post_process(self, data, process_workers, batch_size):
+        total = len(data)
+        batches = [
+            data[i * batch_size : (i + 1) * batch_size]
+            for i in range((total + batch_size - 1) // batch_size)
+        ]
+        results = []
+        all_failed = 0
+        if process_workers > 1:
+            with ThreadPoolExecutor(process_workers) as pool:
+                handles = [
+                    pool.submit(self._load_post_process_batch, batch)
+                    for batch in batches
+                ]
+                for handle in handles:
+                    result, failed = handle.result()
+                    results.extend(result)
+                    all_failed += failed
+        else:
+            for batch in batches:
+                result, failed = self._load_post_process_batch(batch)
+                results.extend(result)
+                all_failed += failed
 
-    def _load_post_process(self, batch):
+        assert len(results) > 0, (
+            f"No samples found within max_prompt_length={self.max_prompt_length}. "
+            "Please check your dataset or increase max_prompt_length."
+        )
+
+        if failed > 0:
+            logging.warning(
+                f"{failed} samples were skipped due to format issues "
+                f"(kept {len(results)} / {total})."
+            )
+        return results
+
+    def _load_post_process_batch(self, batch):
         result = batch
         failed = 0
         try:
             prompts = (item[self.prompt_key] for item in batch)
             if self.apply_chat_template:
-                prompts = self.tokenizer.self.apply_chat_template(
+                prompts = self.tokenizer.apply_chat_template(
                     prompts, tokenize=False, add_generation_prompt=True
                 )
                 for item, prompt in zip(batch, prompts):
