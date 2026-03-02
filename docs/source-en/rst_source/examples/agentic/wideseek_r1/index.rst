@@ -3,27 +3,32 @@
 WideSeek-R1
 ===========
 
-Overview
---------
-
 WideSeek-R1 is a lead-agent and subagent framework trained with multi-agent
 reinforcement learning (MARL) for broad information-seeking tasks. It combines
-scalable orchestration with parallel execution by using a shared LLM, isolated
-contexts, and specialized tools. On the WideSearch benchmark, WideSeek-R1-4B
-achieves an item F1 score of 40.0%, which is comparable to single-agent
-DeepSeek-R1-671B, while continuing to improve as the number of parallel
-subagents increases.
+scalable orchestration and parallel execution through a shared LLM, isolated
+agent contexts, and specialized tools.
 
-For the full method, experiments, and results, see the
-:doc:`WideSeek-R1 publication <../../../publications/wideseek_r1>`.
+On the WideSearch benchmark, WideSeek-R1-4B reaches an item F1 score of
+``40.0%``. This is comparable to single-agent DeepSeek-R1-671B while continuing
+to improve as the number of parallel subagents increases.
+
+For the full method and results, see the
+:doc:`WideSeek-R1 publication <../../../publications/wideseek_r1>`, the
+`project page <https://wideseek-r1.github.io>`__, the
+`paper on arXiv <https://arxiv.org/abs/2602.04634>`__, and the
+`example code in RLinf <https://github.com/RLinf/RLinf/tree/main/examples/wideseek_r1>`__.
+
+.. contents::
+   :depth: 2
+   :local:
 
 Installation
 ------------
 
-For general environment setup, see the RLinf
+For the base environment, follow the RLinf
 :doc:`installation guide <../../../start/installation>`.
 
-We recommend using the prebuilt Docker image:
+We recommend the prebuilt Docker image:
 
 .. code-block:: bash
 
@@ -35,48 +40,69 @@ If you prefer a local environment, install the agentic stack:
 
    bash requirements/install.sh agentic
 
-Tool Setup
-----------
+Tool Backends
+-------------
 
 WideSeek-R1 supports two tool backends:
 
-- :ref:`wideseek-r1-offline-tools` for standard training and QA-style evaluation.
+- :ref:`wideseek-r1-offline-tools` for training and standard QA evaluation.
 - :ref:`wideseek-r1-online-tools` for WideSearch evaluation.
 
-For complete setup instructions, see :doc:`Tool Setup <tools>`.
+See :doc:`Tool Setup <tools>` for the full configuration workflow.
 
-Run the Script
---------------
+Quick Start
+-----------
+
+Before running either training or evaluation, start the judge model server.
+WideSeek-R1 uses an LLM judge to provide more reliable feedback than exact-match
+scoring alone.
 
 Judge Model
 ~~~~~~~~~~~
 
-Our default setup uses ``Qwen3-30B-A3B-Instruct-2507`` as the LLM judge.
-Download the model from
-`Hugging Face <https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507>`__,
-then update the model path in ``examples/wideseek_r1/judge_llm.sh`` if needed.
+The default setup uses
+`Qwen3-30B-A3B-Instruct-2507 <https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507>`__
+as the judge model.
 
-Start the judge server with:
-
-.. code-block:: bash
-
-   bash examples/wideseek_r1/judge_llm.sh
-
-Training
-~~~~~~~~
-
-Before training, review the configuration file
-``examples/wideseek_r1/config/train_mas_qwen3-4b_hybrid.yaml`` and update the
-model, data, output, and tool-related paths for your environment.
-
-Then launch the main experiment:
+Start the judge server with SGLang:
 
 .. code-block:: bash
 
-   bash examples/wideseek_r1/run_train.sh train_mas_qwen3-4b_hybrid
+   python3 -m sglang.launch_server \
+      --model-path /PATH/TO/Qwen3-30B-A3B-Instruct-2507 \
+      --host 0.0.0.0 \
+      --log-level info \
+      --context-length 32768 \
+      --dp 8
+
+In the main experiments, the judge model was served on 8 H100 GPUs. You can
+reduce or increase ``--dp`` based on your available hardware and throughput
+requirements.
+
+Then obtain the host IP address, for example:
+
+.. code-block:: bash
+
+   hostname -I
+
+Use that IP address in the YAML configuration through 
+
+.. code-block:: yaml
+
+   agentloop:
+     llm_ip: LLLM_JUDGE_IP
+
+Next Steps
+~~~~~~~~~~
+
+- For tool configuration, see :doc:`tools`.
+- For the full training procedure, see :doc:`train`.
+- For the full evaluation procedure, see :doc:`eval`.
 
 .. toctree::
    :hidden:
    :maxdepth: 2
 
    tools
+   train
+   eval

@@ -7,8 +7,8 @@ cluster:
     actor,rollout,reward: all
 
 runner:
-  experiment_name: qa 
-  output_dir: ./eval
+  experiment_name: qa_offline_2eng
+  output_dir: ./logs/eval
   seq_length: 32000  
 
   max_epochs: 1
@@ -18,13 +18,14 @@ algorithm:
   group_size: 4
 
 agentloop:
-  workflow: mas 
+  workflow: mas # or sa, mas refers to multi-agent, sa refers to single-agent
+  llm_ip: LLM_JUDGE_IP # TODO:
   fixed_role: worker # planner or worker
   
 rollout:
   model:
     model_type: qwen3
-    model_path: /mnt/project_rlinf/xzxuan/model/Qwen3-4B
+    model_path: /PATH/TO/MODEL # TODO:
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
 
@@ -33,7 +34,7 @@ rollout:
 rollout_fixed_worker:
   model:
     model_type: qwen3
-    model_path: /mnt/project_rlinf/xzxuan/model/Qwen3-4B
+    model_path: /PATH/TO/MODEL # TODO:
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
 
@@ -47,7 +48,7 @@ data:
   prompt_key: question
   answer_key: answer
   is_markdown: False
-  val_data_paths: ["/mnt/project_rlinf/xzxuan/data/Asearcher-test-data/Bamboogle/test.jsonl"] # TODO:
+  val_data_paths: /PATH/TO/EVAL/QA/DATASET # TODO:
   validation_shuffle: True
   data_size: -1
       

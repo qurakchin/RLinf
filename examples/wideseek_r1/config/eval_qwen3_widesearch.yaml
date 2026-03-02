@@ -7,7 +7,7 @@ cluster:
     actor,rollout,reward: all
 
 runner:
-  experiment_name: ws 
+  experiment_name: ws_online
   output_dir: ./logs/eval
   seq_length: 32000  
 
@@ -18,12 +18,13 @@ algorithm:
   group_size: 4
 
 agentloop:
-  workflow: mas 
+  workflow: mas # or sa, mas refers to multi-agent, sa refers to single-agent
+  llm_ip: LLM_JUDGE_IP # TODO:
   
 rollout:
   model:
     model_type: qwen3
-    model_path: /mnt/project_rlinf/xzxuan/model/Qwen3-4B
+    model_path: /PATH/TO/MODEL # TODO:
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
 
@@ -40,8 +41,8 @@ data:
   is_markdown: True
   norm_column: True
   unique_columns: unique_columns 
-  val_data_paths: ["/mnt/project_rlinf/xzxuan/wideseek_test_data/test.jsonl"] # TODO:
-  data_size: 20
+  val_data_paths: /PATH/TO/EVAL/WIDESEARCH/DATASET # TODO:
+  data_size: -1
       
 
 

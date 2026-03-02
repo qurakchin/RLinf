@@ -40,7 +40,7 @@ val_paths=(
     # /mnt/project_rlinf/xzxuan/data/Asearcher-test-data/Musique_rand1000/test.jsonl
 )
 
-# 2 eng
+# # 2 eng
 for i in "${!val_names[@]}"; do
     val_name="${val_names[$i]}"
     val_path="${val_paths[$i]}"
@@ -58,7 +58,7 @@ for i in "${!val_names[@]}"; do
         
 done
 
-wideseek_offline
+# # wideseek_offline
 python ${REPO_PATH}/examples/wideseek_r1/eval.py \
     --config-path ${CONFIG_PATH}/config/ \
     --config-name eval_qwen3_widesearch \
@@ -69,67 +69,67 @@ python ${REPO_PATH}/examples/wideseek_r1/eval.py \
 
 
 
-# one eng trained
+# # one eng trained
 
-for i in "${!val_names[@]}"; do
-    val_name="${val_names[$i]}"
-    val_path="${val_paths[$i]}"
+# for i in "${!val_names[@]}"; do
+#     val_name="${val_names[$i]}"
+#     val_path="${val_paths[$i]}"
 
-    python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
-        --config-path "${CONFIG_PATH}/config/" \
-        --config-name "eval_qwen3_qa" \
-        "data.val_data_paths=[${val_path}]" \
-        "runner.experiment_name=${val_name}" \
-        "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/mas_train" \
-        "agentloop.workflow=mas" \
-        "rollout.model.model_path=/mnt/project_rlinf/xzxuan/wideseek_model/mas_hybrid_final"
+#     python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
+#         --config-path "${CONFIG_PATH}/config/" \
+#         --config-name "eval_qwen3_qa" \
+#         "data.val_data_paths=[${val_path}]" \
+#         "runner.experiment_name=${val_name}" \
+#         "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/mas_train" \
+#         "agentloop.workflow=mas" \
+#         "rollout.model.model_path=/mnt/project_rlinf/xzxuan/wideseek_model/mas_hybrid_final"
         
-done
+# done
 
-for i in "${!val_names[@]}"; do
-    val_name="${val_names[$i]}"
-    val_path="${val_paths[$i]}"
+# for i in "${!val_names[@]}"; do
+#     val_name="${val_names[$i]}"
+#     val_path="${val_paths[$i]}"
 
-    python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
-        --config-path "${CONFIG_PATH}/config/" \
-        --config-name "eval_qwen3_qa" \
-        "data.val_data_paths=[${val_path}]" \
-        "runner.experiment_name=${val_name}" \
-        "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/sa_train" \
-        "agentloop.workflow=sa" \
-        "rollout.model.model_path=/mnt/project_rlinf/xzxuan/wideseek_model/sa_hybrid_final"
+#     python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
+#         --config-path "${CONFIG_PATH}/config/" \
+#         --config-name "eval_qwen3_qa" \
+#         "data.val_data_paths=[${val_path}]" \
+#         "runner.experiment_name=${val_name}" \
+#         "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/sa_train" \
+#         "agentloop.workflow=sa" \
+#         "rollout.model.model_path=/mnt/project_rlinf/xzxuan/wideseek_model/sa_hybrid_final"
         
-done
+# done
 
-# one eng not trained
+# # one eng not trained
 
-for i in "${!val_names[@]}"; do
-    val_name="${val_names[$i]}"
-    val_path="${val_paths[$i]}"
+# for i in "${!val_names[@]}"; do
+#     val_name="${val_names[$i]}"
+#     val_path="${val_paths[$i]}"
 
-    python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
-        --config-path "${CONFIG_PATH}/config/" \
-        --config-name "eval_qwen3_qa" \
-        "data.val_data_paths=[${val_path}]" \
-        "runner.experiment_name=${val_name}" \
-        "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/mas_no_train" \
-        "agentloop.workflow=mas" \
-        "rollout.model.model_path=/mnt/project_rlinf/xzxuan/model/Qwen3-4B"
+#     python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
+#         --config-path "${CONFIG_PATH}/config/" \
+#         --config-name "eval_qwen3_qa" \
+#         "data.val_data_paths=[${val_path}]" \
+#         "runner.experiment_name=${val_name}" \
+#         "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/mas_no_train" \
+#         "agentloop.workflow=mas" \
+#         "rollout.model.model_path=/mnt/project_rlinf/xzxuan/model/Qwen3-4B"
         
-done
+# done
 
-for i in "${!val_names[@]}"; do
-    val_name="${val_names[$i]}"
-    val_path="${val_paths[$i]}"
+# for i in "${!val_names[@]}"; do
+#     val_name="${val_names[$i]}"
+#     val_path="${val_paths[$i]}"
 
-    python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
-        --config-path "${CONFIG_PATH}/config/" \
-        --config-name "eval_qwen3_qa" \
-        "data.val_data_paths=[${val_path}]" \
-        "runner.experiment_name=${val_name}" \
-        "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/sa_no_train" \
-        "agentloop.workflow=sa" \
-        "rollout.model.model_path=/mnt/project_rlinf/xzxuan/model/Qwen3-4B"
+#     python "${REPO_PATH}/examples/wideseek_r1/eval.py" \
+#         --config-path "${CONFIG_PATH}/config/" \
+#         --config-name "eval_qwen3_qa" \
+#         "data.val_data_paths=[${val_path}]" \
+#         "runner.experiment_name=${val_name}" \
+#         "runner.output_dir=/mnt/project_rlinf/xzxuan/RLinf_no_bugs/logs/eval/sa_no_train" \
+#         "agentloop.workflow=sa" \
+#         "rollout.model.model_path=/mnt/project_rlinf/xzxuan/model/Qwen3-4B"
         
-done
+# done
 

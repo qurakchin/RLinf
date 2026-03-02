@@ -7,18 +7,15 @@ cluster:
     actor,rollout,reward: all
 
 runner:
-  experiment_name: refactor-v2-with-metrics-and-merge-rlinf-fixbug
-  output_dir: ./logs
+  experiment_name: mas_qwen3_4b_hybrid
+  output_dir: ./logs/train
   seq_length: 32000  
-
-  enable_dynamic_batch_size: True
-  max_tokens_per_mbs: 32000
 
   max_epochs: 1
   max_steps: -1  
 
-  val_check_interval: 50
-  save_interval: 50
+  val_check_interval: 30
+  save_interval: 30
   
 algorithm:
   group_size: 8
@@ -32,12 +29,13 @@ algorithm:
   advantage_mode: trajectory
 
 agentloop:
-  workflow: mas
+  workflow: mas # or sa, mas refers to multi-agent, sa refers to single-agent
+  llm_ip: ${oc.env:LLM_JUDGE_IP}
 
 rollout:
   model:
     model_type: qwen3
-    model_path: /mnt/project_rlinf/xzxuan/model/Qwen3-4B
+    model_path: /PATH/TO/MODEL # TODO:
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
 
@@ -46,21 +44,19 @@ tools:
 
 data:
   type: wideseek_r1
-  max_prompt_length: 4096
   rollout_batch_size: 128
   prompt_key: question
   answer_key: answer
   is_markdown: True
   unique_columns: unique_columns 
-  train_data_paths: ["/mnt/project_rlinf/xzxuan/train_data/hybrid_20k.jsonl"]
-  val_data_paths: ["/mnt/project_rlinf/xzxuan/train_data/hybrid_20k.jsonl"]
+  train_data_paths: /PATH/TO/TRAIN/DATASET # TODO:
   shuffle: False
   is_hybrid: True
   data_size: -1
 
 actor:
   model:
-    megatron_checkpoint: /mnt/project_rlinf/xzxuan/RLinf/converted_ckpts/qwen3_4b_tp2_pp1
+    megatron_checkpoint: null
     recompute_num_layers: 36
 
     tensor_model_parallel_size: 2
@@ -68,27 +64,8 @@ actor:
     sequence_parallel: True
 
   megatron:
-    use_hf_ckpt: False  
+    use_hf_ckpt: True  
     ckpt_convertor:
       model: Qwen3-4B
-
-  optim:
-    lr: 1.0e-06
-    adam_beta1: 0.9
-    adam_beta2: 0.999
-    adam_eps: 1.0e-05
-    weight_decay: 0.01
-    clip_grad: 1.0
-    loss_scale: 65536
-
-  lr_sched:
-    lr_warmup_fraction: 0.0
-    lr_warmup_init: 0.0
-    lr_warmup_iters: 0
-    max_lr: 1.0e-06
-    min_lr: 0.0
-    lr_decay_style: constant
-    # lr_decay_iters: 10
-
 
 

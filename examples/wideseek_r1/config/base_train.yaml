@@ -25,19 +25,19 @@ runner:
   val_check_interval: 30
   save_interval: 30
 
-  seq_length: 7096
+  seq_length: 32000
 
-  enable_dynamic_batch_size: False
-  max_tokens_per_mbs: 7096
+  enable_dynamic_batch_size: True
+  max_tokens_per_mbs: 32000
 
   resume_dir: null
-  experiment_name: null # TODO:
-  # output_dir: /mnt/project_rlinf/xzxuan/RLinf/train
-
+  experiment_name: null 
+  output_dir: null
+  
 algorithm:
-  group_size: 4
+  group_size: 8
 
-  n_minibatches: 2
+  n_minibatches: 1
   training_batch_size_per_gpu: 1 # micro batch size
   rollout_batch_size_per_gpu: null # If set to null, rollout_batch_size will be evenly divided across all inference instances. You can reduce this parameter if inference consumes too much GPU memory.
 
@@ -82,7 +82,7 @@ algorithm:
     repetition_penalty: 1.0
     max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
     min_new_tokens: 1
-    stop_token_ids: [151666, 151643, 151645] # TODO: check
+    stop_token_ids: [151666, 151643, 151645] 
 
 inference:
   model_type: ${rollout.model.model_type}
@@ -111,7 +111,7 @@ agentloop:
   length_penalty: 0.1
   over_context_penalty: 0.2
 
-  llm_ip: 172.27.236.111
+  llm_ip: null
   llm_port: 30000
   llm_type: Qwen3-30b-a3b
 
@@ -140,8 +140,8 @@ rollout:
 
   use_fixed_worker: False 
   model:
-    model_path: null #TODO:
-    model_type: null #TODO:
+    model_path: null 
+    model_type: null 
     precision: ${actor.model.precision}            # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
@@ -180,59 +180,21 @@ rollout:
   max_running_requests: 64 # the maximum number of running requests in the rollout engine.
   cuda_graph_max_bs: 128 # the maximum batch size for cuda graph. If the batch size is larger than this, cuda graph will not be used.
 
-rollout_fixed_worker:
-  group_name: "SubWorkerRolloutGroup"
-
-  gpu_memory_utilization: 0.5
-
-  model:
-    model_path: null #TODO:
-    model_type: null #TODO:
-    precision: ${actor.model.precision}   
-  precision: ${actor.model.precision}              # precision for rollout model, support [fp16, bf16, fp32]
-  enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
-  distributed_executor_backend: mp   # ray or mp
-  disable_log_stats: False
-  detokenize: True            # Whether to detokenize the output. During RL we actually don't need to detokenize it. Can be set to True for debugging.
-  padding: null               # will be tokenizer.pad_token_id if null. it is used to filter megatron's padding for rollout engine
-  eos: null                   # will be tokenizer.eos_token_id if null.
-
-  rollout_backend: sglang     # here choose which backend to rollout,support [sglang, vllm] 
-
-  sglang:
-    attention_backend: triton # [flashinfer, triton] for more, see sglang's doc
-    decode_log_interval: 500000 # the interval for SGLang to log the decode time and other stats.
-    use_torch_compile: False # enable torch_compile in SGLang for rollout.
-    torch_compile_max_bs: 128 # the maximum batch size for torch compile. If the batch size is larger than this, torch compile will not be used.
-
-  return_logprobs: False
-
-  tensor_parallel_size: 1
-  pipeline_parallel_size: 1
-  
-  validate_weight: True # TODO: here is imp
-  validate_weight_first_sync: False # validate the weight norm between load model and first sync.
-  validate_save_dir: null # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
-  print_outputs: False         # whether to print the outputs (token ids, texts, etc.) of rollout engine.
-
-  max_running_requests: 64 # the maximum number of running requests in the rollout engine.
-  cuda_graph_max_bs: 128 # the maximum batch size for cuda graph. If the batch size is larger than this, cuda graph will not be used.
-
 data:
   type: wideseek_r1
   max_prompt_length: 4096
   filter_prompt_by_length: True
-  rollout_batch_size: 512 
+  rollout_batch_size: 128 
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: question
-  answer_key: golden_answers
+  answer_key: answer
   apply_chat_template: False
   shuffle: True
   validation_shuffle: False
   seed: 1234
-  train_data_paths: ["/mnt/project_rlinf/xzxuan/data/nq_hotpotqa_train/train_RLinf.jsonl"]
-  val_data_paths: ["/mnt/project_rlinf/xzxuan/data/nq_hotpotqa_train/validation_RLinf.jsonl"]
+  train_data_paths: null
+  val_data_paths: ${data.train_data_paths} 
   data_size: -1
 
 
@@ -267,7 +229,7 @@ actor:
 
     recompute_method: block
     recompute_granularity: full
-    recompute_num_layers: 20 # TODO:开到跟model layer一致
+    recompute_num_layers: 36
 
     seq_length: ${runner.seq_length}
     encoder_seq_length: ${runner.seq_length}
@@ -293,7 +255,7 @@ actor:
     fp16: True
     lr: 1.0e-06
     adam_beta1: 0.9
-    adam_beta2: 0.95
+    adam_beta2: 0.999
     adam_eps: 1.0e-05
     min_lr: 0.0
     weight_decay: 0.01
@@ -302,11 +264,11 @@ actor:
     overlap_param_gather: False
     optimizer_enable_pin: False
     overlap_param_gather_with_optimizer_step: False
-    clip_grad: 0.8
+    clip_grad: 1.0
     loss_scale: 65536
 
   lr_sched:
-    lr_warmup_fraction: 0.285
+    lr_warmup_fraction: 0.0
     lr_warmup_init: 0.0
     lr_warmup_iters: 0
     max_lr: 1.0e-06
@@ -332,7 +294,7 @@ actor:
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor
-      model: null # TODO:
+      model: null 
       model_type: null # will be set by hf model's config if null
       hf_model_path: ${rollout.model.model_path} # path to the hf model
       save_path: ${runner.output_dir}/${runner.experiment_name}/converted_ckpts/actor

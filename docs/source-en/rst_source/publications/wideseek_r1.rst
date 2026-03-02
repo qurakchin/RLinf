@@ -1,18 +1,6 @@
 WideSeek-R1: Exploring Width Scaling for Broad Information Seeking via Multi-Agent Reinforcement Learning
 ===========================================================================================================
 
-.. .. centered::
-..    Zelai Xu :sup:`1*`, Zhexuan Xu :sup:`1*`, Ruize Zhang :sup:`2*`, Chunyang Zhu :sup:`3`, Shi Yu :sup:`4`
-
-.. .. centered::
-..    Weilin Liu :sup:`3`, Quanlu Zhang :sup:`3`, Wenbo Ding :sup:`2`, Chao Yu :sup:`2†`, Yu Wang :sup:`1†`
-
-.. .. centered::
-..    :sup:`1` EE, Tsinghua University   :sup:`2` SIGS, Tsinghua University   :sup:`3` Infinigence AI   :sup:`4` IIIS, Tsinghua University
-
-.. .. centered::
-..    :sup:`*` Equal Contribution   :sup:`†` Corresponding Authors
-
 .. raw:: html
 
    <div style="text-align:center">
@@ -44,7 +32,7 @@ WideSeek-R1: Exploring Width Scaling for Broad Information Seeking via Multi-Age
 
 **Paper:** `arXiv:2602.04634 <https://arxiv.org/abs/2602.04634>`__  
 
-**Code:** `RLinf Example (WideSeek-R1) <https://github.com/RLinf/RLinf/tree/main/examples/wideseek_r1>`__ 
+**Code:** `WideSeek-R1 code <https://github.com/RLinf/RLinf/tree/main/examples/wideseek_r1>`__ 
 
 **Dataset:** `WideSeek-R1-train-data <https://huggingface.co/datasets/RLinf/WideSeek-R1-train-data>`__  
 
@@ -207,93 +195,95 @@ improvement of 11.9 points in item F1 score, and attains an 8.8-point gain over 
 Qwen3-4B in the same multi-agent setting. Notably, WideSeek-R1-4B is comparable to
 single-agent DeepSeek-R1-671B with nearly 170x fewer parameters.
 
-.. list-table:: Table 1. Results on the WideSearch benchmark (100 English + 100 Chinese tasks requiring tabular output)
+.. list-table:: Table 1a. Single-agent results on the WideSearch benchmark
    :header-rows: 1
-   :widths: 12 22 11 11 11 11 11 11
+   :widths: 22 11 11 11 11 11 11
    :align: left
 
-   * - Setting
-     - Model
+   * - Model
      - Item F1 Avg@4
      - Item F1 Max@4
      - Row F1 Avg@4
      - Row F1 Max@4
      - Success Avg@4
      - Success Pass@4
-   * - Single Agent
-     - SingleSeek-R1-4B
+   * - SingleSeek-R1-4B
      - 28.1
      - 39.2
      - 6.5
      - 12.5
      - 0.3
      - 1.0
-   * - Single Agent
-     - Qwen3-4B
+   * - Qwen3-4B
      - 20.1
      - 30.2
      - 3.0
      - 4.8
      - 0.0
      - 0.0
-   * - Single Agent
-     - Search-R1-7B
+   * - Search-R1-7B
      - 15.5
      - 24.4
      - 2.0
      - 4.4
      - 0.0
      - 0.0
-   * - Single Agent
-     - ASearcher-7B
+   * - ASearcher-7B
      - 16.5
      - 26.0
      - 2.8
      - 5.8
      - 0.0
      - 0.0
-   * - Single Agent
-     - DeepSeek-R1-671B
+   * - DeepSeek-R1-671B
      - 41.3
      - 55.1
      - 20.7
      - 31.7
      - 0.4
      - 1.5
-   * - Multi-Agent System
-     - **WideSeek-R1-4B**
+
+.. list-table:: Table 1b. Multi-agent results on the WideSearch benchmark
+   :header-rows: 1
+   :widths: 22 11 11 11 11 11 11
+   :align: left
+
+   * - Model
+     - Item F1 Avg@4
+     - Item F1 Max@4
+     - Row F1 Avg@4
+     - Row F1 Max@4
+     - Success Avg@4
+     - Success Pass@4
+   * - **WideSeek-R1-4B**
      - **40.0**
      - **51.8**
      - **15.3**
      - **24.4**
      - **0.4**
      - **1.0**
-   * - Multi-Agent System
-     - Qwen3-4B
+   * - Qwen3-4B
      - 31.2
      - 42.3
      - 8.4
      - 15.5
      - 0.0
      - 0.0
-   * - Multi-Agent System
-     - AgentFlow-7B
+   * - AgentFlow-7B
      - 28.7
      - 45.4
      - 9.0
      - 20.2
      - 0.4
      - 1.5
-   * - Multi-Agent System
-     - OWL-8B
+   * - OWL-8B
      - 20.2
      - 29.3
      - 3.1
      - 5.8
      - 0.0
      - 0.0
-   * - Multi-Agent System
-     - MiroFlow-8B
+   * - MiroFlow-8B
      - 23.7
      - 37.7
      - 5.8
@@ -347,13 +337,12 @@ benchmarks (three single-hop and four multi-hop). WideSeek-R1-4B reaches an aver
 59.0%, outperforming its backbone multi-agent Qwen3-4B by 7.7 points and surpassing larger
 multi-agent systems such as OWL-8B and MiroFlow-8B.
 
-.. list-table:: Table 2. Results on standard QA benchmarks (3 single-hop + 4 multi-hop)
+.. list-table:: Table 2a. Single-agent results on standard QA benchmarks (3 single-hop + 4 multi-hop)
    :header-rows: 1
-   :widths: 12 18 8 8 10 8 8 10 10 8
+   :widths: 18 8 8 10 8 8 10 10 8
    :align: left
 
-   * - Setting
-     - Model
+   * - Model
      - Avg.
      - NQ
      - TriviaQA
@@ -362,8 +351,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - HotpotQA
      - Bamboogle
      - MuSiQue
-   * - Single Agent
-     - SingleSeek-R1-4B
+   * - SingleSeek-R1-4B
      - 57.0
      - 58.8
      - 78.3
@@ -372,8 +360,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - 62.1
      - 54.6
      - 26.5
-   * - Single Agent
-     - Qwen3-4B
+   * - Qwen3-4B
      - 48.3
      - 48.5
      - 68.7
@@ -382,8 +369,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - 51.4
      - 48.2
      - 19.2
-   * - Single Agent
-     - Search-R1-7B
+   * - Search-R1-7B
      - 55.4
      - 49.9
      - 78.0
@@ -392,8 +378,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - 60.8
      - 58.4
      - 27.1
-   * - Single Agent
-     - ASearcher-7B
+   * - ASearcher-7B
      - 61.0
      - 54.5
      - 79.3
@@ -402,8 +387,22 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - 67.6
      - 60.0
      - 32.6
-   * - Multi-Agent System
-     - **WideSeek-R1-4B**
+
+.. list-table:: Table 2b. Multi-agent results on standard QA benchmarks (3 single-hop + 4 multi-hop)
+   :header-rows: 1
+   :widths: 18 8 8 10 8 8 10 10 8
+   :align: left
+
+   * - Model
+     - Avg.
+     - NQ
+     - TriviaQA
+     - PopQA
+     - 2Wiki
+     - HotpotQA
+     - Bamboogle
+     - MuSiQue
+   * - **WideSeek-R1-4B**
      - **59.0**
      - **56.1**
      - **78.5**
@@ -412,8 +411,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - **64.2**
      - **61.8**
      - **28.9**
-   * - Multi-Agent System
-     - Qwen3-4B
+   * - Qwen3-4B
      - 51.3
      - 49.6
      - 70.7
@@ -422,8 +420,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - 54.3
      - 52.6
      - 21.7
-   * - Multi-Agent System
-     - AgentFlow-7B
+   * - AgentFlow-7B
      - 61.0
      - 58.5
      - 87.0
@@ -432,8 +429,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - 57.0
      - 69.6
      - 25.3
-   * - Multi-Agent System
-     - OWL-8B
+   * - OWL-8B
      - 57.2
      - 64.0
      - 74.2
@@ -442,8 +438,7 @@ multi-agent systems such as OWL-8B and MiroFlow-8B.
      - 61.0
      - 55.8
      - 30.4
-   * - Multi-Agent System
-     - MiroFlow-8B
+   * - MiroFlow-8B
      - 50.0
      - 50.9
      - 73.1
@@ -464,4 +459,3 @@ Citation
      journal={arXiv preprint arXiv:2602.04634},
      year={2026},
    }
-

@@ -139,10 +139,6 @@ class WebPageCache:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
 
-            print(
-                f"[DEBUG] WebPageCache: Saved {len(self.cache)} entries to {self.cache_file}"
-            )
-
         except Exception as e:
             print(
                 f"[ERROR] WebPageCache: Failed to save cache to {self.cache_file}: {e}"

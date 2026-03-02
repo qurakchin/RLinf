@@ -482,7 +482,6 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
         extra_fields_turn = rollout_result.extra_fields_turn or {}
         extra_fields_traj = rollout_result.extra_fields_traj or {}
 
-        eval_metrics = extra_fields_traj.get("eval_metric") or [None] * group_size
         total_turn_list_metric = (
             extra_fields_traj.get("total_turn_list") or [None] * group_size
         )
@@ -507,7 +506,6 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
 
         samples_data: list[dict] = []
         for traj_idx in range(group_size):
-            eval_metric = _safe_idx(eval_metrics, traj_idx, None) or {}
             total_turn_list = _safe_idx(total_turn_list_metric, traj_idx, None)
             final_answer_format = (
                 _safe_idx(final_answer_format_metric, traj_idx, 0) or 0
@@ -569,10 +567,6 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
                     "final_answer_text": _safe_idx(
                         extra_fields_traj.get("final_answer_text"), traj_idx, None
                     ),
-                    "planner_summary": _safe_idx(
-                        extra_fields_traj.get("planner_summary"), traj_idx, None
-                    ),
-                    "eval_metric": eval_metric,
                     "total_turn_list": total_turn_list,
                     "final_answer_format": float(final_answer_format),
                     "llm_reward": float(llm_reward),

@@ -1,9 +1,6 @@
 #! /bin/bash
 set -x
 
-# ray stop
-# ray start --head
-
 tabs 4
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export TOKENIZERS_PARALLELISM=false
@@ -16,11 +13,10 @@ MEGATRON_PATH=/opt/Megatron-LM
 export PYTHONPATH=${REPO_PATH}:${MEGATRON_PATH}:$PYTHONPATH
 
 if [ -z "$1" ]; then
-    CONFIG_NAME="mas_train_qwen3_8b_format"
+    CONFIG_NAME="train_qwen3_hybrid"
 else
     CONFIG_NAME=$1
 fi
-
 
 python ${REPO_PATH}/examples/wideseek_r1/train.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
 

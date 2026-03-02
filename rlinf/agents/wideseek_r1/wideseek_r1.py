@@ -70,12 +70,10 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
         ]
         self.extra_keys_traj = [
             "origin_question",
-            "planner_summary",
             "final_answer",
             "final_answer_text",
             "num_valid_planner_turns",
             "num_valid_worker_turns",
-            "eval_metric",
             "total_turn_list",
             "final_answer_format",
             "llm_reward",
@@ -667,7 +665,6 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
             language=language,
         )
 
-        final_answer_text = None
         if is_markdown:
             final_answer_extract = extract_final_answer(answer_text, mode="markdown")
         else:
@@ -745,8 +742,7 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
             trace_prints=[],  # Can add message_history tracking if needed
             extra_fields={
                 "final_answer": final_answer_extract,
-                "final_answer_text": final_answer_text,
-                "planner_summary": answer_text,
+                "final_answer_text": answer_text,
                 "reward": reward_score,
                 "origin_question": origin_question,
                 "llm_reward": llm_reward,

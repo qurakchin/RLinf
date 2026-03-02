@@ -7,15 +7,11 @@ set -x
 # Configuration — edit these before running
 # ---------------------------------------------------------------------------
 
-pages_file=/PATH/TO/wiki_webpages.jsonl  # Path to your pages JSONL file
+pages_file=/PATH/TO/Wiki-2018-Corpus/wiki_webpages.jsonl  # Path to your pages JSONL file
 retriever_name=e5
 retriever_path=/PATH/TO/e5-model  # Path to your e5 model directory
 
-pages_file=/mnt/project_rlinf/xzxuan/data/Asearch/wiki_webpages.jsonl
-retriever_name=e5
-retriever_path=/mnt/project_rlinf/xzxuan/model/e5
-
-qdrant_url=http://172.27.236.111:6333
+qdrant_url=/URL/TO/QDRANT/HOST # eg http://xxx.xx.xxx.xxx:6333
 qdrant_collection_name=wiki_collection_m32_cef512
 
 # hnsw_ef: search accuracy parameter, higher is more accurate but slower
