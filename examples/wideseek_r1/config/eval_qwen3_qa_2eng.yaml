@@ -19,24 +19,18 @@ algorithm:
 
 agentloop:
   workflow: mas # or sa, mas refers to multi-agent, sa refers to single-agent
-  llm_ip: LLM_JUDGE_IP # TODO:
+  llm_ip: ${oc.env:LLM_JUDGE_IP}
+  llm_port: 30000
   fixed_role: worker # planner or worker
-  
+
 rollout:
   model:
-    model_type: qwen3
     model_path: /PATH/TO/MODEL # TODO:
-  tensor_parallel_size: 1
-  pipeline_parallel_size: 1
-
   use_fixed_worker: True
 
 rollout_fixed_worker:
   model:
-    model_type: qwen3
     model_path: /PATH/TO/MODEL # TODO:
-  tensor_parallel_size: 1
-  pipeline_parallel_size: 1
 
 tools:
   online: False
@@ -51,6 +45,3 @@ data:
   val_data_paths: /PATH/TO/EVAL/QA/DATASET # TODO:
   validation_shuffle: True
   data_size: -1
-      
-
-

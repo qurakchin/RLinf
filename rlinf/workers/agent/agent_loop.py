@@ -262,6 +262,7 @@ class AgentLoopWorker(Worker):
                 )
 
             await asyncio.gather(*send_output_tasks)
+            return {}
 
     def get_rollout_result(
         self, task_results: list[AgentLoopOutput], answer: str

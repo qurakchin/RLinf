@@ -118,16 +118,17 @@ class MathDataset(Dataset):
                 results.extend(result)
                 all_failed += failed
 
+        if all_failed > 0:
+            logging.warning(
+                f"{all_failed} samples were skipped due to format issues "
+                f"(kept {len(results)} / {total})."
+            )
+
         assert len(results) > 0, (
             f"No samples found within max_prompt_length={self.max_prompt_length}. "
             "Please check your dataset or increase max_prompt_length."
         )
 
-        if failed > 0:
-            logging.warning(
-                f"{failed} samples were skipped due to format issues "
-                f"(kept {len(results)} / {total})."
-            )
         return results
 
     def _load_post_process_batch(self, batch):

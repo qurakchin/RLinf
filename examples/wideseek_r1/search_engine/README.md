@@ -74,7 +74,7 @@ We use **[E5](https://huggingface.co/intfloat/e5-base-v2)** as the retriever mod
 1. **Start the Qdrant database**
 
    ```bash
-   cd /PATH/TO/WideSeek-R1-Corpus/qdrant
+   cd /path/to/WideSeek-R1-Corpus/qdrant
    ./qdrant
    ```
 
@@ -85,8 +85,8 @@ We use **[E5](https://huggingface.co/intfloat/e5-base-v2)** as the retriever mod
    Edit the config variables at the top of `launch_qdrant.sh`:
 
    ```bash
-   pages_file=/PATH/TO/WideSeek-R1-Corpus/wiki_webpages.jsonl
-   retriever_path=/PATH/TO/e5-model
+   pages_file=/path/to/WideSeek-R1-Corpus/wiki_webpages.jsonl
+   retriever_path=/path/to/e5-model
    ```
 
    Then run:

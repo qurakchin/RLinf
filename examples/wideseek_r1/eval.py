@@ -18,7 +18,9 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from rlinf.agents.wideseek_r1.eval_runner import WideSeekR1AgentEvalRunner as EvalRunner
+from rlinf.agents.wideseek_r1.eval_runner import (
+    WideSeekR1AgentEvalRunner as AgentEvalRunner,
+)
 from rlinf.agents.wideseek_r1.tools import WideSeekR1ToolWorker
 from rlinf.agents.wideseek_r1.wideseek_r1 import WideSeekR1AgentLoopWorker
 from rlinf.config import validate_cfg
@@ -48,6 +50,7 @@ def main(cfg) -> None:
     rollout_placement_strategy = component_placement.get_strategy("rollout")
     if cfg.rollout.get("use_fixed_worker", False):
         # main agent and sub agent use different rollout engine
+        # TODO: add support for multiple rollout engines in a more elegant way and refactor this code
         rollout_accel_num = (
             rollout_placement_strategy._end_hw_rank
             - rollout_placement_strategy._start_hw_rank
@@ -147,7 +150,7 @@ def main(cfg) -> None:
         ): ToolWorkerInfo(tool_names=["access"], has_session=False),
     }
 
-    runner = EvalRunner(
+    runner = AgentEvalRunner(
         cfg=cfg,
         placement=component_placement,
         val_dataset=val_ds,

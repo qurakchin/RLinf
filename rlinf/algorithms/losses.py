@@ -18,7 +18,7 @@ import torch
 
 from rlinf.algorithms.registry import register_policy_loss
 from rlinf.algorithms.utils import huber_loss
-from rlinf.utils.utils import masked_mean, masked_mean_ratio, masked_sum
+from rlinf.utils.utils import masked_mean, masked_mean_ratio
 
 
 def compute_decoupled_ppo_actor_loss(
@@ -258,7 +258,9 @@ def compute_ppo_actor_loss(
     else:
         dual_clip_mask = torch.zeros_like(clip_mask)
 
-    policy_loss_metrics = policy_loss.clone()
+    metric_policy_loss_abs = loss_agg_func(
+        policy_loss.abs(), loss_mask, loss_mask_ratio
+    )
     policy_loss = loss_agg_func(
         policy_loss, loss_mask, loss_mask_ratio
     )  # default max_episode_steps is None
@@ -266,6 +268,7 @@ def compute_ppo_actor_loss(
     clip_mask = policy_loss1.detach() < policy_loss2.detach()
     dual_clip_mask = (dual_clip_mask * loss_mask).bool()
 
+    clip_fraction = (clip_mask * loss_mask).sum() / float(loss_mask_count)
     approx_kl = -torch.sum(approx_kl) / float(loss_mask_count)
 
     dual_cliped_ratio = torch.where(dual_clip_mask, ratio, 0)
@@ -276,6 +279,7 @@ def compute_ppo_actor_loss(
     # Compile metrics for logging
     loss_mask_for_metrics = loss_mask
     ratio_for_metrics = ratio.detach()
+    ratio_abs_for_metrics = (ratio - 1).abs().detach()
     clipped_ratio_for_metrics = clipped_ratio.detach()
     dual_cliped_ratio_for_metrics = dual_cliped_ratio.detach()
 
@@ -285,24 +289,19 @@ def compute_ppo_actor_loss(
         # Broadcast loss_mask to match ratio's shape for metrics computation
         loss_mask_for_metrics = loss_mask.expand_as(ratio)
 
-    approx_kl = -approx_kl.sum() / loss_mask_count
-    clip_fraction = (clip_mask.logical_and_(loss_mask) != 0).float()
     metrics_data = {
-        "actor/token_num": loss_mask.count_nonzero().float(),
-        "actor/policy_loss": masked_sum(policy_loss_metrics, loss_mask_for_metrics),
-        "actor/policy_loss_mbs_mean": policy_loss.detach(),
-        "actor/policy_loss_abs": masked_sum(
-            policy_loss_metrics.abs(), loss_mask_for_metrics
-        ),
-        "actor/ratio": masked_sum(ratio_for_metrics, loss_mask_for_metrics),
-        "actor/clipped_ratio": masked_sum(
+        "actor/policy_loss": policy_loss.detach(),
+        "actor/policy_loss_abs": metric_policy_loss_abs.detach(),
+        "actor/ratio": masked_mean(ratio_for_metrics, loss_mask_for_metrics),
+        "actor/ratio_abs": masked_mean(ratio_abs_for_metrics, loss_mask_for_metrics),
+        "actor/clipped_ratio": masked_mean(
             clipped_ratio_for_metrics, loss_mask_for_metrics
         ),
-        "actor/dual_cliped_ratio": masked_sum(
+        "actor/dual_cliped_ratio": masked_mean(
             dual_cliped_ratio_for_metrics, loss_mask_for_metrics
         ),
-        "actor/approx_kl": -masked_sum(approx_kl, loss_mask_for_metrics),
-        "actor/clip_fraction": masked_sum(clip_fraction, loss_mask_for_metrics),
+        "actor/approx_kl": approx_kl.detach(),
+        "actor/clip_fraction": clip_fraction.detach(),
     }
     return policy_loss, metrics_data
 
