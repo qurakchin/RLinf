@@ -27,7 +27,7 @@ from rlinf.data.io_struct import DynamicRolloutResult
 from rlinf.runners.agent_eval_runner import AgentEvalRunner
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.utils.runner_utils import local_mkdir_safe
-from rlinf.workers.agent.agent_loop import MultiTurnAgentLoopWorker
+from rlinf.workers.agent.agent_loop import MultiAgentLoopWorker
 from rlinf.workers.agent.tool_worker import ToolWorker, ToolWorkerInfo
 from rlinf.workers.reward.reward_worker import RewardWorker
 
@@ -48,7 +48,7 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
         val_dataset: Dataset,
         rollout: Union["SGLangWorker", "VLLMWorker"],
         reward: Optional[RewardWorker],
-        agent_loop: MultiTurnAgentLoopWorker,
+        agent_loop: MultiAgentLoopWorker,
         tool_workers: dict[ToolWorker, ToolWorkerInfo] = {},
         solid_rollouts: dict[str, Union["SGLangWorker", "VLLMWorker"]] = {},
     ):
