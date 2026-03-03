@@ -2,7 +2,7 @@ defaults:
   - base_train
 
 cluster:
-  num_nodes: 2
+  num_nodes: 1
   component_placement:
     actor,rollout,reward: all
 
@@ -16,7 +16,7 @@ runner:
 
   val_check_interval: 30
   save_interval: 30
-  
+
 algorithm:
   group_size: 8
   n_minibatches: 1
@@ -30,14 +30,12 @@ algorithm:
 
 agentloop:
   workflow: mas # or sa, mas refers to multi-agent, sa refers to single-agent
-  llm_ip: ${oc.env:LLM_JUDGE_IP}
+  llm_ip: LLM_JUDGE_IP # TODO:
+  llm_port: 30000
 
 rollout:
   model:
-    model_type: qwen3
     model_path: /PATH/TO/MODEL # TODO:
-  tensor_parallel_size: 1
-  pipeline_parallel_size: 1
 
 tools:
   online: False
@@ -64,8 +62,7 @@ actor:
     sequence_parallel: True
 
   megatron:
-    use_hf_ckpt: True  
+    use_hf_ckpt: True
     ckpt_convertor:
       model: Qwen3-4B
-
 

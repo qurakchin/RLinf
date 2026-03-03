@@ -74,7 +74,18 @@ WideSeek-R1 支持两种工具后端：
 .. code-block:: yaml
 
    agentloop:
-     llm_ip: LLLM_JUDGE_IP
+     llm_ip: LLM_JUDGE_IP
+
+你可以通过一下命令测试:
+
+.. code-block:: bash
+
+   python rlinf/agents/wideseek_r1/utils/sglang_client.py --llm-ip LLM_JUDGE_IP
+   
+多节点
+~~~~~~~~~~~~
+
+由于多智能体生成的时间开销较大，使用单机 8 卡进行训练和评估会显著降低实验效率，因此 WideSeek-R1 支持多节点训练与评估。详细内容请参阅 :doc:`../../../start/distribute`.
 
 后续步骤
 ~~~~~~~~

@@ -18,14 +18,16 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from rlinf.agents.wideseek_r1.eval_runner import WideSeekR1AgentEvalRunner as EvalRunner
+from rlinf.agents.wideseek_r1.eval_runner import (
+    WideSeekR1AgentEvalRunner as AgentEvalRunner,
+)
 from rlinf.agents.wideseek_r1.tools import WideSeekR1ToolWorker
 from rlinf.agents.wideseek_r1.wideseek_r1 import WideSeekR1AgentLoopWorker
 from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.scheduler import Cluster, NodePlacementStrategy, PackedPlacementStrategy
-from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf.utils.placement import ModelParallelEvalComponentPlacement
 from rlinf.utils.utils import output_redirector
 from rlinf.workers.agent.tool_worker import ToolWorkerInfo
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
@@ -41,13 +43,14 @@ def main(cfg) -> None:
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 
     cluster = Cluster(cluster_cfg=cfg.cluster)
-    component_placement = ModelParallelComponentPlacement(cfg, cluster)
+    component_placement = ModelParallelEvalComponentPlacement(cfg, cluster)
 
     # Generator group
     rollout_worker_cls = get_rollout_backend_worker(cfg)
     rollout_placement_strategy = component_placement.get_strategy("rollout")
     if cfg.rollout.get("use_fixed_worker", False):
         # main agent and sub agent use different rollout engine
+        # TODO: add support for multiple rollout engines in a more elegant way and refactor this code
         rollout_accel_num = (
             rollout_placement_strategy._end_hw_rank
             - rollout_placement_strategy._start_hw_rank
@@ -124,7 +127,7 @@ def main(cfg) -> None:
     )
 
     # Dataset
-    tokenizer = hf_tokenizer(cfg.actor.tokenizer.tokenizer_model)
+    tokenizer = hf_tokenizer(cfg.rollout.model.model_path)
     train_ds, val_ds = create_rl_dataset(cfg, tokenizer)
 
     # Tool workers group
@@ -147,7 +150,7 @@ def main(cfg) -> None:
         ): ToolWorkerInfo(tool_names=["access"], has_session=False),
     }
 
-    runner = EvalRunner(
+    runner = AgentEvalRunner(
         cfg=cfg,
         placement=component_placement,
         val_dataset=val_ds,

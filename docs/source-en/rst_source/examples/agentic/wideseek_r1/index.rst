@@ -90,7 +90,19 @@ Use that IP address in the YAML configuration through
 .. code-block:: yaml
 
    agentloop:
-     llm_ip: LLLM_JUDGE_IP
+     llm_ip: LLM_JUDGE_IP
+
+you can test it by:
+
+.. code-block:: bash
+
+   python rlinf/agents/wideseek_r1/utils/sglang_client.py --llm-ip LLM_JUDGE_IP
+
+Multi-node 
+~~~~~~~~~~~~
+
+Since multi-agent generation incurs substantial time overhead, training and evaluation on a single machine with eight GPUs can significantly slow down experiments; therefore, 
+WideSeek-R1 supports multi-node training and evaluation. Please refer to the documentation :doc:`../../../start/distribute`.
 
 Next Steps
 ~~~~~~~~~~

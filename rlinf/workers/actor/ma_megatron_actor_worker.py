@@ -76,9 +76,10 @@ class MAMegatronActor(MegatronActor):
             "enable_dp_load_balance must be True when is_dynamic_rollout_batch is True"
         )
 
-        self.use_sub_worker = self.cfg.rollout.get("use_sub_worker", False)
-        assert self.placement_mode == PlacementMode.COLLOCATED
-        #####
+        self.use_fixed_worker = self.cfg.rollout.get("use_fixed_worker", False)
+        assert self.placement_mode == PlacementMode.COLLOCATED, (
+            "Only collocated placement is supported for multi-agent actor"
+        )
         loss_scales = self.cfg.algorithm.get("loss_scales", [])
         self.loss_scale_fns = get_loss_scales(loss_scales)
         self.pack_traj = self.cfg.actor.get("pack_traj", True)
@@ -246,9 +247,12 @@ class MAMegatronActor(MegatronActor):
                     loss = loss + kl_loss * self.kl_beta
 
                 # all gather
-                _imp = copy.deepcopy(metrics_data["actor/ratio"])
-                _token_num = copy.deepcopy(metrics_data["actor/token_num"])
-                _imp /= _token_num
+                _imp: torch.Tensor = metrics_data["actor/ratio"].clone()
+                torch.distributed.all_reduce(
+                    _imp,
+                    torch.distributed.ReduceOp.AVG,
+                    group=parallel_state.get_data_parallel_group(),
+                )
 
                 # Early stopping.
                 if (
@@ -488,7 +492,7 @@ class MAMegatronActor(MegatronActor):
     def _setup_rollout_weight_dst_ranks(self):
         """Setup destination ranks for token and weight communication."""
         assert self.placement_mode == PlacementMode.COLLOCATED
-        if not self.use_sub_worker:
+        if not self.use_fixed_worker:
             rank_mapper = CollocateRankMapper
         else:
             rank_mapper = DisaggRankMapper
@@ -526,7 +530,7 @@ class MAMegatronActor(MegatronActor):
         if len(self._weight_dst_rank_in_rollout) > 0:
             if (
                 self.placement_mode == PlacementMode.COLLOCATED
-                and not self.use_sub_worker
+                and not self.use_fixed_worker
             ):
                 send_handle = None
                 for bucket_weight in model_bucket_list:

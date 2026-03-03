@@ -262,6 +262,7 @@ class AgentLoopWorker(Worker):
                 )
 
             await asyncio.gather(*send_output_tasks)
+            return {}
 
     def get_rollout_result(
         self, task_results: list[AgentLoopOutput], answer: str
@@ -364,12 +365,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
 
         # For eval mode, allow multiple samples (group_size=k) to compute pass@k and avg@k
         extra_fields = self.gen_extra_fields(task_results, answer)
-        if self.is_eval:
-            rollout_result = self.get_rollout_result(
-                task_results, *extra_fields, use_no_training=False
-            )
-        else:
-            rollout_result = self.get_rollout_result(task_results, *extra_fields)
+        rollout_result = self.get_rollout_result(task_results, *extra_fields)
         agent_metrics = self.get_rollout_metrics(rollout_result)
 
         await output_channel.put(rollout_result, async_op=True).async_wait()
@@ -513,7 +509,6 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
         extra_fields_traj: Optional[dict],
         extra_fields_group: Optional[dict],
         extra_fields_train: dict,
-        use_no_training=True,
     ) -> DynamicRolloutResult:
         """Collect a group of turn-level outputs into `DynamicRolloutResult`.
 
@@ -523,7 +518,6 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
             extra_fields_traj: Trajectory-level extra fields.
             extra_fields_group: Group-level extra fields.
             extra_fields_train: Training-only fields (e.g. regroup indices).
-            use_no_training: Whether to drop turns marked as non-training.
 
         Returns:
             A packed `DynamicRolloutResult` ready for downstream training/eval.
@@ -532,9 +526,9 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
             for task_result in task_results:
                 if len(task_result.trace_prints) > 0:
                     self.print_agent_outputs(None, task_result.trace_prints)
-        if not use_no_training:
+        if self.is_eval:
             self.log_info(
-                f"finish question id {task_results[0].extra_fields['instance_id']}"
+                f"finish question id {task_results[0].extra_fields.get('instance_id', None)}"
             )
 
         idx_to_traj = []
@@ -551,7 +545,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
         for idx, task_result in enumerate(task_results):
             for single_turn_output in task_result.single_turn_outputs:
                 single_turn_output: AgentLoopOutput
-                if use_no_training and single_turn_output.extra_fields["not_training"]:
+                if single_turn_output.extra_fields.get("not_training", False):
                     continue
                 idx_to_traj.append(idx)
                 prompt_lengths.append(len(single_turn_output.prompt_ids))

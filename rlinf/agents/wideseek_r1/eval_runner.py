@@ -78,13 +78,6 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
         # Each item is the raw eval_result dict from agent_loop
         self.accumulated_raw_results = []
 
-        # Specific Configurations
-        self.compute_ref_logprobs = (
-            self.cfg.algorithm.kl_beta > 0
-            or self.cfg.algorithm.get("reinpp_kl_beta", 0) > 0
-        )
-        self.recompute_logprobs = self.cfg.algorithm.recompute_logprobs
-
     def _save_eval_results(self, all_results, aggregated_metrics, total_count):
         """Persist aggregated metrics and per-sample responses to disk.
 
@@ -112,7 +105,7 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         data_paths = self.cfg.data.val_data_paths
-        if data_paths:
+        if OmegaConf.is_config(data_paths): 
             data_paths = OmegaConf.to_container(data_paths, resolve=True)
 
         model_config_name = self.cfg.runner.experiment_name
