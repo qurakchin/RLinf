@@ -518,7 +518,6 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
             extra_fields_traj: Trajectory-level extra fields.
             extra_fields_group: Group-level extra fields.
             extra_fields_train: Training-only fields (e.g. regroup indices).
-            use_no_training: Whether to drop turns marked as non-training.
 
         Returns:
             A packed `DynamicRolloutResult` ready for downstream training/eval.
@@ -546,7 +545,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
         for idx, task_result in enumerate(task_results):
             for single_turn_output in task_result.single_turn_outputs:
                 single_turn_output: AgentLoopOutput
-                if single_turn_output.extra_fields["not_training"]:
+                if single_turn_output.extra_fields.get("not_training", False):
                     continue
                 idx_to_traj.append(idx)
                 prompt_lengths.append(len(single_turn_output.prompt_ids))
