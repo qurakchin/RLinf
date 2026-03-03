@@ -425,16 +425,11 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
                 response_text, role=role
             )
 
-            # Store output
-            # if self.cfg.runner.task_type == "reasoning":
-            #     assert generate_result["logprobs"] is not None
-            # else:
-            #     generate_result["logprobs"] = [0.0] * len(generate_result["output_ids"])
-
             if self.is_eval:
                 generate_result["logprobs"] = None
             else:
                 assert generate_result["logprobs"] is not None
+                
             output_buffer.append(
                 AgentLoopOutput(
                     prompt_ids=copy.deepcopy(prompt_ids),
