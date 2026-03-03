@@ -45,12 +45,12 @@ from rlinf.data.tool_call.tool_io_struct import (
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.agent.agent_loop import (
     AgentLoopOutput,
-    MultiTurnAgentLoopOutput,
-    MultiTurnAgentLoopWorker,
+    MultiAgentLoopOutput,
+    MultiAgentLoopWorker,
 )
 
 
-class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
+class WideSeekR1AgentLoopWorker(MultiAgentLoopWorker):
     """Multi-turn WideSeek-R1 agent worker for MAS and single-agent workflows."""
 
     def __init__(
@@ -736,7 +736,7 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
                 single_turn_output.response_text
             )
 
-        output = MultiTurnAgentLoopOutput(
+        output = MultiAgentLoopOutput(
             single_turn_outputs=output_buffer,
             trace_prints=[],  # Can add message_history tracking if needed
             extra_fields={
@@ -756,7 +756,7 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
 
     def gen_extra_fields(
         self,
-        task_results: list[MultiTurnAgentLoopOutput],
+        task_results: list[MultiAgentLoopOutput],
         answer: str,
     ) -> Optional[dict]:
         """Build extra fields for turn/traj/group scopes and training regrouping.

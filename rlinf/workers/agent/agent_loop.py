@@ -70,7 +70,7 @@ class AgentLoopOutput:
 
 
 @dataclass
-class MultiTurnAgentLoopOutput:
+class MultiAgentLoopOutput:
     """Multi agent loop output."""
 
     """Single-turn agent loop outputs."""
@@ -104,8 +104,8 @@ class AgentLoopWorker(Worker):
             "is_dynamic_rollout_batch", False
         )
         if self.is_dynamic_rollout_batch:
-            assert isinstance(self, MultiTurnAgentLoopWorker), (
-                "agent loop worker must be MultiTurnAgentLoopWorker if is_dynamic_rollout_batch is True"
+            assert isinstance(self, MultiAgentLoopWorker), (
+                "agent loop worker must be MultiAgentLoopWorker if is_dynamic_rollout_batch is True"
             )
 
         self.tokenizer = AutoTokenizer.from_pretrained(cfg.rollout.model.model_path)
@@ -324,7 +324,7 @@ class AgentLoopWorker(Worker):
         raise NotImplementedError("Subclasses must implement this method")
 
 
-class MultiTurnAgentLoopWorker(AgentLoopWorker):
+class MultiAgentLoopWorker(AgentLoopWorker):
     """Multi-turn agent loop worker."""
 
     def __init__(
@@ -353,7 +353,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
             group_size: Number of rollouts per query (k samples for pass@k)
             output_channel: Channel to output results
         """
-        rollout_tasks: list[asyncio.Task[MultiTurnAgentLoopOutput]] = []
+        rollout_tasks: list[asyncio.Task[MultiAgentLoopOutput]] = []
         # grpo group_size
         for _ in range(group_size):
             task = asyncio.create_task(
@@ -406,7 +406,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
 
     def gen_extra_fields(
         self,
-        task_results: list[MultiTurnAgentLoopOutput],
+        task_results: list[MultiAgentLoopOutput],
         answer: str,
     ) -> Optional[dict]:
         """Collect extra fields emitted by per-turn and per-trajectory outputs.
@@ -504,7 +504,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
 
     def get_rollout_result(
         self,
-        task_results: list[MultiTurnAgentLoopOutput],
+        task_results: list[MultiAgentLoopOutput],
         extra_fields_turn: Optional[dict],
         extra_fields_traj: Optional[dict],
         extra_fields_group: Optional[dict],
@@ -577,6 +577,6 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
             extra_fields_train=extra_fields_train,
         )
 
-    async def run_one_query(self, *args, **kwargs) -> MultiTurnAgentLoopOutput:
+    async def run_one_query(self, *args, **kwargs) -> MultiAgentLoopOutput:
         """Run one query and return a multi-turn output (subclass must implement)."""
         raise NotImplementedError("Subclasses must implement this method")
