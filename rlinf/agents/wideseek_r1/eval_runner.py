@@ -105,7 +105,7 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         data_paths = self.cfg.data.val_data_paths
-        if data_paths:
+        if OmegaConf.is_config(data_paths): 
             data_paths = OmegaConf.to_container(data_paths, resolve=True)
 
         model_config_name = self.cfg.runner.experiment_name

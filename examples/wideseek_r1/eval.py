@@ -27,7 +27,7 @@ from rlinf.config import validate_cfg
 from rlinf.data.datasets import create_rl_dataset
 from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.scheduler import Cluster, NodePlacementStrategy, PackedPlacementStrategy
-from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf.utils.placement import ModelParallelEvalComponentPlacement
 from rlinf.utils.utils import output_redirector
 from rlinf.workers.agent.tool_worker import ToolWorkerInfo
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
@@ -43,7 +43,7 @@ def main(cfg) -> None:
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 
     cluster = Cluster(cluster_cfg=cfg.cluster)
-    component_placement = ModelParallelComponentPlacement(cfg, cluster)
+    component_placement = ModelParallelEvalComponentPlacement(cfg, cluster)
 
     # Generator group
     rollout_worker_cls = get_rollout_backend_worker(cfg)
@@ -127,7 +127,7 @@ def main(cfg) -> None:
     )
 
     # Dataset
-    tokenizer = hf_tokenizer(cfg.actor.tokenizer.tokenizer_model)
+    tokenizer = hf_tokenizer(cfg.rollout.model.model_path)
     train_ds, val_ds = create_rl_dataset(cfg, tokenizer)
 
     # Tool workers group

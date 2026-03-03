@@ -76,7 +76,7 @@ Before starting training, verify all of the following:
 
 - ``rollout.model.model_path`` points to the downloaded base model.
 - ``data.train_data_paths`` points to the training dataset.
-- ``agentloop.llm_ip`` is set correctly, or ``LLM_JUDGE_IP`` is exported.
+- ``agentloop.llm_ip`` is set correctly.
 - Offline tools are configured and reachable. See :doc:`tools`.
 
 Then run:
