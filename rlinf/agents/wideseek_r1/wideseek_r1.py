@@ -80,7 +80,7 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
         ]
 
         self.max_prompt_len = int(self.cfg.data.max_prompt_length)
-        self.max_total_len = int(self.cfg.actor.model.encoder_seq_length)
+        self.max_total_len = int(self.cfg.runner.seq_length)
 
         self.use_access_summary = self.cfg.tools.get("use_access_summary", False)
 
@@ -426,7 +426,10 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
             )
 
             # Store output
-            assert generate_result["logprobs"] is not None
+            if self.cfg.runner.task_type == "reasoning":
+                assert generate_result["logprobs"] is not None
+            else:
+                generate_result["logprobs"] = [0.0] * len(generate_result["output_ids"])
             output_buffer.append(
                 AgentLoopOutput(
                     prompt_ids=copy.deepcopy(prompt_ids),

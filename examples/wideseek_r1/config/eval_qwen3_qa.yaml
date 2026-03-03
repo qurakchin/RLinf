@@ -19,7 +19,7 @@ algorithm:
 
 agentloop:
   workflow: mas # or sa, mas refers to multi-agent, sa refers to single-agent
-  llm_ip: ${oc.env:LLM_JUDGE_IP}
+  llm_ip: LLM_JUDGE_IP # TODO:
   llm_port: 30000
 
 rollout:
