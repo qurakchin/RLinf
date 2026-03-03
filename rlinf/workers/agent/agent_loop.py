@@ -529,7 +529,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
                     self.print_agent_outputs(None, task_result.trace_prints)
         if self.is_eval:
             self.log_info(
-                f"finish question id {task_results[0].extra_fields['instance_id']}"
+                f"finish question id {task_results[0].extra_fields.get('instance_id', None)}"
             )
 
         idx_to_traj = []
@@ -546,7 +546,7 @@ class MultiTurnAgentLoopWorker(AgentLoopWorker):
         for idx, task_result in enumerate(task_results):
             for single_turn_output in task_result.single_turn_outputs:
                 single_turn_output: AgentLoopOutput
-                if not self.is_eval and single_turn_output.extra_fields["not_training"]:
+                if single_turn_output.extra_fields["not_training"]:
                     continue
                 idx_to_traj.append(idx)
                 prompt_lengths.append(len(single_turn_output.prompt_ids))

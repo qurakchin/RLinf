@@ -76,6 +76,12 @@ WideSeek-R1 支持两种工具后端：
    agentloop:
      llm_ip: LLM_JUDGE_IP
 
+你可以通过一下命令测试:
+
+.. code-block:: bash
+
+   python rlinf/agents/wideseek_r1/utils/sglang_client.py --llm-ip LLM_JUDGE_IP
+   
 多节点
 ~~~~~~~~~~~~
 

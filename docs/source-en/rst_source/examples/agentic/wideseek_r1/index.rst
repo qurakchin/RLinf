@@ -92,6 +92,12 @@ Use that IP address in the YAML configuration through
    agentloop:
      llm_ip: LLM_JUDGE_IP
 
+you can test it by:
+
+.. code-block:: bash
+
+   python rlinf/agents/wideseek_r1/utils/sglang_client.py --llm-ip LLM_JUDGE_IP
+
 Multi-node 
 ~~~~~~~~~~~~
 

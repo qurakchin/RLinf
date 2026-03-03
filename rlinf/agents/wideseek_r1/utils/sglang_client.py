@@ -14,6 +14,7 @@
 
 
 import asyncio
+import argparse
 import threading
 
 import aiohttp
@@ -44,6 +45,13 @@ class SGLangClient:
                         trust_env=False,
                     )
         return cls._shared_session
+
+    @classmethod
+    async def close_session(cls) -> None:
+        """Close the shared aiohttp session when the process exits."""
+        if cls._shared_session is not None and not cls._shared_session.closed:
+            await cls._shared_session.close()
+        cls._shared_session = None
 
     def __init__(self, llm_ip: str, llm_port: str, llm_type: str):
         """Store endpoint and model metadata for SGLang chat completions.
@@ -99,3 +107,41 @@ class SGLangClient:
 
         print(f"[ERROR] SGLangClient: Failed after {max_retries} retries")
         return None
+
+
+async def _main() -> None:
+    """Run a simple manual test against an SGLang endpoint."""
+    parser = argparse.ArgumentParser(description="Simple SGLang client test")
+    parser.add_argument("--llm-ip", required=True, help="SGLang server host or IP")
+    parser.add_argument(
+        "--llm-port",
+        default="30000",
+        help="SGLang server port, defaults to 30000",
+    )
+    parser.add_argument(
+        "--llm-type",
+        default="qwen3",
+        help="Model name, defaults to qwen3",
+    )
+    parser.add_argument(
+        "--prompt",
+        default="Hello, introduce yourself briefly.",
+        help="Prompt sent to the model",
+    )
+    args = parser.parse_args()
+
+    try:
+        client = SGLangClient(
+            llm_ip=args.llm_ip,
+            llm_port=args.llm_port,
+            llm_type=args.llm_type,
+        )
+        messages = [{"role": "user", "content": args.prompt}]
+        response = await client.call_sglang_api(messages)
+        print(response)
+    finally:
+        await SGLangClient.close_session()
+
+
+if __name__ == "__main__":
+    asyncio.run(_main())

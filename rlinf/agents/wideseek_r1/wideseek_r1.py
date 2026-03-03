@@ -97,6 +97,7 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
         llm_port = self.cfg.agentloop.get("llm_port", "")
         llm_type = self.cfg.agentloop.get("llm_type", "")
         self.sgl_client = SGLangClient(llm_ip, llm_port, llm_type)
+        assert self.return_logprobs if not self.is_eval else True
 
     async def extract_tool_calls(
         self, response_text: str, role: str
@@ -425,11 +426,6 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
                 response_text, role=role
             )
 
-            if self.is_eval:
-                generate_result["logprobs"] = None
-            else:
-                assert generate_result["logprobs"] is not None
-                
             output_buffer.append(
                 AgentLoopOutput(
                     prompt_ids=copy.deepcopy(prompt_ids),
@@ -437,7 +433,7 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
                     prompt_text=copy.deepcopy(self.tokenizer.decode(prompt_ids)),
                     response_text=response_text,
                     is_end=generate_result["finish_reason"] == "length",
-                    response_logprobs=generate_result["logprobs"],
+                    response_logprobs=generate_result["logprobs"] if self.return_logprobs else None,
                     extra_fields={
                         "role": role,
                         "idx_to_sub_traj": sub_traj_id,
@@ -700,7 +696,7 @@ class WideSeekR1AgentLoopWorker(MultiTurnAgentLoopWorker):
             single_turn_output.reward_score = reward_score
 
         for single_turn_output in output_buffer:
-            single_turn_output.extra_fields["not_training"] = True
+            single_turn_output.extra_fields["not_training"] = False if self.is_eval else True
         for single_turn_output in train_buffer:
             single_turn_output.extra_fields["not_training"] = False
 
