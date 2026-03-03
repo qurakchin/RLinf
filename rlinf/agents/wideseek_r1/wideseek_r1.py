@@ -92,7 +92,6 @@ class WideSeekR1AgentLoopWorker(MultiAgentLoopWorker):
         self.workflow = self.cfg.agentloop.get("workflow", "mas")
         self.is_hybrid = self.cfg.data.get("is_hybrid", False)
 
-        self.use_llm_judge_api = True
         llm_ip = self.cfg.agentloop.get("llm_ip", "")
         llm_port = self.cfg.agentloop.get("llm_port", "")
         llm_type = self.cfg.agentloop.get("llm_type", "")

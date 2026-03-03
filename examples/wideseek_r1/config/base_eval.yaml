@@ -111,15 +111,13 @@ tools:
   search:
     server_addr: "127.0.0.1:8000"  # Used only for local search
     topk: 3
-    stop_token: "</search>"
   use_access_summary: True
   # Online search cache settings (only used when online: True)
-  enable_cache: True # may have some bugs?
+  enable_cache: True 
   cache_size: 50000
   cache_file: './webpage_cache.json'
   use_jina: True  # Set to True to enable Jina API for webpage access
 
-  use_access_summary_http: False
 
 
 rollout:
