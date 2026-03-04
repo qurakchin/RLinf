@@ -191,6 +191,27 @@ class FSDPActor(FSDPModelManager, Worker):
         self.enable_dynamic_batch_size = cfg.runner.get(
             "enable_dynamic_batch_size", False
         )
+        if self.cfg.algorithm.recompute_logprobs:
+            # validate inference mbs
+            inference_split = self.cfg.actor.get("inference_split", None)
+            if inference_split is None:
+                if not self.is_pipeline:
+                    inference_split = 1
+                else:
+                    inference_split = self.cfg.algorithm.n_minibatches
+            assert self.total_batch_size_per_dp % inference_split == 0, (
+                f"FSDPActor: total_batch_size_per_dp[{self.total_batch_size_per_dp}] should be divisible by inference_split[{inference_split}]"
+            )
+            inference_max_mbs = (
+                self.cfg.data.rollout_batch_size // self._world_size // inference_split
+            )
+            assert inference_max_mbs >= 1, f"inference mbs validate error, max mbs({inference_max_mbs}) should >= 1"
+            if self.enable_dynamic_batch_size:
+                inference_min_mbs = 1
+            else:
+                inference_min_mbs = max(1, self.cfg.algorithm.logprob_forward_micro_batch_size // self.cfg.algorithm.group_size)
+                assert inference_min_mbs <= inference_max_mbs, f"inference mbs validate error, min mbs({inference_min_mbs}) should <= max mbs({inference_max_mbs})"
+            self.inference_min_mbs, self.inference_max_mbs = inference_min_mbs, inference_max_mbs
         # remove padding for speed up
         self.variable_seq_lengths = cfg.actor.model.get("variable_seq_lengths", True)
         if self.is_pipeline:
@@ -384,15 +405,15 @@ class FSDPActor(FSDPModelManager, Worker):
     def get_dynamic_batch_as_much(
         self,
         input_channel: Channel,
-        min_result_len: int,
-        max_result_len: int,
+        inference_min_mbs: int,
+        inference_max_mbs: int,
         cliped_results=[],
         unfinished_result=None,
     ):
         assert not input_channel.is_local
         rollout_results = cliped_results
-        # get min_result_len
-        while len(rollout_results) < min_result_len:
+        # get inference_min_mbs
+        while len(rollout_results) < inference_min_mbs:
             if unfinished_result is not None:
                 rollout_result: RolloutResult = unfinished_result.wait()
                 unfinished_result = None
@@ -407,7 +428,7 @@ class FSDPActor(FSDPModelManager, Worker):
         result_len = len(rollout_results)
         time_until = time.time() + 0.1
         while last_result_len < result_len:
-            if len(rollout_results) < max_result_len:
+            if len(rollout_results) < inference_max_mbs:
                 if unfinished_result is None:
                     unfinished_result = input_channel.get(async_op=True)
                 else:
@@ -418,11 +439,13 @@ class FSDPActor(FSDPModelManager, Worker):
                 if time.time() >= time_until:
                     last_result_len = result_len
                     result_len = all_reduce_int(len(rollout_results))
+                    result_len = result_len // inference_min_mbs * inference_min_mbs
                     if last_result_len < result_len:
                         time_until = time.time() + 0.1
             else:
                 last_result_len = result_len
                 result_len = all_reduce_int(len(rollout_results))
+                result_len = result_len // inference_min_mbs * inference_min_mbs
 
         batches = []
         for rollout_result in rollout_results:
@@ -647,22 +670,8 @@ class FSDPActor(FSDPModelManager, Worker):
             output_channel: The output channel to send results to.
             compute_ref_logprobs: Whether to compute reference logprobs.
         """
-        inference_split = self.cfg.actor.get("inference_split", None)
-        if inference_split is None:
-            if not self.is_pipeline:
-                inference_split = 1
-            else:
-                inference_split = self.cfg.algorithm.n_minibatches
-        assert self.total_batch_size_per_dp % inference_split == 0, (
-            f"FSDPActor: total_batch_size_per_dp[{self.total_batch_size_per_dp}] should be divisible by inference_split[{inference_split}]"
-        )
-
-        min_result_len = 1
-        max_result_len = (
-            self.cfg.data.rollout_batch_size // self._world_size // inference_split
-        )
+        inference_min_mbs, inference_max_mbs = self.inference_min_mbs, self.inference_max_mbs
         if not self.is_pipeline:
-            min_result_len = max_result_len
             coll_rollout_results = []
         total_result_len = 0
         total_result_len_per_dp = self.cfg.data.rollout_batch_size // self._world_size
@@ -671,8 +680,8 @@ class FSDPActor(FSDPModelManager, Worker):
             batch, rollout_result, result_len, cliped_results, unfinished_result = (
                 self.get_dynamic_batch_as_much(
                     input_channel,
-                    min(min_result_len, total_result_len_per_dp - total_result_len),
-                    min(max_result_len, total_result_len_per_dp - total_result_len),
+                    min(inference_min_mbs, total_result_len_per_dp - total_result_len),
+                    min(inference_max_mbs, total_result_len_per_dp - total_result_len),
                     cliped_results,
                     unfinished_result,
                 )
@@ -718,7 +727,7 @@ class FSDPActor(FSDPModelManager, Worker):
                 min(total_result_len, self.cfg.algorithm.n_minibatches),
             )
             for split_result in split_results:
-                output_channel.put(split_result, async_op=True)
+                output_channel.put(split_result)
         assert total_result_len == total_result_len_per_dp, (
             f"Expected {total_result_len_per_dp} sequences from channel, but got {total_result_len}"
         )
