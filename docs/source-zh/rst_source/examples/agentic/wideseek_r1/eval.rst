@@ -131,7 +131,7 @@ WideSearch 基准
 对于 WideSearch 评测，RLinf 会保存生成的回答，以便使用官方 WideSearch 评测流程进行打分。
 
 额外的 WideSearch 打分
----------------------
+------------------------
 
 如果需要最终的 WideSearch 基准分数，请使用专门的评测仓库：
 
