@@ -130,7 +130,6 @@ agentloop:
 
 # Tools configuration for AgentLoop
 tools:
-  mcp_file_system: null
   online: False  # Set to True to use online search (Serper API), False for local search
   search:
     server_addr: "127.0.0.1:8000"  # Used only for local search

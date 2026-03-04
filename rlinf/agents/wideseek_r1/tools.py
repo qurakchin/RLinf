@@ -595,22 +595,6 @@ class WideSeekR1ToolWorker(ToolWorker):
                 page = response[0].get("page", "")
                 assert access_token is not None
                 if page is not None and page.strip() != "":
-                    # # Limit page content to 250k characters
-                    # page = page[:250000]
-
-                    # # Split into chunks of 25k characters, max 10 pages
-                    # page_chunks = []
-                    # chunk_idx = 0
-                    # while len(page) > 0 and chunk_idx < 10:
-                    #     chunk_len = min(25000, len(page))
-                    #     page_chunks.append(
-                    #         f">>>> Page {chunk_idx + 1} >>>>\n\n" + page[:chunk_len]
-                    #     )
-                    #     page = page[chunk_len:]
-                    #     chunk_idx += 1
-
-                    # # Return first page chunk (agent will need to handle pagination)
-                    # return page_chunks[0] if page_chunks else "No More Information is Found for this URL."
                     return page[:access_token]
                 else:
                     return "No More Information is Found for this URL."

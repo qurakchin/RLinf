@@ -50,17 +50,26 @@ def main(cfg) -> None:
     rollout_placement_strategy = component_placement.get_strategy("rollout")
     if cfg.rollout.get("use_fixed_worker", False):
         # main agent and sub agent use different rollout engine
-        # TODO: add support for multiple rollout engines in a more elegant way and refactor this code
         rollout_accel_num = (
             rollout_placement_strategy._end_hw_rank
             - rollout_placement_strategy._start_hw_rank
             + 1
         )
-        assert rollout_accel_num % 2 == 0
-        assert (rollout_accel_num // 2) % cfg.rollout.tensor_parallel_size == 0
+        assert rollout_accel_num % 2 == 0, (
+            f"rollout accelerator count must be even when "
+            f"`cfg.rollout.use_fixed_worker=True`, got {rollout_accel_num}"
+        )
+        assert (rollout_accel_num // 2) % cfg.rollout.tensor_parallel_size == 0, (
+            f"half of rollout accelerators ({rollout_accel_num // 2}) must be divisible "
+            f"by `cfg.rollout.tensor_parallel_size` ({cfg.rollout.tensor_parallel_size})"
+        )
         assert (
             rollout_accel_num // 2
-        ) % cfg.rollout_fixed_worker.tensor_parallel_size == 0
+        ) % cfg.rollout_fixed_worker.tensor_parallel_size == 0, (
+            f"half of rollout accelerators ({rollout_accel_num // 2}) must be divisible "
+            f"by `cfg.rollout_fixed_worker.tensor_parallel_size` "
+            f"({cfg.rollout_fixed_worker.tensor_parallel_size})"
+        )
         planner_rollout_placement_strategy = PackedPlacementStrategy(
             rollout_placement_strategy._start_hw_rank,
             rollout_placement_strategy._start_hw_rank + rollout_accel_num // 2 - 1,
@@ -131,7 +140,7 @@ def main(cfg) -> None:
     train_ds, val_ds = create_rl_dataset(cfg, tokenizer)
 
     # Tool workers group
-    if cfg.get("tools", {}).get("online") is True:
+    if cfg.tools.online is True:
         num_tool_worker_per_node = 1
     else:
         num_tool_worker_per_node = 32

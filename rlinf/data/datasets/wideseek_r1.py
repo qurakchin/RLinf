@@ -75,7 +75,7 @@ class WideSeekR1_Dataset(Dataset):
             for i in range((total + batch_size - 1) // batch_size)
         ]
         results = []
-        all_failed = 0
+        num_failed = 0
         if process_workers > 1:
             with ThreadPoolExecutor(process_workers) as pool:
                 handles = [
@@ -85,21 +85,21 @@ class WideSeekR1_Dataset(Dataset):
                 for handle in handles:
                     result, failed = handle.result()
                     results.extend(result)
-                    all_failed += failed
+                    num_failed += failed
         else:
             for batch in batches:
                 result, failed = self._load_post_process_batch(batch)
                 results.extend(result)
-                all_failed += failed
+                num_failed += failed
 
         assert len(results) > 0, (
             f"No samples found within max_prompt_length={self.max_prompt_length}. "
             "Please check your dataset or increase max_prompt_length."
         )
 
-        if all_failed > 0:
+        if num_failed > 0:
             logging.warning(
-                f"{all_failed} samples were skipped due to format issues "
+                f"{num_failed} samples were skipped due to format issues "
                 f"(kept {len(results)} / {total})."
             )
         return results

@@ -46,11 +46,11 @@ def _compute_tool_call_metrics(
     if num_trajectories <= 0:
         return {}
 
-    turn_subtask_counts = list(rollout_batch.get("turn_subtask_counts") or [])
-    turn_search_counts = list(rollout_batch.get("turn_search_counts") or [])
-    turn_access_counts = list(rollout_batch.get("turn_access_counts") or [])
-    num_valid_planner_turns = int(rollout_batch.get("num_valid_planner_turns", 0) or 0)
-    num_valid_worker_turns = int(rollout_batch.get("num_valid_worker_turns", 0) or 0)
+    turn_subtask_counts = list(rollout_batch.get("turn_subtask_counts", []))
+    turn_search_counts = list(rollout_batch.get("turn_search_counts", []))
+    turn_access_counts = list(rollout_batch.get("turn_access_counts", []))
+    num_valid_planner_turns = int(rollout_batch.get("num_valid_planner_turns", 0))
+    num_valid_worker_turns = int(rollout_batch.get("num_valid_worker_turns", 0))
 
     # idx_to_traj may come from training turns; use common prefix to avoid index mismatch.
     num_mapped_turns = min(

@@ -432,7 +432,9 @@ class WideSeekR1AgentLoopWorker(MultiAgentLoopWorker):
                     prompt_text=copy.deepcopy(self.tokenizer.decode(prompt_ids)),
                     response_text=response_text,
                     is_end=generate_result["finish_reason"] == "length",
-                    response_logprobs=generate_result["logprobs"] if self.return_logprobs else None,
+                    response_logprobs=generate_result["logprobs"]
+                    if self.return_logprobs
+                    else None,
                     extra_fields={
                         "role": role,
                         "idx_to_sub_traj": sub_traj_id,
@@ -695,7 +697,9 @@ class WideSeekR1AgentLoopWorker(MultiAgentLoopWorker):
             single_turn_output.reward_score = reward_score
 
         for single_turn_output in output_buffer:
-            single_turn_output.extra_fields["not_training"] = False if self.is_eval else True
+            single_turn_output.extra_fields["not_training"] = (
+                False if self.is_eval else True
+            )
         for single_turn_output in train_buffer:
             single_turn_output.extra_fields["not_training"] = False
 

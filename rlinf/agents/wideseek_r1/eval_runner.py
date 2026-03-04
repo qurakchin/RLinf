@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import json
 import logging
 import os
@@ -89,7 +90,6 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
         Returns:
             Path to the saved `metrics.json` file.
         """
-        import datetime
 
         output_dir = os.path.join(
             self.cfg.runner.output_dir, self.cfg.runner.experiment_name
@@ -105,7 +105,7 @@ class WideSeekR1AgentEvalRunner(AgentEvalRunner):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         data_paths = self.cfg.data.val_data_paths
-        if OmegaConf.is_config(data_paths): 
+        if OmegaConf.is_config(data_paths):
             data_paths = OmegaConf.to_container(data_paths, resolve=True)
 
         model_config_name = self.cfg.runner.experiment_name

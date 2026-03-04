@@ -133,15 +133,19 @@ def compute_grpo_dynamic_advantages(
     """Compute GRPO advantages for dynamic multi-turn batches.
 
     Args:
-        rewards (torch.Tensor): Reward values aligned to flattened turn sequences.
-        loss_mask (torch.Tensor): Token-level mask used to broadcast advantages.
+        rewards (torch.Tensor): Reward values for flattened turns. Shape: [num_turns]
+            or [num_turns, 1].
+        loss_mask (torch.Tensor): Token-level mask used to broadcast turn-level
+            advantages. Shape: [seq_len, num_turns].
         group_size (int): Number of sampled trajectories per question.
-        idx_to_traj (list[int]): Mapping from flattened turn index to trajectory id.
+        idx_to_traj (list[int]): Mapping from each flattened turn index to its
+            trajectory id.
         advantage_mode (str): `trajectory` for per-trajectory normalization, or
             `turn` for per-question turn-level normalization.
 
     Returns:
-        tuple[torch.Tensor, None]: advantages
+        tuple[torch.Tensor, None]: Broadcasted token-level advantages with shape
+        [seq_len, num_turns], and `None` for returns.
     """
     num_sequence = len(idx_to_traj)
 
@@ -174,7 +178,7 @@ def compute_grpo_dynamic_advantages(
             trajectory_rewards[traj_idx] += rewards_flat[turn_idx]
             trajectory_counts[traj_idx] += 1
 
-        # Average rewards per trajectory.
+        # Step 1: Average rewards per trajectory.
         trajectory_rewards = trajectory_rewards / trajectory_counts.clamp(min=1).float()
 
         # Step 2: reshape to [num_questions, group_size] for per-question GRPO.
@@ -201,24 +205,28 @@ def compute_grpo_dynamic_advantages(
             turn_advantages[turn_idx] = normalized_trajectory_rewards[traj_idx]
 
     elif advantage_mode == "turn":
-        # Normalize all turns belonging to the same question together.
+        # Step 1: map each turn to its owning question.
         turn_to_question = torch.tensor(
             [idx_to_traj[i] // group_size for i in range(num_sequence)],
             dtype=torch.long,
             device=rewards.device,
         )
 
+        # Step 2: normalize turn rewards within each question group.
         for question_idx in range(num_questions):
             question_mask = turn_to_question == question_idx
             question_turn_rewards = rewards_flat[question_mask]
 
+            # Step 3: compute mean and std for all turns in this question.
             question_mean = question_turn_rewards.mean()
             question_std = question_turn_rewards.std()
 
+            # Step 4: normalize turn rewards within the question.
             normalized_question_rewards = (question_turn_rewards - question_mean) / (
                 question_std + 1e-6
             )
 
+            # Step 5: write normalized turn-level advantages back.
             turn_advantages[question_mask] = normalized_question_rewards
 
     else:

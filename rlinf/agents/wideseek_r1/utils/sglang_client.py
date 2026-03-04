@@ -13,8 +13,8 @@
 # limitations under the License.
 
 
-import asyncio
 import argparse
+import asyncio
 import threading
 
 import aiohttp
@@ -97,9 +97,6 @@ class SGLangClient:
                         return result_text
 
             except Exception:
-                # print(
-                #     f"[ERROR] SGLangClient: Exception error in calling sglang: {e}, Retry {retry_count}/{max_retries}"
-                # )
                 pass
 
             retry_count += 1
