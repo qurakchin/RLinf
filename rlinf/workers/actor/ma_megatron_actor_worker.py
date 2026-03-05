@@ -195,6 +195,7 @@ class MAMegatronActor(MegatronActor):
                 curr_logprobs[:, 0] = 0.0  # first token has no previous token
 
                 advantages = batch["advantages"]
+                advantages *= batch["loss_scales"]
                 prev_logprobs = batch["prev_logprobs"]
                 ref_logprobs = None
                 if "ref_logprobs" in batch:
@@ -242,9 +243,8 @@ class MAMegatronActor(MegatronActor):
 
                 kl_loss = torch.tensor(0.0, device=torch.cuda.current_device())
                 if self.kl_beta > 0 and ref_logprobs is not None:
-                    assert False, "Currently, KL loss is not avaliable"
                     kld = kl_penalty(curr_logprobs, ref_logprobs, self.kl_penalty_type)
-                    kl_loss = self.loss_agg_func(kld, mask)
+                    kl_loss = self.loss_agg_func(kld * batch["loss_scales"], mask)
                     loss = loss + kl_loss * self.kl_beta
 
                 # all gather
@@ -265,15 +265,6 @@ class MAMegatronActor(MegatronActor):
                         f"than early stop threshold {self.cfg.algorithm.early_stop_imp_ratio}. Abandon this microbatch."
                     )
                     loss = loss * 0.0
-
-                if self.cfg.algorithm.use_valid_token_scale:
-                    loss_scale = (
-                        mask.sum()
-                        / self.global_valid_token
-                        * parallel_state.get_data_parallel_world_size()
-                        * self.num_microbatches
-                    )
-                    loss *= loss_scale.item()
 
                 # add to log
                 metrics_data.update(
@@ -402,6 +393,9 @@ class MAMegatronActor(MegatronActor):
         assert "prev_logprobs" in batch
         # Compute advantages and returns
         batch = self.compute_advantages_and_returns(batch)
+        batch["loss_scales"] = torch.ones_like(batch["advantages"]).masked_fill(
+            ~batch["response_mask"], 0
+        )
         # Advantage normalization
         if self.cfg.algorithm.normalize_advantages:
             assert False, "not implemented in multi-agent"
@@ -411,10 +405,6 @@ class MAMegatronActor(MegatronActor):
                 mask,
                 group=parallel_state.get_data_parallel_group(),
             )
-
-        # Valid token scale
-        if self.cfg.algorithm.use_valid_token_scale:
-            self._setup_valid_token_scale(batch)
 
         # metrics
         rollout_metrics = self._compute_rollout_metrics(batch)
@@ -430,14 +420,10 @@ class MAMegatronActor(MegatronActor):
             ),
             "data_parallel_world_size": parallel_state.get_data_parallel_world_size(),
         }
-        batch["loss_scales"] = torch.ones_like(batch["advantages"]).masked_fill(
-            ~batch["response_mask"], 0
-        )
         for loss_scale_fn in self.loss_scale_fns:
             batch = loss_scale_fn(scale_context, batch)
         if self.pack_traj:
             batch = DynamicRolloutResult.pack_traj_batch(scale_context, batch)
-        batch["advantages"] *= batch.pop("loss_scales")
         for key in list(batch.keys()):
             if key == "idx_to_traj" or key.startswith("extra:"):
                 batch.pop(key, None)

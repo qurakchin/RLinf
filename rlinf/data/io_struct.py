@@ -1114,10 +1114,6 @@ class DynamicRolloutResult:
             advantages (torch.Tensor), optional:
                 Advantage values for the responses,
                 shape ``[num_sequence, seq_length]``.
-
-            # loss_scales (torch.Tensor), optional:
-            #     loss scale values for the responses,
-            #     shape ``[num_sequence, seq_length]``.
         """
 
         # len = seq_length: input_ids, attention_mask, position_ids
@@ -1178,9 +1174,6 @@ class DynamicRolloutResult:
         if self.advantages is not None:
             batch["advantages"] = self.advantages.cuda()
 
-        # if self.loss_scales is not None:
-        #     batch["loss_scales"] = self.loss_scales.cuda()
-
         if self.ref_logprobs is not None:
             batch["ref_logprobs"] = self.ref_logprobs.cuda()
 
@@ -1228,6 +1221,9 @@ class DynamicRolloutResult:
                 1, dtype=torch.float32, device=torch.cuda.current_device()
             ),
             "advantages": torch.zeros(
+                *pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()
+            ),
+            "loss_scales": torch.zeros(
                 *pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()
             ),
         }
@@ -1485,16 +1481,6 @@ class DynamicRolloutResult:
                     )
                 else:
                     raise ValueError(f"Wrong type of advantages {type(res.advantages)}")
-
-            if res.loss_scales is not None:
-                if isinstance(res.loss_scales, torch.Tensor):
-                    merged_result.loss_scales = merge_tensor(
-                        merged_result.loss_scales, res.loss_scales
-                    )
-                else:
-                    raise ValueError(
-                        f"Wrong type of loss_scales {type(res.loss_scales)}"
-                    )
 
         return merged_result
 
