@@ -178,6 +178,7 @@ def compute_ppo_actor_loss(
     critic_warmup: Optional[bool] = False,
     clip_log_ratio_min: Optional[float] = None,
     clip_log_ratio_max: Optional[float] = None,
+    fast_path_zero_loss_mask: Optional[bool] = False,
     **kwargs,
 ) -> tuple[torch.Tensor, dict]:
     """
@@ -197,7 +198,9 @@ def compute_ppo_actor_loss(
     Returns:
         Tuple[torch.Tensor, Dict]: (actor_loss, metrics_dict)
     """
-    if loss_mask is not None and loss_mask[0].sum() == 0.0:
+    if fast_path_zero_loss_mask and (
+        loss_mask is not None and loss_mask[0].sum() == 0.0
+    ):
         return torch.tensor(0.0, device=logprobs.device), {
             "actor/token_num": torch.tensor(0.0, device=logprobs.device),
             "actor/policy_loss": torch.tensor(0.0, device=logprobs.device),
