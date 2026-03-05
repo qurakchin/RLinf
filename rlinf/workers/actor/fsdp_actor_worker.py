@@ -778,12 +778,8 @@ class FSDPActor(FSDPModelManager, Worker):
                 clip_ratio_low=clip_ratio_low,
                 clip_ratio_high=clip_ratio_high,
                 loss_mask=loss_mask,
-                clip_log_ratio_min=self.cfg.algorithm.get(
-                    "clip_log_ratio_min", None
-                ),
-                clip_log_ratio_max=self.cfg.algorithm.get(
-                    "clip_log_ratio_max", None
-                ),
+                clip_log_ratio_min=self.cfg.algorithm.get("clip_log_ratio_min", None),
+                clip_log_ratio_max=self.cfg.algorithm.get("clip_log_ratio_max", None),
                 fast_path_zero_loss_mask=True,
             )
 
