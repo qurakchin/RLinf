@@ -436,7 +436,7 @@ class MAMegatronActor(MegatronActor):
         # DP batch load balance
         if self.cfg.actor.get("enable_dp_load_balance", False):
             batch_pad = DynamicRolloutResult.get_batch_pad(
-                self.cfg.actor.model.encoder_seq_length
+                self.cfg.actor.model.encoder_seq_length, batch.keys()
             )
             batch = self._dp_load_balance_dynamic(
                 batch, batch_pad, self.cfg.actor.micro_batch_size
