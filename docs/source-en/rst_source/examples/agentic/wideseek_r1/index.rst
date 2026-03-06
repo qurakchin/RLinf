@@ -85,12 +85,13 @@ Then obtain the host IP address, for example:
 
    hostname -I
 
-Use that IP address in the YAML configuration through 
+Use that IP address in the YAML configuration through the following fields. The default port is ``30000``.
 
 .. code-block:: yaml
 
    agentloop:
      llm_ip: LLM_JUDGE_IP
+     llm_port: LLM_JUDGE_PORT
 
 you can test it by:
 

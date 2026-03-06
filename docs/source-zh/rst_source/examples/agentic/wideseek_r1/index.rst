@@ -69,12 +69,13 @@ WideSeek-R1 支持两种工具后端：
 
    hostname -I
 
-在 YAML 配置中通过以下字段使用该 IP 地址
+在 YAML 配置中通过以下字段使用该 IP 地址。默认端口为 ``30000``。
 
 .. code-block:: yaml
 
    agentloop:
      llm_ip: LLM_JUDGE_IP
+     llm_port: LLM_JUDGE_PORT
 
 你可以通过一下命令测试:
 
