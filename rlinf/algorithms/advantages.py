@@ -130,22 +130,36 @@ def compute_grpo_dynamic_advantages(
     advantage_mode: str = "turn",  # "trajectory" or "turn"
     **kwargs,
 ):
-    """Compute GRPO advantages for dynamic multi-turn batches.
+    """
+    Compute GRPO advantages for multi-turn multi-agent scenarios.
+
+    IMPORTANT: This function computes advantages PER QUESTION, not globally.
+    - idx_to_traj maps turn_idx -> global_traj_idx (e.g., [0,0,1,1,2,2,3,3,4,4,...,15,15])
+    - Trajectories 0-3 belong to question 0, 4-7 to question 1, etc.
+    - We must compute GRPO separately for each question's group_size trajectories
+
+    Two advantage computation modes:
+    1. "trajectory": Trajectory-level GRPO (Method 1)
+       - Compute mean/std over group_size trajectory rewards per question
+       - Broadcast same advantage to all turns in a trajectory
+       - Example: Q0 has 4 trajs with 1,2,3,4 turns. Compute GRPO over 4 traj rewards,
+                  then assign traj0_adv to its 1 turn, traj1_adv to its 2 turns, etc.
+
+    2. "turn": Turn-level GRPO (Method 2)
+       - Compute mean/std over all turns within each question
+       - Example: Q0 has 4 trajs with 1,2,3,4 turns = 10 turns total.
+                  Compute GRPO over these 10 turn rewards (currently all same within traj).
+       - Future-proof: works when turns have different rewards within same trajectory
 
     Args:
-        rewards (torch.Tensor): Reward values for flattened turns. Shape: [num_turns]
-            or [num_turns, 1].
-        loss_mask (torch.Tensor): Token-level mask used to broadcast turn-level
-            advantages. Shape: [seq_len, num_turns].
-        group_size (int): Number of sampled trajectories per question.
-        idx_to_traj (list[int]): Mapping from each flattened turn index to its
-            trajectory id.
-        advantage_mode (str): `trajectory` for per-trajectory normalization, or
-            `turn` for per-question turn-level normalization.
+        rewards: Shape [num_sequence, 1] after preprocessing (num_sequence = total turns)
+        loss_mask: Shape [seq_len, num_sequence] after preprocessing
+        group_size: Number of trajectories per question (e.g., 4)
+        idx_to_traj: List mapping turn_idx -> global_traj_idx
+        advantage_mode: "trajectory" or "turn"
 
     Returns:
-        tuple[torch.Tensor, None]: Broadcasted token-level advantages with shape
-        [seq_len, num_turns], and `None` for returns.
+        advantages: Shape [seq_len, num_sequence]
     """
     num_sequence = len(idx_to_traj)
 

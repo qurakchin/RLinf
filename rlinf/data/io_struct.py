@@ -1016,17 +1016,15 @@ class DynamicRolloutResult:
 
     # size of belows are num_sequence
     input_ids: list[list[int]]
-    rollout_logprobs: list[list[float]]
+    rollout_logprobs: Optional[list[list[float]]] = None
+    prev_logprobs: Optional[torch.Tensor] = None
     ref_logprobs: Optional[torch.Tensor] = None
+    recompute_prev_logprobs: Optional[torch.Tensor] = None
     prompt_lengths: list[int]
     response_lengths: list[int]
     is_end: list[bool]
-    # response_mask: Optional[list[list[int]]] = None
-
-    # size of belows are num_sequence
     rewards: Optional[torch.Tensor | list[float]] = None
     advantages: Optional[torch.Tensor] = None
-    # loss_scales: Optional[torch.Tensor] = None
 
     # extra fields used in training for custom process
     extra_fields_train: dict[str, list] = field(default_factory=dict)  # [num_sequence]
@@ -1114,10 +1112,6 @@ class DynamicRolloutResult:
             advantages (torch.Tensor), optional:
                 Advantage values for the responses,
                 shape ``[num_sequence, seq_length]``.
-
-            # loss_scales (torch.Tensor), optional:
-            #     loss scale values for the responses,
-            #     shape ``[num_sequence, seq_length]``.
         """
 
         # len = seq_length: input_ids, attention_mask, position_ids
@@ -1148,17 +1142,6 @@ class DynamicRolloutResult:
             pad_token=pad_token,
         )
 
-        prev_logprobs = batch_pad_to_fixed_len(
-            [
-                torch.as_tensor([0] * prompt_length + logprobs, dtype=torch.float)
-                for prompt_length, logprobs in zip(
-                    self.prompt_lengths, self.rollout_logprobs
-                )
-            ],
-            max_batch_len=seq_length,
-            pad_token=0,
-        )
-
         batch = {
             "idx_to_traj": self.idx_to_traj,
             "input_ids": input_ids.cuda(),
@@ -1168,7 +1151,6 @@ class DynamicRolloutResult:
             "is_end": is_end.cuda(),
             "prompt_lengths": prompt_lengths.cuda(),
             "response_lengths": response_lengths.cuda(),
-            "prev_logprobs": prev_logprobs.cuda(),
             **{
                 f"extra:{k}": torch.as_tensor(v).cuda()
                 for k, v in self.extra_fields_train.items()
@@ -1178,12 +1160,6 @@ class DynamicRolloutResult:
         if self.advantages is not None:
             batch["advantages"] = self.advantages.cuda()
 
-        # if self.loss_scales is not None:
-        #     batch["loss_scales"] = self.loss_scales.cuda()
-
-        if self.ref_logprobs is not None:
-            batch["ref_logprobs"] = self.ref_logprobs.cuda()
-
         if self.rewards is not None:
             if isinstance(self.rewards, torch.Tensor):
                 batch["rewards"] = self.rewards.cuda()
@@ -1192,16 +1168,41 @@ class DynamicRolloutResult:
                     torch.as_tensor(self.rewards, dtype=torch.float).cuda().flatten()
                 )
 
+        if self.prev_logprobs is not None:
+            batch["prev_logprobs"] = self.prev_logprobs.cuda()
+
+        if self.ref_logprobs is not None:
+            batch["ref_logprobs"] = self.ref_logprobs.cuda()
+
+        if self.recompute_prev_logprobs is not None:
+            batch["recompute_prev_logprobs"] = self.recompute_prev_logprobs.cuda()
+
+        if self.rollout_logprobs is not None:
+            prev_logprobs = batch_pad_to_fixed_len(
+                [
+                    torch.as_tensor([0] * prompt_length + logprobs, dtype=torch.float)
+                    for prompt_length, logprobs in zip(
+                        self.prompt_lengths, self.rollout_logprobs
+                    )
+                ],
+                max_batch_len=seq_length,
+                pad_token=0,
+            )
+            batch["prev_logprobs"] = prev_logprobs.cuda()
+
         return batch
 
-    def get_batch_pad(seq_length: int) -> dict[str, torch.Tensor]:
+    def get_batch_pad(
+        seq_length: int,
+        available_keys: list[str],
+    ) -> dict[str, torch.Tensor]:
         """Get the batch pad for the dynamic rollout result."""
         pad_seq_shape = (1, seq_length)
         attention_mask = torch.zeros(
             *pad_seq_shape, dtype=torch.bool, device=torch.cuda.current_device()
         )
         attention_mask[:, :1] = True
-        return {
+        batch_pad = {
             "input_ids": torch.zeros(
                 *pad_seq_shape, dtype=torch.long, device=torch.cuda.current_device()
             ),
@@ -1221,6 +1222,9 @@ class DynamicRolloutResult:
             "response_lengths": torch.zeros(
                 1, dtype=torch.int32, device=torch.cuda.current_device()
             ),
+            "ref_logprobs": torch.zeros(
+                *pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()
+            ),
             "prev_logprobs": torch.zeros(
                 *pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()
             ),
@@ -1230,22 +1234,63 @@ class DynamicRolloutResult:
             "advantages": torch.zeros(
                 *pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()
             ),
+            "loss_scales": torch.zeros(
+                *pad_seq_shape, dtype=torch.float32, device=torch.cuda.current_device()
+            ),
         }
+        batch_pad = {k: v for k, v in batch_pad.items() if k in available_keys}
+        return batch_pad
 
     @staticmethod
     def merge_batches(
         batches: list[dict[str, torch.Tensor]],
-        group_size: int,
-    ) -> dict[str, torch.Tensor]:
-        """Merge two batches into one."""
+        group_size: int | None = None,
+        adjust_traj_indices: bool = True,
+        return_num_sequence_per_group: bool = False,
+    ) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], list[int]]:
+        """
+        Merge multiple batches into one batch.
+
+        Args:
+            batches: List of batch dictionaries to merge
+            group_size: The group_size for adjusting trajectory indices.Required if adjust_traj_indices is True.
+            adjust_traj_indices: If True, adjusts idx_to_traj with trajectory offset (for training).
+                            If False, keeps original indices (for inference).
+            return_num_sequence_per_group: If True, returns tuple (merged_batch, num_sequence_per_group).
+                                        If False, returns only merged_batch.
+
+        Returns:
+            If return_num_sequence_per_group is False: merged_batch
+            If return_num_sequence_per_group is True: (merged_batch, num_sequence_per_group)
+        """
         merged_batch = {}
         if len(batches) == 0:
+            if return_num_sequence_per_group:
+                return merged_batch, []
             return merged_batch
+
         if len(batches) == 1:
+            if return_num_sequence_per_group:
+                num_sequence_per_group = [batches[0]["response_lengths"].shape[0]]
+                return batches[0], num_sequence_per_group
             return batches[0]
 
+        # Compute num_sequence_per_group if needed
+        num_sequence_per_group = None
+        if return_num_sequence_per_group:
+            num_sequence_per_group = [
+                batch["response_lengths"].shape[0] for batch in batches
+            ]
+
+        # Validate group_size if adjusting indices
+        if adjust_traj_indices and group_size is None:
+            raise ValueError(
+                "group_size must be provided when adjust_traj_indices is True"
+            )
+
         for key in batches[0].keys():
-            if key == "idx_to_traj":
+            if key == "idx_to_traj" and adjust_traj_indices:
+                # Special handling for idx_to_traj: adjust with trajectory offset
                 merged_batch[key] = []
                 for i, batch in enumerate(batches):
                     merged_batch[key].extend([j + i * group_size for j in batch[key]])
@@ -1260,6 +1305,9 @@ class DynamicRolloutResult:
                 merged_batch[key] = sum(batch[key] for batch in batches)
             else:
                 raise ValueError(f"Unsupported batch key type: {type(batches[0][key])}")
+
+        if return_num_sequence_per_group:
+            return merged_batch, num_sequence_per_group
         return merged_batch
 
     @staticmethod
@@ -1431,7 +1479,7 @@ class DynamicRolloutResult:
             group_size=rollout_results[0].group_size,
             idx_to_traj=[],
             input_ids=[],
-            rollout_logprobs=[],
+            rollout_logprobs=None,
             prompt_lengths=[],
             response_lengths=[],
             is_end=[],
@@ -1444,10 +1492,13 @@ class DynamicRolloutResult:
             # Merge required list fields (size: num_sequence)
             merged_result.idx_to_traj.extend(res.idx_to_traj)
             merged_result.input_ids.extend(res.input_ids)
-            merged_result.rollout_logprobs.extend(res.rollout_logprobs)
             merged_result.prompt_lengths.extend(res.prompt_lengths)
             merged_result.response_lengths.extend(res.response_lengths)
             merged_result.is_end.extend(res.is_end)
+            if res.rollout_logprobs is not None:
+                merged_result.rollout_logprobs = (
+                    merged_result.rollout_logprobs or []
+                ) + list(res.rollout_logprobs)
 
             # Merge tensor fields (size: num_sequence)
             if res.prev_logprobs is not None:
@@ -1486,16 +1537,6 @@ class DynamicRolloutResult:
                 else:
                     raise ValueError(f"Wrong type of advantages {type(res.advantages)}")
 
-            if res.loss_scales is not None:
-                if isinstance(res.loss_scales, torch.Tensor):
-                    merged_result.loss_scales = merge_tensor(
-                        merged_result.loss_scales, res.loss_scales
-                    )
-                else:
-                    raise ValueError(
-                        f"Wrong type of loss_scales {type(res.loss_scales)}"
-                    )
-
         return merged_result
 
     @staticmethod
@@ -1525,11 +1566,16 @@ class DynamicRolloutResult:
 
             split_idx_to_traj = rollout_result.idx_to_traj[start_idx:end_idx]
             split_input_ids = rollout_result.input_ids[start_idx:end_idx]
-            split_rollout_logprobs = rollout_result.rollout_logprobs[start_idx:end_idx]
             split_prompt_lengths = rollout_result.prompt_lengths[start_idx:end_idx]
             split_response_lengths = rollout_result.response_lengths[start_idx:end_idx]
             split_is_end = rollout_result.is_end[start_idx:end_idx]
             split_rewards = rollout_result.rewards[start_idx:end_idx]
+            if rollout_result.rollout_logprobs is not None:
+                split_rollout_logprobs = rollout_result.rollout_logprobs[
+                    start_idx:end_idx
+                ]
+            else:
+                split_rollout_logprobs = None
             split_extra_fields_train = {
                 k: v[start_idx:end_idx]
                 for k, v in rollout_result.extra_fields_train.items()

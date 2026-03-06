@@ -47,7 +47,7 @@ class AgentRunner(ReasoningRunner):
         cfg: DictConfig,
         placement: ModelParallelComponentPlacement,
         train_dataset: Dataset,
-        val_dataset: Dataset,
+        val_dataset: Optional[Dataset],
         rollout: Union["SGLangWorker", "VLLMWorker"],
         inference: Optional[MegatronInference],
         actor: MegatronActor,
