@@ -8,4 +8,6 @@ export RAY_DEDUP_LOGS=0
 
 export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
 
-python ${REPO_PATH}/examples/agent/rstar2/main_rstar2.py --config-path ${REPO_PATH}/tests/e2e_tests/agent  --config-name qwen2.5-1.5b-megatron
+CONFIG_NAME=qwen2.5-1.5b-megatron
+
+python ${REPO_PATH}/examples/agent/rstar2/main_rstar2.py --config-path ${REPO_PATH}/tests/e2e_tests/agent/rstar2  --config-name $CONFIG_NAME

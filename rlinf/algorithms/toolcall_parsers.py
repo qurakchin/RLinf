@@ -64,8 +64,8 @@ class Qwen25ToolCallParser:
         return content, function_calls
 
 
-@register_toolcall_parser("searchr1-qwen2.5")
-class Searchr1Qwen25ToolCallParser:
+@register_toolcall_parser("searchr1-qwen")
+class Searchr1QwenToolCallParser:
     def __init__(self) -> None:
         self.tool_call_start_token: str = "<search>"
         self.tool_call_end_token: str = "</search>"
