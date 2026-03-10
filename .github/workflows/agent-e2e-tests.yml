@@ -391,6 +391,41 @@ jobs:
           rm -rf .venv
           uv cache prune
 
+  wideseek-r1-qwen-grpo-test:
+    runs-on: reason
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create reason environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          export MEGATRON_PATH=/workspace/dataset/Megatron-LM
+          bash requirements/install.sh agentic
+
+      - name: Train with SGLang Megatron Collocated mode
+        timeout-minutes: 20
+        run: |
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/agent/wideseek/run-train.sh
+
+      - name: Evaluate with SGLang Collocated mode
+        timeout-minutes: 20
+        run: |
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/agent/wideseek/run-eval.sh
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+
   qwen-vl-grpo-test:
     runs-on: reason
     steps:
