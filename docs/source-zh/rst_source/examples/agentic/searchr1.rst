@@ -46,15 +46,15 @@ Wiki配置文件
    conda activate retriever
 
    save_path=/the/path/to/save
-   python examples/searchr1/download.py --save_path $save_path
+   python examples/agent/searchr1/download.py --save_path $save_path
 
 从huggingface上下载\ `flat e5 <https://huggingface.co/intfloat/e5-base-v2>`__ embedding模型，并生成index
 
 .. code-block:: bash
 
-   bash examples/searchr1/local_server_faiss/build_index.sh
+   bash examples/agent/tools/search_local_server_faiss/build_index.sh
 
-将之前下载好的wiki文件路径和index路径等写入examples/searchr1/launch_local_server.sh
+将之前下载好的wiki文件路径和index路径等写入examples/agent/searchr1/launch_local_server.sh
 
 .. code-block:: bash
 
@@ -91,21 +91,21 @@ Wiki配置文件
 
 下载 `qdrant <https://github.com/qdrant/qdrant/releases>`__ 并按照以下步骤构建 qdrant collection。首先，创建一个文件夹并把下载好的qdrant二进制文件放入该文件夹中，方便后续存储qdrant程序及其构建的collection文件。
 
-在 `examples/searchr1/local_server_qdrant/build_index_qdrant.sh` 和 `examples/searchr1/local_server_qdrant/launch_local_server_qdrant.sh` 中，根据之前下载的 wiki corpus, Qwen2.5-3B-Instruct 和 qdrant路径更新 `WIKI2018_DIR`、 `retriever_path` 和 `qdrant_path` 的文件路径。
+在 `examples/agent/tools/search_local_server_qdrant/build_index_qdrant.sh` 和 `examples/agent/tools/search_local_server_qdrant/launch_local_server_qdrant.sh` 中，根据之前下载的 wiki corpus, Qwen2.5-3B-Instruct 和 qdrant路径更新 `WIKI2018_DIR`、 `retriever_path` 和 `qdrant_path` 的文件路径。
 
 使用以下指令构建 qdrant wiki 服务器的collection：
 
 .. code-block:: bash
 
    # 构建 qdrant collection
-   bash ./examples/searchr1/local_server_qdrant/build_index_qdrant.sh
+   bash ./examples/agent/tools/search_local_server_qdrant/build_index_qdrant.sh
 
 运行launch_local_server_qdrant.sh启动Local Qdrant Wiki Server，等待直至输出server ip等信息，代表server启动完成
 
 .. code-block:: bash
    
    # 启动 qdrant server
-   bash ./examples/searchr1/local_server_qdrant/launch_local_server_qdrant.sh
+   bash ./examples/agent/tools/search_local_server_qdrant/launch_local_server_qdrant.sh
 
 Qdrant 默认使用 HNSW 图索引算法。关于 HNSW 图索引的优化,请参考 `Qdrant 文档 <https://qdrant.tech/documentation/guides/optimize/>`__。
 
@@ -113,7 +113,7 @@ Qdrant 默认使用 HNSW 图索引算法。关于 HNSW 图索引的优化,请参
 --------------
 
 从huggingface上下载\ `训练集 <https://huggingface.co/datasets/RLinf/Search-R1-Data>`__
-，并将路径写入examples/searchr1/config/qwen2.5-3b-tool-1node.yaml
+，并将路径写入examples/agent/searchr1/config/qwen2.5-3b-tool-1node.yaml
 
 .. code-block:: yaml
 
@@ -122,7 +122,7 @@ Qdrant 默认使用 HNSW 图索引算法。关于 HNSW 图索引的优化,请参
      train_data_paths: ["/path/to/train.jsonl"]
      val_data_paths: ["/path/to/train.jsonl"]
 
-修改examples/searchr1/config/qwen2.5-3b-tool-1node.yaml中rollout.model.model_path的路径
+修改examples/agent/searchr1/config/qwen2.5-3b-tool-1node.yaml中rollout.model.model_path的路径
 
 .. code-block:: yaml
 
@@ -153,7 +153,7 @@ Qdrant 默认使用 HNSW 图索引算法。关于 HNSW 图索引的优化,请参
       recompute_logprobs: True
       shuffle_rollout: False
 
-运行examples/searchr1/run_main_searchr1_single.sh启动训练。
+运行examples/agent/searchr1/run_main_searchr1_single.sh启动训练。
 
 测试
 ----
@@ -187,7 +187,7 @@ Qdrant 默认使用 HNSW 图索引算法。关于 HNSW 图索引的优化,请参
    cp "${CKPT_PATH_ORIGINAL_HF}"/!(*model.safetensors.index.json) "${CKPT_PATH_HF}"
 
 将转换得到的huggingface
-model路径填入examples/searchr1/config/qwen2.5-3b-tool-1node-eval.yaml
+model路径填入examples/agent/searchr1/config/qwen2.5-3b-tool-1node-eval.yaml
 
 .. code-block:: yaml
 
@@ -208,7 +208,7 @@ model路径填入examples/searchr1/config/qwen2.5-3b-tool-1node-eval.yaml
      train_data_paths: ["/path/to/eval.jsonl"]
      val_data_paths: ["/path/to/eval.jsonl"]
 
-运行examples/searchr1/run_main_searchr1_single_eval.sh启动测试。
+运行examples/agent/searchr1/run_main_searchr1_single_eval.sh启动测试。
 
 训练曲线
 --------

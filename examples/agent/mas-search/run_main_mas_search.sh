@@ -17,4 +17,4 @@ else
     CONFIG_NAME=$1
 fi
 
-python ${REPO_PATH}/examples/mas-search/main_mas_search.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
+python ${REPO_PATH}/examples/agent/mas-search/main_mas_search.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
