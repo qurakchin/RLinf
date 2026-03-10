@@ -23,22 +23,22 @@ runner:
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1
-  max_steps: -1
+  max_steps: 2
 
-  val_check_interval: 30
-  save_interval: 30
+  val_check_interval: 1
+  save_interval: -1
 
-  seq_length: 32000
+  seq_length: 10000
 
   enable_dynamic_batch_size: True
-  max_tokens_per_mbs: 32000
+  max_tokens_per_mbs: 10000
 
   resume_dir: null
-  experiment_name: null 
-  output_dir: null
+  experiment_name: wideseek-qwen3-train
+  output_dir: ../results
 
 algorithm:
-  group_size: 8
+  group_size: 2
   n_minibatches: 1
   training_batch_size_per_gpu: 1 # micro batch size
   rollout_batch_size_per_gpu: null # If set to null, rollout_batch_size will be evenly divided across all inference instances. You can reduce this parameter if inference consumes too much GPU memory.
@@ -62,14 +62,15 @@ algorithm:
   ratio_clip_eps: 0.2
   entropy_bonus: 0.0
   calculate_entropy: False
-  clip_ratio_c: null # 3.0
-  clip_ratio_low: null # if null or not set, will use ratio_clip_eps
-  clip_ratio_high: null # if null or not set, will use ratio_clip_eps
+  clip_ratio_low: 0.2
+  clip_ratio_high: 0.28
+  clip_ratio_c: 10
   clip_log_ratio_min: -20 # if null or not set, will not clip
   clip_log_ratio_max: 20 # if null or not set, will not clip
 
   adv_type: grpo_dynamic
   advantage_mode: trajectory  # "trajectory" for trajectory-level GRPO, "turn" for turn-level GRPO
+  loss_scales: ["group_level", "agent_level", "turn_level"] # used for implementing our GRPO alg. Details in `rlinf/algorithms/loss_scales.py`  
   normalize_advantages: False
   early_stop_imp_ratio: 5.0
   use_valid_token_scale: False
@@ -90,16 +91,19 @@ data:
   type: wideseek_r1
   max_prompt_length: 4096
   filter_prompt_by_length: True
-  rollout_batch_size: 128 
+  rollout_batch_size: 32
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: question
   answer_key: answer
+  is_markdown: True
+  unique_columns: unique_columns   
+  is_hybrid: True  
   apply_chat_template: False
-  shuffle: True
+  shuffle: False
   validation_shuffle: False
   seed: 1234
-  train_data_paths: null
+  train_data_paths: /workspace/dataset/wideseek_r1/train.jsonl # TODO: 
   val_data_paths: ${data.train_data_paths} 
   data_size: -1
 
@@ -107,12 +111,12 @@ data:
 agentloop:
   group_name: "AgentLoopGroup"
   workflow: mas
-  max_planner_turns: 10
-  max_worker_turns: 20
-  max_sa_turns: 50
+  max_planner_turns: 3
+  max_worker_turns: 3
+  max_sa_turns: 5
   print_outputs: False # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
-  max_workers_per_planner: 10
-  max_toolcall_per_worker: 5
+  max_workers_per_planner: 3
+  max_toolcall_per_worker: 3
   is_dynamic_rollout_batch: True
 
   format_reward: 0.1
@@ -123,7 +127,7 @@ agentloop:
   over_context_penalty: 0.2
 
   # whether to enable Qwen3-30B-A3B LLM judge for access summary and answer reward, False is only for ci now
-  use_llm_judge: True
+  use_llm_judge: False
   # set to your own llm server
   llm_ip: xx.xx.xx.xx
   llm_port: xx
@@ -134,7 +138,7 @@ agentloop:
 tools:
   online: False  # Set to True to use online search (Serper API), False for local search
   search:
-    server_addr: "127.0.0.1:8000"  # Used only for local search
+    server_addr: "127.0.0.1:8001"  # Used only for local search
     topk: 3
   use_access_summary: True
   # Online search cache settings (only used when online: True)
@@ -150,7 +154,7 @@ rollout:
   use_fixed_worker: False 
   model:
     model_type: qwen3
-    model_path: /path/to/Qwen3-4B
+    model_path: /workspace/dataset/Qwen3-0.6B 
     precision: ${actor.model.precision}            # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False          # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
@@ -225,7 +229,7 @@ actor:
 
     recompute_method: block
     recompute_granularity: full
-    recompute_num_layers: 36
+    recompute_num_layers: 28
 
     apply_rope_fusion: True
     bias_dropout_fusion: False
@@ -287,7 +291,7 @@ actor:
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor
-      model: null
+      model: Qwen3-0.6B
       hf_model_path: ${rollout.model.model_path} # path to the hf model
       save_path: ${runner.output_dir}/${runner.experiment_name}/converted_ckpts/actor
       use_gpu_num : 0
