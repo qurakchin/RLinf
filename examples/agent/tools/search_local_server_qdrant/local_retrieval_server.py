@@ -365,7 +365,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Launch the local qdrant retriever.")
     parser.add_argument(
-        "--pages_path", type=str, default="xxx", help="Local page file."
+        "--pages_path", type=str, default=None, help="Local page file."
     )
     parser.add_argument(
         "--topk",
@@ -469,10 +469,13 @@ if __name__ == "__main__":
     loop.run_until_complete(test())
 
     # 3) Load pages
-    if os.path.exists(args.pages_path):
+    if not args.pages_path:
+        logging.info("Page Access is off.")
+    elif os.path.exists(args.pages_path):
+        logging.info(f"Page Access is not load because pages_path({args.pages_path}) not exist.")
+    else:
         page_access = PageAccess(args.pages_path)
-
-    logging.info("Page Access is ready.")
+        logging.info("Page Access is ready.")
 
     # 4) Launch the server.
     config = uvicorn.Config(
@@ -483,4 +486,6 @@ if __name__ == "__main__":
         loop=loop,
     )
     server = uvicorn.Server(config)
+    logging.info(f"Server is ready at port {args.port}")
+
     loop.run_until_complete(server.serve())

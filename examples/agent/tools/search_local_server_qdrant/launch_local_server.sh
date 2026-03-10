@@ -12,10 +12,11 @@ retriever_path=/your/retriever/model/path
 
 # Qdrant configuration
 qdrant_url=http://localhost:6333
-qdrant_collection_name=wiki_collection_m24_cef512
-qdrant_search_param='{"hnsw_ef":256}'
+qdrant_collection_name=wiki_collection
+qdrant_search_param='{}'
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -u examples/agent/tools/search_local_server_qdrant/local_retrieval_server.py \
+CONFIG_PATH="$( realpath "$( dirname "${BASH_SOURCE[0]}" )"  )"
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -u ${CONFIG_PATH}/local_retrieval_server.py \
                                             --pages_path $pages_file \
                                             --topk 3 \
                                             --retriever_name $retriever_name \
@@ -24,5 +25,3 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -u examples/agent/tools/search_loca
                                             --qdrant_url $qdrant_url\
                                             --qdrant_search_param $qdrant_search_param\
                                             --port 8000 \
-
-
