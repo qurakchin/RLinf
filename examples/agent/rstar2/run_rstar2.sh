@@ -2,7 +2,6 @@
 set -x
 
 tabs 4
-export VLLM_ATTENTION_BACKEND=XFORMERS
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export TOKENIZERS_PARALLELISM=false
 export RAY_DEDUP_LOGS=0
@@ -13,9 +12,9 @@ MEGATRON_PATH=/opt/Megatron-LM
 export PYTHONPATH=${REPO_PATH}:${MEGATRON_PATH}:$PYTHONPATH
 
 if [ -z "$1" ]; then
-    CONFIG_NAME="qwen2.5-1.5b-ppo"
+    CONFIG_NAME="rstar2-qwen2.5-1.5b-megatron"
 else
     CONFIG_NAME=$1
 fi
 
-python ${REPO_PATH}/examples/coding_online_rl/main_coding_online_rl.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
+python ${REPO_PATH}/examples/agent/rstar2/main_rstar2.py --config-path ${CONFIG_PATH}/config/  --config-name $CONFIG_NAME
