@@ -115,6 +115,7 @@ data:
 
 agentloop:
   group_name: "AgentLoopGroup"
+  toolcall_parser: "rstar2-qwen"
   max_user_turns: null
   max_assistant_turns: 5
   max_parallel_calls: 1

@@ -14,7 +14,6 @@
 
 import asyncio
 import json
-import re
 from typing import Any
 from uuid import uuid4
 
@@ -44,10 +43,9 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         max_total_len = int(self.cfg.runner.seq_length)
         self.max_resp_len = max(1, max_total_len - self.max_prompt_len)
 
-        # 5 is a magic number in this demo.
-        self.tool_call_start_token: str = "<search>"
-        self.tool_call_end_token: str = "</search>"
-        self.tool_call_regex = re.compile(r"<search>(.*?)</search>", re.DOTALL)
+        assert self.toolcall_parser is not None, (
+            "toolcall_parser must be set in searchr1"
+        )
 
         # Inserting tool info requires re-encode token_ids, so the recompute_logprobs must be true.
         if self.cfg.runner.task_type != "reasoning_eval":
@@ -94,25 +92,6 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         return ToolResponse(
             text=result_text,
         )
-
-    async def extract_tool_calls(self, response_text) -> tuple[str, list[ToolRequest]]:
-        if (
-            self.tool_call_start_token not in response_text
-            or self.tool_call_end_token not in response_text
-        ):
-            return response_text, []
-        matches = self.tool_call_regex.findall(response_text)
-        function_calls = []
-        if matches:
-            match = matches[-1].strip()
-            function_calls.append(
-                ToolRequest(name="search", arguments={"keyword": match})
-            )
-
-        # remaining text exclude tool call tokens
-        content = self.tool_call_regex.sub("", response_text)
-
-        return content, function_calls
 
     def pre_process(self, prompt_ids: list[int]) -> dict[str, Any]:
         return {"turn": 0}
@@ -165,7 +144,7 @@ class Searchr1ToolAgentLoopWorker(AgentLoopWorker):
         llm_response_text: str,
     ):
         # Extract tool calls from response
-        _, tool_requests = await self.extract_tool_calls(llm_response_text)
+        _, tool_requests = await self.toolcall_parser(llm_response_text)
         if len(tool_requests) == 0:
             return False, [], [], None
 
