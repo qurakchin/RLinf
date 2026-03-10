@@ -22,6 +22,7 @@ from uuid import uuid4
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
+from rlinf.algorithms.registry import get_toolcall_parser
 from rlinf.data.io_struct import (
     DynamicRolloutResult,
     RolloutRequest,
@@ -109,6 +110,9 @@ class AgentLoopWorker(Worker):
             )
 
         self.tokenizer = AutoTokenizer.from_pretrained(cfg.rollout.model.model_path)
+        self.toolcall_parser = None
+        if cfg.agentloop.get("toolcall_parser", None) is not None:
+            self.toolcall_parser = get_toolcall_parser(cfg.agentloop.toolcall_parser)
 
     def init_worker(
         self,

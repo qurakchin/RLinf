@@ -17,7 +17,6 @@ import json
 from typing import Any
 from uuid import uuid4
 
-import regex as re
 from omegaconf import DictConfig
 
 from rlinf.data.tool_call.tool_io_struct import (
@@ -62,6 +61,7 @@ class Rstar2AgentLoopWorker(AgentLoopWorker):
             tokenize=True,
             **self.apply_chat_template_kwargs,
         )
+        assert self.toolcall_parser is not None, "toolcall_parser must be set in rstar2"
 
     def pre_process(self, prompt_ids: list[int]) -> dict[str, Any]:
         return {
@@ -187,37 +187,6 @@ class Rstar2AgentLoopWorker(AgentLoopWorker):
                     )
             return ToolResponse(text=result_text)
 
-    async def extract_tool_calls(
-        self, response_text
-    ) -> tuple[str, list[ToolRequest | ToolChannelResponse]]:
-        tool_call_start_token: str = "<tool_call>"
-        tool_call_end_token: str = "</tool_call>"
-        tool_call_regex = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
-
-        if (
-            tool_call_start_token not in response_text
-            or tool_call_end_token not in response_text
-        ):
-            return response_text, []
-
-        matches = tool_call_regex.findall(response_text)
-        return_function_calls = []
-        for match in matches:
-            try:
-                function_call = json.loads(match)
-                name, arguments = function_call["name"], function_call["arguments"]
-                return_function_calls.append(
-                    ToolRequest(name=name, arguments=arguments)
-                )
-            except Exception as e:
-                return_function_calls.append(
-                    ToolChannelResponse(
-                        success=False, result=f"Failed to decode tool call: {e}"
-                    )
-                )
-
-        return response_text, return_function_calls
-
     async def generate_llm_response(
         self,
         generate_context: dict[str, Any],
@@ -298,32 +267,31 @@ class Rstar2AgentLoopWorker(AgentLoopWorker):
         if self.return_logprobs:
             empty_logprobs = []
         # Extract tool calls from response
-        _, tool_requests = await self.extract_tool_calls(llm_response_text)
+        _, tool_requests = await self.toolcall_parser(llm_response_text)
         if len(tool_requests) == 0:
             return False, [], [], empty_logprobs
 
         # Execute tools in parallel with history propagation
-        tool_requests = tool_requests[: self.max_parallel_calls]
-        total_tool_responses, filtered_tool_requests, pending_pos = [], [], []
-        for i, tool_request in enumerate(tool_requests):
-            if isinstance(tool_request, ToolResponse):
-                total_tool_responses.append(tool_request)
-            else:
-                total_tool_responses.append(None)
-                pending_pos.append(i)
-                filtered_tool_requests.append(tool_request)
-        tool_requests = filtered_tool_requests
-        tasks = []
+        tool_responses: list[ToolResponse | int] = []
+        run_tool_requests = []
         for tool_request in tool_requests[: self.max_parallel_calls]:
-            tasks.append(self.tool_call(generate_context, tool_request))
-        tool_responses: list[ToolResponse] = await asyncio.gather(*tasks)
-        for i, tool_response in zip(
-            pending_pos[: self.max_parallel_calls], tool_responses, strict=False
-        ):
-            total_tool_responses[i] = tool_response
-        tool_responses = total_tool_responses
-        if any(isinstance(item, Exception) for item in tool_responses):
+            if isinstance(tool_request, ToolResponse):
+                tool_responses.append(tool_request)
+            else:
+                tool_responses.append(len(run_tool_requests))
+                run_tool_requests.append(tool_request)
+        run_tool_tasks = [
+            self.tool_call(generate_context, tool_request)
+            for tool_request in run_tool_requests
+        ]
+        run_tool_responses: list[ToolResponse] = await asyncio.gather(*run_tool_tasks)
+        tool_responses: list[ToolResponse] = [
+            item if isinstance(item, ToolResponse) else run_tool_responses[item]
+            for item in tool_responses
+        ]
+        if any(not isinstance(item, ToolResponse) for item in tool_responses):
             assert False
+
         # Convert tool responses to messages and tokenize
         tool_messages = []
         for tool_response in tool_responses:
