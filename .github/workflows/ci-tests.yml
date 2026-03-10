@@ -113,7 +113,6 @@ jobs:
               - 'rlinf/runners/agent_eval_runner.py'
               - 'rlinf/runners/reasoning_eval_runner.py'
               - 'examples/coding_online_rl/**'
-              - 'examples/multiturn_demo/**'
               - 'examples/reasoning/**'
               - 'examples/searchr1/**'
               - 'examples/mas-search/**'

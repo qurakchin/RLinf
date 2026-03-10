@@ -8,5 +8,4 @@ export RAY_DEDUP_LOGS=0
 
 export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
 
-python ${REPO_PATH}/examples/multiturn_demo/main_tool.py --config-path ${REPO_PATH}/tests/e2e_tests/agent  --config-name tool-qwen2.5-1.5b
-
+python ${REPO_PATH}/examples/searchr1/main_searchr1_eval.py --config-path ${REPO_PATH}/tests/e2e_tests/agent/searchr1  --config-name qwen2.5-1.5b-eval

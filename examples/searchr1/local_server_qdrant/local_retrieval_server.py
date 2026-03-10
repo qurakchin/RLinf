@@ -203,12 +203,6 @@ class AsyncDenseRetriever(AsyncBaseRetriever):
             f"time elapse: search: {time_elapse_search}; embed: {time_elapse_embed}"
         )
 
-        if len(search_results) < 1:
-            if return_score:
-                return [], []
-            else:
-                return []
-
         # Extract IDs and scores
         payloads = [result.payload for result in search_results]
         scores = [result.score for result in search_results]
@@ -244,15 +238,10 @@ async def get_retriever(config):
 class PageAccess:
     def __init__(self, pages_path):
         pages = []
-        time_start = time.time()
         with open(pages_path, "r") as f:
-            for ff in tqdm(f, desc="PageAccess"):
-                pages.append(json.loads(ff))
-        time_load = time.time()
+            for line in tqdm(f, desc="Loading pages"):
+                pages.append(json.loads(line))
         self.pages = {page["url"]: page for page in pages}
-        time_map = time.time()
-        logging.info(f"PageAccess: load json: {time_load - time_start}")
-        logging.info(f"PageAccess: map data: {time_map - time_load}")
 
     def access(self, url):
         # php parsing
@@ -390,26 +379,41 @@ if __name__ == "__main__":
     parser.add_argument(
         "--retriever_model",
         type=str,
-        default="intfloat/e5-base-v2",
+        required=True,
         help="Path of the retriever model.",
     )
     parser.add_argument(
         "--qdrant_url",
         type=str,
-        default=None,
-        help="Qdrant server URL (e.g., http://localhost:6333). If not provided, uses local mode.",
+        default="http://localhost:6333",
+        help="Qdrant server URL",
     )
     parser.add_argument(
         "--qdrant_collection_name",
         type=str,
-        default="default_collection",
+        required=True,
         help="Name of the Qdrant collection.",
     )
-    parser.add_argument("--qdrant_search_param", type=str, default={}, help="")
-    parser.add_argument("--qdrant_search_quant_param", type=str, default=None, help="")
-    parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
-        "--save-address-to", type=str, help="path to save server address"
+        "--qdrant_search_param",
+        type=str,
+        default="{}",
+        help="HNSW search parameters as JSON string (e.g., '{\"hnsw_ef\":256}')",
+    )
+    parser.add_argument(
+        "--qdrant_search_quant_param",
+        type=str,
+        default=None,
+        help="Quantization search parameters as JSON string (optional)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000, help="Port to run the server on"
+    )
+    parser.add_argument(
+        "--save-address-to",
+        type=str,
+        default=None,
+        help="Directory to save server address file (optional)",
     )
 
     args = parser.parse_args()
@@ -435,7 +439,7 @@ if __name__ == "__main__":
     # 1) Build a config (could also parse from arguments).
     #    In real usage, you'd parse your CLI arguments or environment variables.
     config = Config(
-        retrieval_method=args.retriever_name,  # or "dense"
+        retrieval_method=args.retriever_name,
         retrieval_topk=args.topk,
         qdrant_url=args.qdrant_url,
         qdrant_collection_name=args.qdrant_collection_name,

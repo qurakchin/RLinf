@@ -23,18 +23,18 @@ runner:
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1
-  max_steps: -1
+  max_steps: 2
 
-  val_check_interval: 25
-  save_interval: 25
+  val_check_interval: 1
+  save_interval: -1
 
   seq_length: 7096
 
   enable_dynamic_batch_size: True
   max_tokens_per_mbs: 11008
 
-  resume_dir: null
-  experiment_name: searchr1-grpo-qwen2.5-3b-ins-fsdp
+  resume_dir: auto
+  experiment_name: searchr1-qwen2.5-1.5b-fsdp
   output_dir: ../results
 
 
@@ -88,7 +88,7 @@ data:
   type: math
   max_prompt_length: 4096
   filter_prompt_by_length: True
-  rollout_batch_size: 512
+  rollout_batch_size: 32
   val_rollout_batch_size: null
   num_workers: 2
   prompt_key: prompt
@@ -97,7 +97,7 @@ data:
   shuffle: True
   validation_shuffle: True
   seed: 1234
-  train_data_paths: ["/path/to/data/searchr1_train.jsonl"]
+  train_data_paths: ["/workspace/dataset/searchr1/train.jsonl"]
 
 
 agentloop:
@@ -113,13 +113,14 @@ tools:
   search:
     server_addr: 0.0.0.0:8000
     topk: 3
+    dummy_mode: True
 
 
 rollout:
   group_name: "RolloutGroup"
   gpu_memory_utilization: 0.5
   model:
-    model_path: /path/to/model/Qwen2.5-3B-Instruct
+    model_path: /workspace/dataset/Qwen2.5-1.5B-Instruct
     model_type: qwen2.5
     precision: fp16
   enforce_eager: False          # if False, rollout engine will capture cuda graph, which will take more time to initialize.
@@ -146,7 +147,7 @@ rollout:
 
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
-  max_running_requests: 128     # the maximum number of running requests in the rollout engine.
+  max_running_requests: 128     # the maximum number of running requests in rollout engine.
   cuda_graph_max_bs: 128        # the maximum batch size for cuda graph. If the batch size is larger than this, cuda graph will not be used.
 
   validate_weight_first_sync: True # validate the weight norm between load model and first sync.
@@ -160,6 +161,7 @@ reward:
   use_reward_model: False
   reward_type: 'searchr1'
   reward_scale: 1.0
+  random_print_percent: 0
 
   tokenizer:
     tokenizer_model: ${actor.tokenizer.tokenizer_model}
@@ -238,13 +240,10 @@ actor:
       reduce_dtype: "fp32"
       buffer_dtype: "fp32"
 
-    amp_autocast:                       # Do not enable `amp_autocast` with FSDP `mixed_precision` enabled, using both will result in conflict.         
+    amp:
       enabled: False                    # if True, automatic mixed precision (AMP) will be used in FSDP/FSDP2 training.
       precision: "fp16"                 # precision for AMP, options are ["fp16" , "bf16"]
-    
-    grad_scaler:
-      enabled: True               # if True, GradScaler will be used for AMP training to prevent underflow.
-
+      use_grad_scaler: True             # if True, GradScaler will be used for AMP training to prevent underflow.
 
 
 inference:

@@ -320,8 +320,109 @@ class AgentLoopWorker(Worker):
             rollout_logprobs=response_logprobs,
         )
 
-    async def run_one_query(self, prompt_ids: list[int], **kwargs) -> AgentLoopOutput:
-        raise NotImplementedError("Subclasses must implement this method")
+    def pre_process(self, prompt_ids: list[int]) -> dict[str, Any]:
+        return {}
+
+    async def post_process(
+        self, generate_context: dict[str, Any], output: AgentLoopOutput
+    ) -> dict[str, Any]:
+        return output
+
+    async def run_one_query_turn(
+        self,
+        generate_context: dict[str, Any],
+        trace_prints: list[dict],
+        problem_prompt_ids: list[int],
+        turn_prompt_ids: list[int],
+    ):
+        (
+            is_continue,
+            llm_response_ids,
+            llm_response_mask,
+            llm_response_logprobs,
+            llm_response_text,
+        ) = await self.generate_llm_response(
+            generate_context,
+            trace_prints,
+            problem_prompt_ids,
+            turn_prompt_ids,
+        )
+
+        if not is_continue:
+            return (
+                False,
+                llm_response_ids,
+                llm_response_mask,
+                llm_response_logprobs,
+            )
+
+        (
+            is_continue,
+            tool_response_ids,
+            tool_response_mask,
+            tool_response_logprobs,
+        ) = await self.generate_tool_response(
+            generate_context,
+            trace_prints,
+            problem_prompt_ids,
+            turn_prompt_ids,
+            llm_response_ids,
+            llm_response_text,
+        )
+        append_ids = llm_response_ids + tool_response_ids
+        append_mask = llm_response_mask + tool_response_mask
+        append_logprobs = None
+        if self.return_logprobs:
+            append_logprobs = llm_response_logprobs + tool_response_logprobs
+
+        return (
+            is_continue,
+            append_ids,
+            append_mask,
+            append_logprobs,
+        )
+
+    async def run_one_query(self, prompt_ids: list[int]) -> AgentLoopOutput:
+        prompt_ids = prompt_ids[: self.max_prompt_len]
+        problem_prompt_ids = copy.deepcopy(prompt_ids)
+        generate_context = self.pre_process(prompt_ids)
+        trace_prints = []
+        response_mask = []
+        response_logprobs = None
+        if self.return_logprobs:
+            response_logprobs = []
+        while True:
+            (
+                is_continue,
+                append_ids,
+                append_mask,
+                append_logprobs,
+            ) = await self.run_one_query_turn(
+                generate_context,
+                trace_prints,
+                problem_prompt_ids,
+                prompt_ids,
+            )
+            prompt_ids += append_ids
+            response_mask += append_mask
+            if self.return_logprobs:
+                response_logprobs += append_logprobs
+            if not is_continue:
+                break
+
+        # Separate prompt and response
+        response_ids = prompt_ids[len(problem_prompt_ids) :]
+
+        output = AgentLoopOutput(
+            prompt_ids=problem_prompt_ids,
+            prompt_text=self.tokenizer.decode(problem_prompt_ids),
+            response_ids=response_ids,
+            response_text=self.tokenizer.decode(response_ids),
+            response_mask=response_mask,
+            trace_prints=trace_prints,
+            response_logprobs=response_logprobs,
+        )
+        return await self.post_process(generate_context, output)
 
 
 class MultiAgentLoopWorker(AgentLoopWorker):

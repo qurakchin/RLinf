@@ -1,10 +1,12 @@
 defaults:
   - override hydra/job_logging: stdout
 
+
 hydra:
   run:
     dir: .
   output_subdir: null
+
 
 cluster:
   num_nodes: 1
@@ -14,6 +16,7 @@ cluster:
     inference: 4-5
     actor: 6-7
     reward: 0-3
+
 
 runner:
   task_type: coding_online_rl
@@ -38,10 +41,10 @@ runner:
   experiment_name: online-ppo-1.5b-pipeline
   output_dir: /path/to/results
 
+
 algorithm:
   # online rl use ppo.
   group_size: 1
-
   n_minibatches: 2
   training_batch_size_per_gpu: 1 # micro batch size
   rollout_batch_size_per_gpu: null # If set to null, rollout_batch_size will be evenly divided across all inference instances. You can reduce this parameter if inference consumes too much GPU memory.
@@ -78,8 +81,8 @@ algorithm:
   gae_lambda: 0.95
   # value_clip and huber_delta not needed without critic
 
-  # Use no-critic GAE advantage computation
-  adv_type: gae
+  # Use raw rewards as advantages
+  adv_type: raw
   normalize_advantages: False
   early_stop_imp_ratio: 5.0
   use_valid_token_scale: False
@@ -105,57 +108,6 @@ algorithm:
       "<|im_end|>",
     ]
 
-inference:
-  model_type: ${rollout.model.model_type}
-  group_name: "InferenceGroup"
-  load_from_actor: True
-  model:
-    tensor_model_parallel_size: 2
-    pipeline_model_parallel_size: 1
-    sequence_parallel: True
-
-rollout:
-  group_name: "RolloutGroup"
-
-  gpu_memory_utilization: 0.55
-
-  model:
-    model_path: /path/to/model/Qwen2.5-Coder-1.5B
-    model_type: qwen2.5
-    precision: ${actor.model.precision} # precision for rollout model, support [fp16, bf16, fp32]  
-  enforce_eager: False         # if False, rollout engine will capture cuda graph, which will take more time to initialize.
-  distributed_executor_backend: mp   # ray or mp
-  disable_log_stats: False
-  detokenize: True            # Whether to detokenize the output.
-  padding: null               # will be tokenizer.pad_token_id if null. it is used to filter megatron's padding for rollout engine
-  eos: null                   # will be tokenizer.eos_token_id if null.
-
-  rollout_backend: sglang     # online_rl now only support sglang 
-
-  sglang:
-    attention_backend: triton # [flashinfer, triton] for more, see sglang's doc
-    decode_log_interval: 500000 # the interval for SGLang to log the decode time and other stats.
-    use_torch_compile: False # enable torch_compile in SGLang for rollout.
-    torch_compile_max_bs: 128 # the maximum batch size for torch compile. If the batch size is larger than this, torch compile will not be used.
-
-  vllm:
-    # not used, but reserved to pass config validate
-    attention_backend: FLASH_ATTN #[FLASH_ATTN,XFORMERS] for more, see vllm's doc
-    enable_chunked_prefill: True  # enable vllm to use chunked_prefill.
-    enable_prefix_caching: True   # enable vllm to use prefix_caching.
-    enable_flash_infer_sampler: True # if True, vllm will use flashinfer to do sampling.
-
-  return_logprobs: ${not:${algorithm.recompute_logprobs}}
-
-  tensor_parallel_size: 1
-  pipeline_parallel_size: 1
-
-  validate_weight: False # whether to send all weights at first for weight comparison.
-  validate_save_dir: null # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
-  print_outputs: False         # whether to print the outputs (token ids, texts, etc.) of rollout engine.
-
-  max_running_requests: 64 # the maximum number of running requests in the rollout engine.
-  cuda_graph_max_bs: 128 # the maximum batch size for cuda graph. If the batch size is larger than this, cuda graph will not be used.
 
 data:
   # not used, but reserved to pass config validate
@@ -163,9 +115,69 @@ data:
   rollout_batch_size: 16
   seed: 1234
 
+
+rollout:
+  group_name: "RolloutGroup"
+  gpu_memory_utilization: 0.55
+  model:
+    model_path: /path/to/Qwen2.5-Coder-1.5B
+    model_type: qwen2.5
+    precision: ${actor.model.precision} # precision for rollout model, support [fp16, bf16, fp32]
+  enforce_eager: False          # if False, rollout engine will capture cuda graph, which will take more time to initialize.
+  distributed_executor_backend: mp   # ray or mp
+  disable_log_stats: False
+  detokenize: True              # Whether to detokenize the output.
+  padding: null                 # will be tokenizer.pad_token_id if null. it is used to filter megatron's padding for rollout engine
+  eos: null                     # will be tokenizer.eos_token_id if null.
+  return_logprobs: ${not:${algorithm.recompute_logprobs}}
+
+  rollout_backend: sglang       # online_rl now only support sglang 
+  sglang:
+    attention_backend: triton   # [flashinfer, triton] for more, see sglang's doc
+    decode_log_interval: 500000 # the interval for SGLang to log the decode time and other stats.
+    use_torch_compile: False    # enable torch_compile in SGLang for rollout.
+    torch_compile_max_bs: 128   # the maximum batch size for torch compile. If the batch size is larger than this, torch compile will not be used.
+  vllm:
+    # not used, but reserved to pass config validate
+    attention_backend: FLASH_ATTN #[FLASH_ATTN,XFORMERS] for more, see vllm's doc
+    enable_chunked_prefill: True # enable vllm to use chunked_prefill.
+    enable_prefix_caching: True # enable vllm to use prefix_caching.
+    enable_flash_infer_sampler: True # if True, vllm will use flashinfer to do sampling.
+
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  max_running_requests: 64      # the maximum number of running requests in the rollout engine.
+  cuda_graph_max_bs: 128        # the maximum batch size for cuda graph. If the batch size is larger than this, cuda graph will not be used.
+
+  validate_weight: False        # whether to send all weights at first for weight comparison.
+  validate_save_dir: null       # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
+  print_outputs: False          # whether to print the outputs (token ids, texts, etc.) of rollout engine.
+
+
+rollout_server:
+  # online serving and user reward tracking.
+  online_router:
+    host: 0.0.0.0
+    port: 8081
+
+  tracking_rollout:
+    host: 0.0.0.0
+    port: 8082
+
+
+reward:
+  # online rl get reward from user judge.
+  use_reward_model: False
+
+
 actor:
   group_name: "ActorGroup"
   training_backend: megatron
+  enable_dp_load_balance: False
+  calculate_flops: False
+  seed: 1234
+
+  # megatron config
   mcore_gpt: True
   spec_name: decoder_gpt
 
@@ -173,36 +185,29 @@ actor:
   offload_weight: True
   offload_grad: True
 
-  enable_dp_load_balance: False
-
-  calculate_flops: False
-
-  seed: 1234
-
   model:
-    megatron_checkpoint: null
-    model_type: qwen2.5
     precision: bf16
-    add_bias_linear: False
-
-    tensor_model_parallel_size: 2
-    pipeline_model_parallel_size: 1
-
-    activation: swiglu
-    sequence_parallel: True
-    # recompute_method: block
-    # recompute_granularity: selective
-
-    recompute_method: block
-    recompute_granularity: full
-    recompute_num_layers: 20
 
     seq_length: ${runner.seq_length}
     encoder_seq_length: ${runner.seq_length}
 
-    normalization: rmsnorm
+    # megatron config
+    megatron_checkpoint: null
 
+    # megatron model config
+    activation: swiglu
+    normalization: rmsnorm
+    add_bias_linear: False
     position_embedding_type: rope
+
+    # megatron performance config
+    tensor_model_parallel_size: 1
+    pipeline_model_parallel_size: 1
+    sequence_parallel: False
+
+    recompute_method: block
+    recompute_granularity: full
+    recompute_num_layers: 20
 
     apply_rope_fusion: True
     bias_dropout_fusion: False
@@ -217,21 +222,32 @@ actor:
 
   optim:
     optimizer: adam
-    bf16: True
-    fp16: False
     lr: 2e-06
     adam_beta1: 0.9
     adam_beta2: 0.95
     adam_eps: 1.0e-05
     min_lr: 2.0e-7
     weight_decay: 0.05
+    clip_grad: 0.8
+
+    # megatron config
     use_distributed_optimizer: True
     overlap_grad_reduce: False
     overlap_param_gather: False
     optimizer_enable_pin: False
     overlap_param_gather_with_optimizer_step: False
-    clip_grad: 0.8
-    loss_scale: 65536
+
+    # megatron grad scale config
+    # 1. use loss_scale: constant grad scale
+    # 2. no loss_scale, bf16 true, fp16 false: no grad scale
+    # 3. no loss_scale, bf16 false, fp16 true: dynamic grad scale
+    #    args of dynamic grad scale:
+    #        initial_loss_scale: 2**32
+    #        min_loss_scale:     1
+    #        loss_scale_window:  1000
+    #        hysteresis:         2
+    bf16: True
+    fp16: False
 
   lr_sched:
     lr_warmup_fraction: 0.01
@@ -285,19 +301,16 @@ actor:
       schedule_repeat: 1 # inference and training will repeat such times
       # schedule_wait: it will be set at runtime
 
-reward:
-  # online rl get reward from user judge.
-  use_reward_model: False
+
+inference:
+  model_type: ${rollout.model.model_type}
+  group_name: "InferenceGroup"
+  load_from_actor: True
+  model:
+    tensor_model_parallel_size: 1
+    pipeline_model_parallel_size: 1
+    sequence_parallel: False
+
 
 critic:
   use_critic_model: False
-
-server:
-  # online serving and user reward tracking.
-  online_router:
-    host: 0.0.0.0
-    port: 8081
-
-  tracking_rollout:
-    host: 0.0.0.0
-    port: 8082
