@@ -35,10 +35,6 @@ from qdrant_client.models import (
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 
-# ============================================================================
-# Model Loading and Pooling Utilities
-# ============================================================================
-
 
 def load_model(model_path: str, use_fp16: bool = False, device=torch.device("cuda")):
     """Load retrieval model from checkpoint.
@@ -87,11 +83,6 @@ def pooling(
         return pooler_output
     else:
         raise NotImplementedError(f"Pooling method '{pooling_method}' not implemented!")
-
-
-# ============================================================================
-# Encoder Class
-# ============================================================================
 
 
 class Encoder:
@@ -450,13 +441,6 @@ class AsyncDenseRetriever(AsyncBaseRetriever):
             f"Search timing - embed: {time_elapse_embed:.3f}s, search: {time_elapse_search:.3f}s"
         )
 
-        # Handle empty results
-        if len(search_results) < 1:
-            if return_score:
-                return [], []
-            else:
-                return []
-
         # Extract payloads and scores
         payloads = [result.payload for result in search_results]
         scores = [result.score for result in search_results]
@@ -497,11 +481,6 @@ async def get_retriever(config):
     return retriever
 
 
-# ============================================================================
-# Page Access Utility
-# ============================================================================
-
-
 class PageAccess:
     """Page content accessor.
 
@@ -516,8 +495,9 @@ class PageAccess:
             pages_path: Path to pages JSONL file
         """
         pages = []
-        for line in tqdm(open(pages_path, "r"), desc="Loading pages"):
-            pages.append(json.loads(line))
+        with open(pages_path, "r") as f:
+            for line in tqdm(f, desc="Loading pages"):
+                pages.append(json.loads(line))
         self.pages = {page["url"]: page for page in pages}
         print(f"Loaded {len(self.pages)} pages")
 
@@ -650,10 +630,6 @@ async def access_endpoint(request: AccessRequest):
     print(f"Access request: {len(request.urls)} URLs")
     return {"result": resp}
 
-
-# ============================================================================
-# Main Entry Point
-# ============================================================================
 
 if __name__ == "__main__":
     set_start_method("spawn")  # Required for CUDA in multiprocessing

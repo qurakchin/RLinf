@@ -158,7 +158,7 @@ rollout:
   eos: null                     # will be tokenizer.eos_token_id if null.
   return_logprobs: ${not:${algorithm.recompute_logprobs}}
 
-  rollout_backend: sglang       # here choose which backend to rollout,support [sglang, vllm] 
+  rollout_backend: sglang       # here choose which backend to rollout,support [sglang, vllm]
   sglang:
     attention_backend: triton   # [flashinfer, triton] for more, see sglang's doc
     decode_log_interval: 500000 # the interval for SGLang to log the decode time and other stats.
@@ -286,7 +286,6 @@ actor:
 
     ckpt_convertor: # config for ckpt convertor
       model: null
-      model_type: null # will be set by hf model's config if null
       hf_model_path: ${rollout.model.model_path} # path to the hf model
       save_path: ${runner.output_dir}/${runner.experiment_name}/converted_ckpts/actor
       use_gpu_num : 0
