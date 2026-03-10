@@ -118,9 +118,7 @@ class Rstar2QwenToolCallParser:
                 )
             except Exception as e:
                 return_function_calls.append(
-                    ToolResponse(
-                        text=f"Failed to decode tool call: {e}"
-                    )
+                    ToolResponse(text=f"Failed to decode tool call: {e}")
                 )
 
         return response_text, return_function_calls
