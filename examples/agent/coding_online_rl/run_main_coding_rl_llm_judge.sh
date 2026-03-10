@@ -8,7 +8,7 @@ export TOKENIZERS_PARALLELISM=false
 export RAY_DEDUP_LOGS=0
 
 CONFIG_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-REPO_PATH=$(dirname $(dirname "$CONFIG_PATH"))
+REPO_PATH=$(dirname $(dirname $(dirname "$CONFIG_PATH")))
 MEGATRON_PATH=/opt/Megatron-LM
 export PYTHONPATH=${REPO_PATH}:${MEGATRON_PATH}:$PYTHONPATH
 export LLMASJUDGE_API_URL=${LLMASJUDGE_API_URL:-"https://cloud.infini-ai.com/maas/v1/chat/completions"}
