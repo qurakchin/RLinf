@@ -14,15 +14,11 @@ retriever_path=/path/to/Qwen2.5-3B-Instruct
 # Build step 3: Install qdrant and set qdrant_path to qdrant dir
 qdrant_path=/your/qdrant/path
 qdrant_url=http://localhost:6333
-qdrant_collection_name=wiki_collection_m24_cef512
-hnsw_config='{"m":24,"ef_construct":512}'
+qdrant_collection_name=wiki_collection
+hnsw_config='{"m":32,"ef_construct":512}'
 
-
-"$qdrant_path/qdrant" &
-qdrant_pid=$!
-sleep 5
-
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 examples/agent/tools/search_local_server_qdrant/build_index.py \
+CONFIG_PATH="$( realpath "$( dirname "${BASH_SOURCE[0]}" )"  )"
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 ${CONFIG_PATH}/build_index.py \
                                             --corpus_path $corpus_file \
                                             --retriever_name $retriever_name \
                                             --retriever_model $retriever_path \
@@ -30,8 +26,3 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 examples/agent/tools/search_local_s
                                             --qdrant_url $qdrant_url\
                                             --hnsw_config $hnsw_config\
                                             --build_parallel 16\
-
-echo "wait for qdrant stop"
-kill $qdrant_pid
-wait $qdrant_pid 2>/dev/null
-echo "qdrant is stopped"
