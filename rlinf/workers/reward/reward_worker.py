@@ -105,6 +105,10 @@ class RewardWorker(Worker):
             rollout_result.answers = None
             output_channel.put(rollout_result, async_op=True)
 
+        assert recv_batch_size == total_batch_size_per_dp, (
+            f"Expected {total_batch_size_per_dp} sequences from channel, but got {recv_batch_size}"
+        )
+
     def _compute_rule_based_rewards(self, rollout_result: RolloutResult):
         # Decode only the generated tokens; response_ids are already the post-prompt tokens
         texts = rollout_result.response_texts
