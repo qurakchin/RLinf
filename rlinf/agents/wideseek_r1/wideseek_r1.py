@@ -90,6 +90,7 @@ class WideSeekR1AgentLoopWorker(MultiAgentLoopWorker):
         self.max_total_len = int(self.cfg.runner.seq_length)
 
         self.use_access_summary = self.cfg.tools.get("use_access_summary", False)
+        self.use_llm_judge = self.cfg.agentloop.get("use_llm_judge", True)
 
         self.use_fixed_rollout = cfg.rollout.get("use_fixed_worker", False)
         self.fixed_role = self.cfg.agentloop.get("fixed_role", None)
@@ -99,10 +100,13 @@ class WideSeekR1AgentLoopWorker(MultiAgentLoopWorker):
         self.workflow = self.cfg.agentloop.get("workflow", "mas")
         self.is_hybrid = self.cfg.data.get("is_hybrid", False)
 
-        llm_ip = self.cfg.agentloop.get("llm_ip", "")
-        llm_port = self.cfg.agentloop.get("llm_port", "")
-        llm_type = self.cfg.agentloop.get("llm_type", "")
-        self.sgl_client = SGLangClient(llm_ip, llm_port, llm_type)
+        if self.use_llm_judge:
+            llm_ip = self.cfg.agentloop.get("llm_ip", "")
+            llm_port = self.cfg.agentloop.get("llm_port", "")
+            llm_type = self.cfg.agentloop.get("llm_type", "")
+            self.sgl_client = SGLangClient(llm_ip, llm_port, llm_type)
+        else:
+            self.sgl_client = None
         assert self.return_logprobs if not self.is_eval else True
 
     async def extract_tool_calls(
@@ -267,6 +271,9 @@ class WideSeekR1AgentLoopWorker(MultiAgentLoopWorker):
         Returns:
             A short summary string for tool feedback.
         """
+        if not self.use_llm_judge:
+            return page_content
+
         if page_content == "No More Information is Found for this URL.":
             return "No useful Information is Found under this URL."
 

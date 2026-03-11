@@ -25,18 +25,18 @@ runner:
   max_epochs: 1
   max_steps: -1
 
-  seq_length: 32000
+  seq_length: 10000
 
   enable_dynamic_batch_size: True
-  max_tokens_per_mbs: 32000
+  max_tokens_per_mbs: 10000
 
   resume_dir: null
-  experiment_name: null
-  output_dir: null
+  experiment_name: wideseek-qwen3-eval
+  output_dir: ../results
 
 
 algorithm:
-  group_size: 4
+  group_size: 2
   training_batch_size_per_gpu: 1 # micro batch size
   rollout_batch_size_per_gpu: null # If set to null, rollout_batch_size will be evenly divided across all inference instances. You can reduce this parameter if inference consumes too much GPU memory.
 
@@ -66,27 +66,28 @@ data:
   type: wideseek_r1
   max_prompt_length: 4096
   filter_prompt_by_length: True
-  rollout_batch_size: 128 
-  val_rollout_batch_size: 11280
+  rollout_batch_size: 16 
+  val_rollout_batch_size: 16
   num_workers: 2
   prompt_key: question
   answer_key: answer
+  is_markdown: False
   apply_chat_template: False
   shuffle: True
   validation_shuffle: False
   seed: 1234
-  val_data_paths: null
-  data_size: -1
+  val_data_paths: /workspace/dataset/wideseek_r1/eval.jsonl 
+  data_size: 16
 
 
 agentloop:
   group_name: "AgentLoopGroup"
-  max_planner_turns: 10
-  max_worker_turns: 20
-  max_sa_turns: 50
+  max_planner_turns: 3
+  max_worker_turns: 3
+  max_sa_turns: 3
   print_outputs: False # whether to print the outputs (token ids, texts, tool calls, etc.) of agent loop worker.
-  max_workers_per_planner: 10
-  max_toolcall_per_worker: 5
+  max_workers_per_planner: 3
+  max_toolcall_per_worker: 3
   is_dynamic_rollout_batch: True
 
   format_reward: 0.1
@@ -97,7 +98,7 @@ agentloop:
   over_context_penalty: 0.2
 
   # whether to enable Qwen3-30B-A3B LLM judge for access summary and answer reward, False is only for ci now
-  use_llm_judge: True
+  use_llm_judge: False
   # set to your own llm server
   llm_ip: xx.xx.xx.xx
   llm_port: xx
@@ -108,7 +109,7 @@ agentloop:
 tools:
   online: False  # Set to True to use online search (Serper API), False for local search
   search:
-    server_addr: "127.0.0.1:8000"  # Used only for local search
+    server_addr: "127.0.0.1:8001"  # Used only for local search
     topk: 3
   use_access_summary: True
   # Online search cache settings (only used when online: True)
@@ -123,6 +124,7 @@ rollout:
   gpu_memory_utilization: 0.6
   use_fixed_worker: False 
   model:
+    model_path: /workspace/dataset/Qwen3-0.6B 
     model_type: qwen3
     precision: fp16             # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False          # if False, rollout engine will capture cuda graph, which will take more time to initialize.
