@@ -103,7 +103,7 @@ data:
   shuffle: False
   validation_shuffle: False
   seed: 1234
-  train_data_paths: /workspace/dataset/wideseek_r1/train.jsonl # TODO: 
+  train_data_paths: /workspace/dataset/wideseek_r1/train.jsonl
   val_data_paths: ${data.train_data_paths} 
   data_size: -1
 
