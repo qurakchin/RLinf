@@ -37,6 +37,7 @@ runner:
   experiment_name: wideseek-qwen3-train
   output_dir: ../results
 
+
 algorithm:
   group_size: 2
   n_minibatches: 1
@@ -139,6 +140,7 @@ agentloop:
 tools:
   online: False  # Set to True to use online search (Serper API), False for local search
   search:
+    dummy_mode: True
     server_addr: "127.0.0.1:8001"  # Used only for local search
     topk: 3
   use_access_summary: True
@@ -154,8 +156,8 @@ rollout:
   gpu_memory_utilization: 0.5
   use_fixed_worker: False 
   model:
-    model_type: qwen3
     model_path: /workspace/dataset/Qwen3-4B
+    model_type: qwen3
     precision: ${actor.model.precision}            # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False          # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
