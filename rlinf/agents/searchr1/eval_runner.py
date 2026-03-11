@@ -200,7 +200,6 @@ class Searchr1AgentEvalRunner(AgentEvalRunner):
         context["total_correct"] += batch_correct
         context["total_samples"] += batch_count
         context["batch_accuracy"] = batch_accuracy
-        breakpoint()
 
     def pre_process(self) -> dict:
         logging.info("=" * 80)
