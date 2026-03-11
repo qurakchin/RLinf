@@ -364,9 +364,7 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
 
     parser = argparse.ArgumentParser(description="Launch the local qdrant retriever.")
-    parser.add_argument(
-        "--pages_path", type=str, default=None, help="Local page file."
-    )
+    parser.add_argument("--pages_path", type=str, default=None, help="Local page file.")
     parser.add_argument(
         "--topk",
         type=int,
@@ -472,7 +470,9 @@ if __name__ == "__main__":
     if not args.pages_path:
         logging.info("Page Access is off.")
     elif os.path.exists(args.pages_path):
-        logging.info(f"Page Access is not load because pages_path({args.pages_path}) not exist.")
+        logging.info(
+            f"Page Access is not load because pages_path({args.pages_path}) not exist."
+        )
     else:
         page_access = PageAccess(args.pages_path)
         logging.info("Page Access is ready.")
