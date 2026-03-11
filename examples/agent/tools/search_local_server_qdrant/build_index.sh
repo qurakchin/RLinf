@@ -18,11 +18,11 @@ qdrant_collection_name=wiki_collection
 hnsw_config='{"m":32,"ef_construct":512}'
 
 CONFIG_PATH="$( realpath "$( dirname "${BASH_SOURCE[0]}" )"  )"
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 ${CONFIG_PATH}/build_index.py \
-                                            --corpus_path $corpus_file \
-                                            --retriever_name $retriever_name \
-                                            --retriever_model $retriever_path \
-                                            --qdrant_collection_name $qdrant_collection_name \
-                                            --qdrant_url $qdrant_url\
-                                            --hnsw_config $hnsw_config\
-                                            --build_parallel 16\
+python3 ${CONFIG_PATH}/build_index.py \
+    --corpus_path $corpus_file \
+    --retriever_name $retriever_name \
+    --retriever_model $retriever_path \
+    --qdrant_collection_name $qdrant_collection_name \
+    --qdrant_url $qdrant_url\
+    --hnsw_config $hnsw_config\
+    --build_parallel 16\
