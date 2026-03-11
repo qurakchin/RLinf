@@ -106,6 +106,7 @@ data:
 
 agentloop:
   group_name: "AgentLoopGroup"
+  toolcall_parser: "wideseek_r1-qwen"
   workflow: mas
   max_planner_turns: 10
   max_worker_turns: 20

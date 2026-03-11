@@ -82,6 +82,7 @@ data:
 
 agentloop:
   group_name: "AgentLoopGroup"
+  toolcall_parser: "wideseek_r1-qwen"
   max_planner_turns: 3
   max_worker_turns: 3
   max_sa_turns: 3
