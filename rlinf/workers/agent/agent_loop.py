@@ -631,10 +631,6 @@ class MultiAgentLoopWorker(AgentLoopWorker):
             for task_result in task_results:
                 if len(task_result.trace_prints) > 0:
                     self.print_agent_outputs(None, task_result.trace_prints)
-        if self.is_eval:
-            self.log_info(
-                f"finish question id {task_results[0].extra_fields.get('instance_id', None)}"
-            )
 
         idx_to_traj = []
         prompt_lengths = []
