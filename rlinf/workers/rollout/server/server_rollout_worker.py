@@ -327,17 +327,15 @@ class ServerRolloutWorker(Worker):
         # start tracking new data
         self._track_data_enable = True
         if self._enable_dummy_data:
-            import random
-
-            for i in range(self._batch_size):
+            for _ in range(self._batch_size):
                 data = {
                     "prompt": "Hello, world!",
                     "completion": "Hello, world!",
-                    "accepted": float(random.random() < 0.3),
+                    "accepted": 1.0,
                 }
                 await self._data_source.put(data)
 
-        for i in range(self._batch_size):
+        for _ in range(self._batch_size):
             # Get data from unified source (either HTTP or Channel)
             data = await self._data_source.get()
 

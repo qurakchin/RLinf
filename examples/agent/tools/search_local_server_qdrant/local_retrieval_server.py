@@ -469,7 +469,7 @@ if __name__ == "__main__":
     # 3) Load pages
     if not args.pages_path:
         logging.info("Page Access is off.")
-    elif os.path.exists(args.pages_path):
+    elif not os.path.exists(args.pages_path):
         logging.info(
             f"Page Access is not load because pages_path({args.pages_path}) not exist."
         )
