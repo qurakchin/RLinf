@@ -76,7 +76,7 @@ data:
   shuffle: True
   validation_shuffle: False
   seed: 1234
-  val_data_paths: /workspace/dataset/wideseek_r1/eval.jsonl 
+  val_data_paths: /workspace/dataset/wideseek_r1/eval.jsonl
   data_size: 16
 
 
@@ -125,7 +125,7 @@ rollout:
   gpu_memory_utilization: 0.6
   use_fixed_worker: False 
   model:
-    model_path: /workspace/dataset/Qwen3-0.6B 
+    model_path: /workspace/dataset/Qwen3-4B
     model_type: qwen3
     precision: fp16             # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False          # if False, rollout engine will capture cuda graph, which will take more time to initialize.
