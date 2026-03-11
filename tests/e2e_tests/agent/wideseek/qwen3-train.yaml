@@ -155,7 +155,7 @@ rollout:
   use_fixed_worker: False 
   model:
     model_type: qwen3
-    model_path: /workspace/dataset/Qwen3-0.6B 
+    model_path: /workspace/dataset/Qwen3-4B
     precision: ${actor.model.precision}            # precision for rollout model, support [fp16, bf16, fp32]
   enforce_eager: False          # if False, rollout engine will capture cuda graph, which will take more time to initialize.
   distributed_executor_backend: mp   # ray or mp
@@ -292,7 +292,7 @@ actor:
     use_profiler: False # if true, will enable torch profiler when training, pay attention it has influence on performance
 
     ckpt_convertor: # config for ckpt convertor
-      model: Qwen3-0.6B
+      model: Qwen3-4B
       hf_model_path: ${rollout.model.model_path} # path to the hf model
       save_path: ${runner.output_dir}/${runner.experiment_name}/converted_ckpts/actor
       use_gpu_num : 0
