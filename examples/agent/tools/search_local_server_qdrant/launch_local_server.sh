@@ -16,12 +16,12 @@ qdrant_collection_name=wiki_collection
 qdrant_search_param='{}'
 
 CONFIG_PATH="$( realpath "$( dirname "${BASH_SOURCE[0]}" )"  )"
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -u ${CONFIG_PATH}/local_retrieval_server.py \
-                                            --pages_path $pages_file \
-                                            --topk 3 \
-                                            --retriever_name $retriever_name \
-                                            --retriever_model $retriever_path \
-                                            --qdrant_collection_name $qdrant_collection_name \
-                                            --qdrant_url $qdrant_url\
-                                            --qdrant_search_param $qdrant_search_param\
-                                            --port 8000 \
+python3 -u ${CONFIG_PATH}/local_retrieval_server.py \
+    --pages_path $pages_file \
+    --topk 3 \
+    --retriever_name $retriever_name \
+    --retriever_model $retriever_path \
+    --qdrant_collection_name $qdrant_collection_name \
+    --qdrant_url $qdrant_url\
+    --qdrant_search_param $qdrant_search_param\
+    --port 8000
