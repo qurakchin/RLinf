@@ -122,3 +122,176 @@ class Rstar2QwenToolCallParser:
                 )
 
         return response_text, return_function_calls
+
+
+@register_toolcall_parser("wideseek_r1-qwen")
+class WideSeekQwenToolCallParser:
+    """Tool-call parser for WideSeek-R1 planner/worker/single-agent roles."""
+
+    def __init__(self) -> None:
+        self.tool_call_start_token: str = "<tool_call>"
+        self.tool_call_end_token: str = "</tool_call>"
+        self.tool_call_regex = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+
+    @staticmethod
+    def _parse_planner_calls(
+        tool_name: str,
+        tool_arguments: dict,
+        max_workers_per_planner: int,
+    ) -> list[ToolRequest]:
+        if tool_name != "create_sub_agents":
+            return []
+        sub_agents = tool_arguments.get("sub_agents", [])
+        if not isinstance(sub_agents, list):
+            return []
+
+        function_calls = []
+        for sub_agent in sub_agents[:max_workers_per_planner]:
+            if not isinstance(sub_agent, dict):
+                continue
+            prompt = sub_agent.get("prompt", "")
+            if not isinstance(prompt, str) or not prompt:
+                continue
+            function_calls.append(
+                ToolRequest(name="subtask", arguments={"subtask": prompt})
+            )
+        return function_calls
+
+    @staticmethod
+    def _parse_worker_calls(
+        tool_name: str,
+        tool_arguments: dict,
+        max_toolcall_per_worker: int,
+    ) -> list[ToolRequest]:
+        function_calls = []
+        if tool_name == "search":
+            searches = tool_arguments.get("queries", [])
+            if not isinstance(searches, list):
+                return []
+            for search_item in searches[:max_toolcall_per_worker]:
+                if not isinstance(search_item, dict):
+                    continue
+                query = search_item.get("query", "")
+                if not isinstance(query, str) or not query:
+                    continue
+                topk = search_item.get("count", None)
+                if topk:
+                    function_calls.append(
+                        ToolRequest(
+                            name="search",
+                            arguments={"query": query, "topk": topk},
+                        )
+                    )
+                else:
+                    function_calls.append(
+                        ToolRequest(name="search", arguments={"query": query})
+                    )
+
+        elif tool_name == "access":
+            accesses = tool_arguments.get("urls", [])
+            if not isinstance(accesses, list):
+                return []
+            for access_item in accesses[:max_toolcall_per_worker]:
+                if not isinstance(access_item, dict):
+                    continue
+                url = access_item.get("url", "")
+                if not isinstance(url, str) or not url:
+                    continue
+                info_to_extract = access_item.get("info_to_extract", None)
+                function_calls.append(
+                    ToolRequest(
+                        name="access",
+                        arguments={
+                            "url": url,
+                            "access_token": 25000,
+                            "info_to_extract": info_to_extract,
+                        },
+                    )
+                )
+        return function_calls
+
+    @staticmethod
+    def _parse_single_calls(tool_name: str, tool_arguments: dict) -> list[ToolRequest]:
+        if tool_name == "search":
+            query = tool_arguments.get("query", "")
+            if not isinstance(query, str) or not query:
+                return []
+            topk = tool_arguments.get("count", None)
+            if topk:
+                return [
+                    ToolRequest(
+                        name="search",
+                        arguments={"query": query, "topk": topk},
+                    )
+                ]
+            return [ToolRequest(name="search", arguments={"query": query})]
+
+        if tool_name == "access":
+            url = tool_arguments.get("url", "")
+            if not isinstance(url, str) or not url:
+                return []
+            info_to_extract = tool_arguments.get("info_to_extract", None)
+            return [
+                ToolRequest(
+                    name="access",
+                    arguments={
+                        "url": url,
+                        "access_token": 25000,
+                        "info_to_extract": info_to_extract,
+                    },
+                )
+            ]
+        return []
+
+    async def __call__(
+        self,
+        response_text: str,
+        *,
+        role: str,
+        max_workers_per_planner: int = 10,
+        max_toolcall_per_worker: int = 5,
+    ) -> tuple[str, list[ToolRequest]]:
+        if (
+            self.tool_call_start_token not in response_text
+            or self.tool_call_end_token not in response_text
+        ):
+            return response_text, []
+
+        matches = self.tool_call_regex.findall(response_text)
+        if not matches:
+            return response_text, []
+
+        try:
+            tool_call_json = json.loads(matches[0].strip())
+        except Exception:
+            return response_text, []
+
+        if not isinstance(tool_call_json, dict):
+            return response_text, []
+        tool_name = tool_call_json.get("name")
+        tool_arguments = tool_call_json.get("arguments", {})
+        if not isinstance(tool_arguments, dict):
+            return response_text, []
+
+        if role == "planner":
+            function_calls = self._parse_planner_calls(
+                tool_name=tool_name,
+                tool_arguments=tool_arguments,
+                max_workers_per_planner=max_workers_per_planner,
+            )
+        elif role == "worker":
+            function_calls = self._parse_worker_calls(
+                tool_name=tool_name,
+                tool_arguments=tool_arguments,
+                max_toolcall_per_worker=max_toolcall_per_worker,
+            )
+        elif role == "single":
+            function_calls = self._parse_single_calls(
+                tool_name=tool_name, tool_arguments=tool_arguments
+            )
+        else:
+            function_calls = []
+
+        # remaining text exclude tool call tokens
+        content = self.tool_call_regex.sub("", response_text)
+        return content, function_calls
