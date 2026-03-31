@@ -1,3 +1,17 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import annotations
 
 import json
@@ -22,8 +36,6 @@ from rlinf.workers.inference.utils import get_inference_backend_worker
 from rlinf.workers.actor import get_actor_worker
 from rlinf.workers.agent.agentlightning_rollout_worker import AgentLightningRolloutWorker
 from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
-logger = logging.getLogger(__name__)
-
 
 def run_rlinf_training(
     config: dict[str, Any] | DictConfig,
@@ -32,7 +44,6 @@ def run_rlinf_training(
     store: LightningStore | None,
     adapter: TraceAdapter[Any] | None,
     eval: bool = False,
-    eval_checkpoint_dir: str | None = None,
 ) -> None:
     """Run rlinf training and evaluation for agentlightning task."""
     cfg = config
@@ -92,7 +103,7 @@ def run_rlinf_training(
             adapter=adapter,
             agentlightning_rollout_worker=agentlightning_rollout_group,
         )
-        runner.eval(checkpoint_dir=eval_checkpoint_dir)
+        runner.eval()
     else:
         runner = AgentLightningRLinfRunner(
             cfg=cfg,

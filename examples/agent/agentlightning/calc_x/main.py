@@ -1,3 +1,17 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import socket
 from typing import Any, Optional, cast
 from datetime import datetime
@@ -41,9 +55,8 @@ def train(cfg: Any):
     val_dataset = cast(agl.Dataset[MathProblem], HuggingFaceDataset.from_parquet(val_file).to_list())
 
     eval_mode = cfg.get("eval", False)
-    eval_checkpoint_dir = cfg.get("eval_checkpoint_dir", None)
 
-    algorithm = RlinfAlgorithm(config=cfg, eval=eval_mode, eval_checkpoint_dir=eval_checkpoint_dir)
+    algorithm = RlinfAlgorithm(config=cfg, eval=eval_mode)
     store = None
     llm_proxy = None
 

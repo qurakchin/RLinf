@@ -49,13 +49,14 @@ Start training:
 
 .. code-block:: bash
 
-   bash run_calc_x.sh qwen2.5-1.5b-multiturn
+   bash run_calc_x.sh qwen2.5-1.5b-enginehttp-multiturn
 
 Evaluation
 ----------
 
-For evaluation, you can directly specify a HuggingFace model directory:
+For HF evaluation, set ``rollout.model.model_path`` in the matching ``*_eval.yaml``. Examples:
 
 .. code-block:: bash
 
-   bash run_calc_x.sh eval=true rollout.model.model_path=/path/to/eval/hf_model
+   bash run_calc_x.sh qwen2.5-1.5b-enginehttp-multiturn_eval
+   bash run_calc_x.sh qwen2.5-1.5b-enginehttp-trajectory_eval

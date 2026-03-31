@@ -1,3 +1,16 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import asyncio
 import dataclasses
@@ -7,7 +20,6 @@ from typing import List, Literal, Optional
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from starlette.requests import Request
 from omegaconf import DictConfig
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
@@ -42,29 +54,12 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         self._http_server_task = None
         self._http_app = None
         self._openai_serving_chat = None
-        # Optional: rollout.sglang.server.{http_access_log,http_uvicorn_log_level,http_request_log}
-        self._http_access_log = bool(sv.get("http_access_log", False))
-        self._http_uvicorn_log_level = str(sv.get("http_uvicorn_log_level", "warning")).lower()
-        self._http_request_log = bool(sv.get("http_request_log", False))
 
         if self._enable_http_server:
             self._setup_http_routes()
 
     def _setup_http_routes(self):
         app = FastAPI(title="SGLangWorker-HTTP", version="1.0.0")
-
-        if self._http_request_log:
-
-            @app.middleware("http")
-            async def _log_requests(request: Request, call_next):
-                t0 = time.perf_counter()
-                response = await call_next(request)
-                ms = (time.perf_counter() - t0) * 1000
-                code = getattr(response, "status_code", "?")
-                self.log_info(
-                    f"[SGLangHTTP] {request.method} {request.url.path} -> {code} {ms:.1f}ms"
-                )
-                return response
 
         @app.post("/v1/chat/completions")
         async def handle_chat_completion(request: ChatCompletionRequest):
@@ -88,8 +83,8 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
                 app,
                 host=self._http_server_host,
                 port=self._http_server_port,
-                log_level=self._http_uvicorn_log_level,
-                access_log=self._http_access_log,
+                log_level="warning",
+                access_log=False,
             )
         )
 

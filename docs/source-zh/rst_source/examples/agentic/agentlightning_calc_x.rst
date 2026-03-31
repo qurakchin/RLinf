@@ -49,16 +49,17 @@ RLinf 基础环境请参考 `RLinf Installation <https://rlinf.readthedocs.io/en
 
 .. code-block:: bash
 
-   bash run_calc_x.sh qwen2.5-1.5b-multiturn
+   bash run_calc_x.sh qwen2.5-1.5b-enginehttp-multiturn
 
 测试
 ----
 
-评测时可直接指定 HuggingFace 模型目录：
+HF 评测时在对应的 ``*_eval.yaml`` 里设置 ``rollout.model.model_path``。例如：
 
 .. code-block:: bash
 
-   bash run_calc_x.sh eval=true rollout.model.model_path=/path/to/eval/hf_model
+   bash run_calc_x.sh qwen2.5-1.5b-enginehttp-multiturn_eval
+   bash run_calc_x.sh qwen2.5-1.5b-enginehttp-trajectory_eval
 
 
 

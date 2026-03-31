@@ -1,8 +1,20 @@
 # Copyright (c) Microsoft. All rights reserved.
+#
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 # Copied and adapted from https://github.com/microsoft/agent-lightning/blob/main/examples/calc_x/calc_agent.py
-"""This sample code demonstrates how to define a Calc-X agent trainable with Agent-lightning
-with latest Agent-lightning API (v0.2+)."""
 
 import asyncio
 import logging
@@ -17,8 +29,6 @@ from autogen_ext.tools.mcp import McpWorkbench, StdioServerParams
 from eval_utils import evaluate
 
 import agentlightning as agl
-
-logger = logging.getLogger(__name__)
 
 
 class MathProblem(TypedDict):
@@ -100,11 +110,10 @@ async def calc_agent(task: MathProblem, llm: agl.LLM) -> None:
             else:
                 answer = last_message
         except asyncio.TimeoutError as e:
-            logger.warning("Timeout occurred. Error: %s", e)
+            logging.info("Timeout occurred. Error: %s", e)
             answer = "None"
         except Exception as e:
-            logger.warning("Failure: %s", e)
+            logging.info("Failure: %s", e)
             answer = "None"
         reward = await evaluate(answer, str(task["result"]))
         agl.emit_reward(reward)  # Emit reward for tracing
-        logger.debug("answer: %s ground_truth: %s reward: %s", answer, task["result"], reward)

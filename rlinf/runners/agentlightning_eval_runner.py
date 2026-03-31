@@ -1,7 +1,21 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import logging
 import os
 import time
-from typing import Any, Optional, Union
+from typing import Any
 
 import requests
 
@@ -124,13 +138,7 @@ class AgentLightningEvalRunner:
         avg_reward = results[0] if results and len(results) > 0 else 0.0
         return avg_reward
 
-    def eval(self, checkpoint_dir: Optional[str] = None):
-        if checkpoint_dir not in (None, "", "original"):
-            logging.warning(
-                "checkpoint_dir is ignored in HF eval mode. "
-                "Current eval path always uses rollout HF model directly."
-            )
-
+    def eval(self) -> None:
         if (
             not self.cfg.rollout.validate_weight
             and not self.cfg.rollout.get("validate_weight_first_sync", False)
