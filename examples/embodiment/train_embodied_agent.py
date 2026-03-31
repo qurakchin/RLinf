@@ -74,6 +74,7 @@ def main(cfg) -> None:
 
     runner = EmbodiedRunner(
         cfg=cfg,
+        component_placement=component_placement,
         actor=actor_group,
         rollout=rollout_group,
         env=env_group,
