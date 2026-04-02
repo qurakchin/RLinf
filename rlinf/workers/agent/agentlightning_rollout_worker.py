@@ -461,7 +461,7 @@ class AgentLightningRolloutWorker(Worker):
                     await asyncio.sleep(0.1)
             
             all_rewards: List[float] = []
-            for rollout_id, rollout_legacy in self._completed_rollout_ids.items():
+            for rollout_legacy in self._completed_rollout_ids.values():
                 all_rewards.append(rollout_legacy.final_reward)
             
             avg_reward = sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
