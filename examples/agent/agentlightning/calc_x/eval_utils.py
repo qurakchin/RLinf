@@ -22,6 +22,7 @@ import string
 
 import sympy
 
+
 def normalize_option(option: str) -> str:
     """
     >>> normalize_option("  (A)  \n")
@@ -47,7 +48,9 @@ def float_eval(input_str: str) -> float:
     return float(expr.evalf())
 
 
-def compare_are_results_same(pred_result: str, true_result: str, rel_tol: float) -> bool:
+def compare_are_results_same(
+    pred_result: str, true_result: str, rel_tol: float
+) -> bool:
     pred_result = str(pred_result) if pred_result is not None else ""  # type: ignore
     true_result = str(true_result) if true_result is not None else ""  # type: ignore
 

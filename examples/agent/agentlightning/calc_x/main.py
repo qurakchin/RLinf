@@ -13,18 +13,15 @@
 # limitations under the License.
 
 import socket
-from typing import Any, Optional, cast
-from datetime import datetime
-import uuid
+from typing import Any, cast
 
-import hydra
 import agentlightning as agl
-from datasets import Dataset as HuggingFaceDataset
-from agentlightning.env_var import LightningEnvVar, resolve_bool_env_var, resolve_str_env_var
-
-from rlinf.utils.utils import output_redirector
-from rlinf.entrypoint.agentlightning.algorithm import RlinfAlgorithm
+import hydra
 from calc_agent import MathProblem, calc_agent
+from datasets import Dataset as HuggingFaceDataset
+
+from rlinf.entrypoint.agentlightning.algorithm import RlinfAlgorithm
+from rlinf.utils.utils import output_redirector
 
 
 def _find_available_port() -> int:
@@ -37,7 +34,9 @@ def _find_available_port() -> int:
 def train(cfg: Any):
     train_data_paths = cfg.data.get("train_data_paths", None)
     val_data_paths = cfg.data.get("val_data_paths", None)
-    assert train_data_paths, "cfg.data.train_data_paths is required and cannot be empty."
+    assert train_data_paths, (
+        "cfg.data.train_data_paths is required and cannot be empty."
+    )
     assert val_data_paths, "cfg.data.val_data_paths is required and cannot be empty."
 
     train_file = train_data_paths[0]
@@ -51,8 +50,12 @@ def train(cfg: Any):
 
     n_runners = cfg.agentlightning.n_runners
 
-    train_dataset = cast(agl.Dataset[MathProblem], HuggingFaceDataset.from_parquet(train_file).to_list())
-    val_dataset = cast(agl.Dataset[MathProblem], HuggingFaceDataset.from_parquet(val_file).to_list())
+    train_dataset = cast(
+        agl.Dataset[MathProblem], HuggingFaceDataset.from_parquet(train_file).to_list()
+    )
+    val_dataset = cast(
+        agl.Dataset[MathProblem], HuggingFaceDataset.from_parquet(val_file).to_list()
+    )
 
     eval_mode = cfg.get("eval", False)
 
@@ -60,7 +63,12 @@ def train(cfg: Any):
     store = None
     llm_proxy = None
 
-    trainer_kwargs = {"algorithm": algorithm, "n_runners": n_runners, "store": store, "llm_proxy": llm_proxy}
+    trainer_kwargs = {
+        "algorithm": algorithm,
+        "n_runners": n_runners,
+        "store": store,
+        "llm_proxy": llm_proxy,
+    }
     trainer_kwargs["port"] = _find_available_port()
 
     trainer = agl.Trainer(**trainer_kwargs)

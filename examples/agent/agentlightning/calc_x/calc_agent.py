@@ -22,13 +22,12 @@ import os
 import re
 from typing import TypedDict, cast
 
+import agentlightning as agl
 from autogen_agentchat.agents import AssistantAgent
 from autogen_core.models import ModelFamily
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_ext.tools.mcp import McpWorkbench, StdioServerParams
 from eval_utils import evaluate
-
-import agentlightning as agl
 
 
 class MathProblem(TypedDict):
@@ -53,7 +52,6 @@ class MathProblem(TypedDict):
 def autogen_assistant_agent(
     model: str, openai_base_url: str, temperature: float, workbench: McpWorkbench
 ) -> AssistantAgent:
-
     model_client = OpenAIChatCompletionClient(
         model=model,
         base_url=openai_base_url,

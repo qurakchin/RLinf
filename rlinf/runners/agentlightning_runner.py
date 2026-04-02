@@ -13,40 +13,34 @@
 # limitations under the License.
 
 import logging
-import time
 import typing
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
-import requests
 import torch
+from agentlightning.adapter.triplet import TraceToTripletBase
+from agentlightning.store.base import LightningStore
 from omegaconf.dictconfig import DictConfig
-import ray.util
 from torch.utils.data import Dataset, RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
-from rlinf.scheduler import Channel
 from rlinf.runners.reasoning_runner import ReasoningRunner
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.utils.runner_utils import check_progress
-from rlinf.utils.timers import Timer
-
-from agentlightning.adapter.triplet import TraceToTripletBase
-from agentlightning.store.base import LightningStore
-
-from rlinf.workers.agent.agentlightning_rollout_worker import AgentLightningRolloutWorker
+from rlinf.workers.agent.agentlightning_rollout_worker import (
+    AgentLightningRolloutWorker,
+)
 
 if typing.TYPE_CHECKING:
-
-    from rlinf.workers.actor.megatron_actor_worker import MegatronActor
     from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
     from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-    from rlinf.workers.rollout.sglang.sglang_worker_server import SGLangWorkerWithHTTPServer
+    from rlinf.workers.rollout.sglang.sglang_worker_server import (
+        SGLangWorkerWithHTTPServer,
+    )
+
 
 class AgentLightningRLinfRunner(ReasoningRunner):
-
     def __init__(
         self,
         cfg: DictConfig,
@@ -70,22 +64,23 @@ class AgentLightningRLinfRunner(ReasoningRunner):
             actor,
             reward=None,
         )
-        
+
         self.store = store
         self.adapter = adapter
         self.agentlightning_rollout_worker = agentlightning_rollout_worker
 
     def _build_dataloader(self, train_dataset, val_dataset, collate_fn=None):
         self.train_dataset, self.val_dataset = train_dataset, val_dataset
-        
-        
+
         if collate_fn is None:
+
             def agl_collate_fn(data_list: list[dict]) -> dict[str, Any]:
                 batch = {}
                 keys = list(data_list[0].keys())
                 for key in keys:
                     batch[key] = [item[key] for item in data_list]
                 return batch
+
             collate_fn = agl_collate_fn
 
         if self.cfg.data.shuffle:
@@ -109,13 +104,12 @@ class AgentLightningRLinfRunner(ReasoningRunner):
             sampler=sampler,
         )
 
-
     def init_rollout_workers(self):
         # Run HF->MG conversion before starting rollout so main process does not read the same
         # HF path while 4 SGLang Server workers are loading from it (avoids I/O contention / hang).
         rollout_handle = self.rollout.init_worker()
         rollout_handle.wait()
-        
+
         if self.cfg.runner.resume_dir is None:
             logging.info("[AgentLightningRLinfRunner] Training from scratch")
             if (
@@ -166,16 +160,17 @@ class AgentLightningRLinfRunner(ReasoningRunner):
         for _ in epoch_iter:
             for batch in self.train_dataloader:
                 with self.timer("step"):
-
                     with self.timer("sync_weights"):
                         self._sync_weights()
 
                     with self.timer("prepare_data"):
                         self._put_batch(batch)
 
-                    rollout_handle: Handle = self.agentlightning_rollout_worker.process_rollout_batch(
-                        input_channel=self.dataloader_channel,
-                        output_channel=self.rollout_channel,
+                    rollout_handle: Handle = (
+                        self.agentlightning_rollout_worker.process_rollout_batch(
+                            input_channel=self.dataloader_channel,
+                            output_channel=self.rollout_channel,
+                        )
                     )
 
                     if not self.is_pipeline:
@@ -207,7 +202,7 @@ class AgentLightningRLinfRunner(ReasoningRunner):
 
                     actor_rollout_metrics = metrics[0][0]
                     actor_training_metrics = metrics[0][1]
-                    
+
                     self.global_steps += 1
 
                     run_time_exceeded = self.run_timer.is_finished()
@@ -251,14 +246,13 @@ class AgentLightningRLinfRunner(ReasoningRunner):
                 rollout_metrics = {
                     f"rollout/{k}": v for k, v in actor_rollout_metrics.items()
                 }
-                
+
                 self.metric_logger.log(agent_metrics, agent_logging_steps)
                 self.metric_logger.log(log_time_metrics, base_logging_steps)
                 self.metric_logger.log(rollout_metrics, base_logging_steps)
                 for i in range(self.cfg.algorithm.n_minibatches):
                     training_metrics = {
-                        f"train/{k}": v
-                        for k, v in actor_training_metrics[i].items()
+                        f"train/{k}": v for k, v in actor_training_metrics[i].items()
                     }
                     self.metric_logger.log(training_metrics, base_logging_steps + i)
 
@@ -268,9 +262,7 @@ class AgentLightningRLinfRunner(ReasoningRunner):
                     flops_metrics = self._compute_flops_metrics(
                         time_metrics, actor_rollout_metrics
                     )
-                    flops_metrics = {
-                        f"flops/{k}": v for k, v in flops_metrics.items()
-                    }
+                    flops_metrics = {f"flops/{k}": v for k, v in flops_metrics.items()}
                     self.metric_logger.log(flops_metrics, base_logging_steps)
                     logging_metrics.update(flops_metrics)
 
@@ -285,5 +277,5 @@ class AgentLightningRLinfRunner(ReasoningRunner):
         # Stop HTTP servers on all rollout workers
         if hasattr(self.rollout, "http_server_stop"):
             self.rollout.http_server_stop().wait()
-        
+
         self.metric_logger.finish()

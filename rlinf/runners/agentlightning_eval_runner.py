@@ -14,32 +14,34 @@
 
 import logging
 import os
-import time
 from typing import Any
-
-import requests
 
 if "CUDA_LAUNCH_BLOCKING" not in os.environ:
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
+import typing
+
+from agentlightning.adapter.triplet import TraceToTripletBase
+from agentlightning.store.base import LightningStore
 from omegaconf.dictconfig import DictConfig
 from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
+
 from rlinf.scheduler import Channel
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.placement import ModelParallelComponentPlacement
-from agentlightning.adapter.triplet import TraceToTripletBase
-from agentlightning.store.base import LightningStore
-from rlinf.workers.agent.agentlightning_rollout_worker import AgentLightningRolloutWorker
-import typing
+from rlinf.workers.agent.agentlightning_rollout_worker import (
+    AgentLightningRolloutWorker,
+)
 
 if typing.TYPE_CHECKING:
     from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
-    from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-    from rlinf.workers.rollout.sglang.sglang_worker_server import SGLangWorkerWithHTTPServer
+    from rlinf.workers.rollout.sglang.sglang_worker_server import (
+        SGLangWorkerWithHTTPServer,
+    )
+
 
 class AgentLightningEvalRunner:
-
     def __init__(
         self,
         cfg: DictConfig,
@@ -84,12 +86,16 @@ class AgentLightningEvalRunner:
         )
 
     def init_rollout_workers(self):
-        logging.info("[AgentLightningEvalRunner] init_rollout_workers: calling rollout.init_worker()")
+        logging.info(
+            "[AgentLightningEvalRunner] init_rollout_workers: calling rollout.init_worker()"
+        )
         rollout_handle = self.rollout.init_worker()
         rollout_handle.wait()
         logging.info("[AgentLightningEvalRunner] rollout.init_worker finished")
 
-        use_pre_process_policy = getattr(self.cfg.cluster, "use_pre_process_policy", False)
+        use_pre_process_policy = getattr(
+            self.cfg.cluster, "use_pre_process_policy", False
+        )
         if use_pre_process_policy:
             self.rollout.offload_engine().wait()
 
@@ -108,7 +114,9 @@ class AgentLightningEvalRunner:
             reward_fillna_value=self.cfg.algorithm.get("reward_fillna_value", 0.0),
             is_eval_mode=True,
         ).wait()
-        logging.info("[AgentLightningEvalRunner] AgentLightningRolloutWorker.init_worker finished")
+        logging.info(
+            "[AgentLightningEvalRunner] AgentLightningRolloutWorker.init_worker finished"
+        )
 
     def init_workers(self):
         self.init_rollout_workers()
@@ -117,7 +125,9 @@ class AgentLightningEvalRunner:
         self.dataloader_channel.put(batch, async_op=True)
 
     def _run_eval_loop(self) -> float:
-        logging.info("[AgentLightningEvalRunner] _run_eval_loop: fetching first batch from val_dataloader")
+        logging.info(
+            "[AgentLightningEvalRunner] _run_eval_loop: fetching first batch from val_dataloader"
+        )
         batch = next(iter(self.val_dataloader))
         logging.info(
             "[AgentLightningEvalRunner] _run_eval_loop: got batch with keys=%s size=%d",
@@ -126,22 +136,28 @@ class AgentLightningEvalRunner:
         )
 
         self._put_batch(batch)
-        logging.info("[AgentLightningEvalRunner] _run_eval_loop: submitted batch to dataloader_channel, calling process_eval_batch")
+        logging.info(
+            "[AgentLightningEvalRunner] _run_eval_loop: submitted batch to dataloader_channel, calling process_eval_batch"
+        )
 
         rollout_handle: Handle = self.agentlightning_rollout_worker.process_eval_batch(
             input_channel=self.dataloader_channel
         )
 
-        logging.info("[AgentLightningEvalRunner] _run_eval_loop: waiting for rollout_handle")
+        logging.info(
+            "[AgentLightningEvalRunner] _run_eval_loop: waiting for rollout_handle"
+        )
         results = rollout_handle.wait()
-        logging.info("[AgentLightningEvalRunner] _run_eval_loop: rollout_handle returned results=%r", results)
+        logging.info(
+            "[AgentLightningEvalRunner] _run_eval_loop: rollout_handle returned results=%r",
+            results,
+        )
         avg_reward = results[0] if results and len(results) > 0 else 0.0
         return avg_reward
 
     def eval(self) -> None:
-        if (
-            not self.cfg.rollout.validate_weight
-            and not self.cfg.rollout.get("validate_weight_first_sync", False)
+        if not self.cfg.rollout.validate_weight and not self.cfg.rollout.get(
+            "validate_weight_first_sync", False
         ):
             logging.warning(
                 "rollout.validate_weight and rollout.validate_weight_first_sync are both false; "
@@ -151,7 +167,7 @@ class AgentLightningEvalRunner:
 
         self.init_workers()
         avg_reward = self._run_eval_loop()
-        logging.info(f"Evaluation Results:")
+        logging.info("Evaluation Results:")
         logging.info(f"  Model: HF rollout model ({self.cfg.rollout.model.model_path})")
         logging.info(f"  Batches: {len(self.val_dataloader)}")
         logging.info(f"  Average Reward: {avg_reward:.6f}")

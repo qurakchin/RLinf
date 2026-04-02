@@ -14,28 +14,26 @@
 
 from __future__ import annotations
 
-import json
-import logging
 from typing import Any
 
 from omegaconf import DictConfig
 
-
 from agentlightning.adapter import TraceAdapter
 from agentlightning.store.base import LightningStore
 from agentlightning.types import Dataset
-
 from rlinf.config import validate_cfg
+from rlinf.runners.agentlightning_eval_runner import AgentLightningEvalRunner
+from rlinf.runners.agentlightning_runner import AgentLightningRLinfRunner
 from rlinf.scheduler import Cluster
 from rlinf.scheduler.placement import PackedPlacementStrategy
-from rlinf.runners.agentlightning_runner import AgentLightningRLinfRunner
-from rlinf.runners.agentlightning_eval_runner import AgentLightningEvalRunner
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
-from rlinf.workers.rollout.utils import get_rollout_backend_worker
-from rlinf.workers.inference.utils import get_inference_backend_worker
-from rlinf.workers.actor import get_actor_worker
-from rlinf.workers.agent.agentlightning_rollout_worker import AgentLightningRolloutWorker
 from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
+from rlinf.workers.agent.agentlightning_rollout_worker import (
+    AgentLightningRolloutWorker,
+)
+from rlinf.workers.inference.utils import get_inference_backend_worker
+from rlinf.workers.rollout.utils import get_rollout_backend_worker
+
 
 def run_rlinf_training(
     config: dict[str, Any] | DictConfig,

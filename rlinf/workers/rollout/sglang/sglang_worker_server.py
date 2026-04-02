@@ -15,16 +15,16 @@
 import asyncio
 import dataclasses
 import time
-from typing import List, Literal, Optional
+from typing import Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from omegaconf import DictConfig
-from sglang.srt.server_args import ServerArgs
 from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
 from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
 from sglang.srt.managers.template_manager import TemplateManager
+from sglang.srt.server_args import ServerArgs
 
 from rlinf.config import torch_dtype_from_precision
 from rlinf.utils.placement import ModelParallelComponentPlacement
@@ -33,7 +33,6 @@ from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
 
 
 class SGLangWorkerWithHTTPServer(SGLangWorker):
-
     def __init__(
         self,
         config: DictConfig,
@@ -102,10 +101,9 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
 
     async def _handle_chat_completion(self, request: ChatCompletionRequest):
         try:
-
             if self._return_logprobs:
                 request.logprobs = True
-                request.top_logprobs = 1 
+                request.top_logprobs = 1
 
             if request.temperature is None and "temperature" in self._sampling_params:
                 request.temperature = self._sampling_params["temperature"]
@@ -115,53 +113,48 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
                 request.top_p = self._sampling_params["top_p"]
             if request.top_k is None and "top_k" in self._sampling_params:
                 request.top_k = self._sampling_params["top_k"]
-            
-           
+
             adapted_request, _ = self._openai_serving_chat._convert_to_internal_request(
                 request
             )
-            adapted_request.return_logprob = self._return_logprobs 
+            adapted_request.return_logprob = self._return_logprobs
             prompt_token_ids = None
-            if hasattr(adapted_request, "input_ids") and adapted_request.input_ids is not None:
+            if (
+                hasattr(adapted_request, "input_ids")
+                and adapted_request.input_ids is not None
+            ):
                 prompt_token_ids = adapted_request.input_ids
-                if hasattr(prompt_token_ids, 'tolist'):
+                if hasattr(prompt_token_ids, "tolist"):
                     prompt_token_ids = prompt_token_ids.tolist()
-            
+
             generator = self._openai_serving_chat.tokenizer_manager.generate_request(
                 adapted_request
             )
             result = await generator.__anext__()
-            
+
             if not isinstance(result, list):
                 result = [result]
-
 
             response = self._openai_serving_chat._build_chat_response(
                 request,
                 result,
                 int(time.time()),
             )
-            
-            response_dict = response.model_dump(exclude_none=True)     
 
+            response_dict = response.model_dump(exclude_none=True)
 
             if result and len(result) > 0 and "output_ids" in result[0]:
                 response_dict["response_token_ids"] = [result[0]["output_ids"]]
 
             if prompt_token_ids is not None:
                 response_dict["prompt_token_ids"] = prompt_token_ids
-            
+
             return response_dict
 
         except Exception as e:
             return JSONResponse(
                 status_code=500,
-                content={
-                    "error": {
-                        "message": str(e),
-                        "type": type(e).__name__
-                    }
-                }
+                content={"error": {"message": str(e), "type": type(e).__name__}},
             )
 
     def _init_engine(self):
@@ -199,7 +192,7 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
             log_level="warning",
             max_running_requests=self._cfg_rollout.max_running_requests,
             dist_init_addr=f"127.0.0.1:{str(self.acquire_free_port())}",
-            tool_call_parser = self._cfg_rollout.sglang.get("tool_call_parser", None),
+            tool_call_parser=self._cfg_rollout.sglang.get("tool_call_parser", None),
         )
 
         self.log_on_first_rank(f"{server_args=}")
@@ -216,7 +209,9 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
             return
 
         self._http_server_task = asyncio.create_task(self._http_server.serve())
-        self.log_info(f"HTTP server started on {self._http_server_host}:{self._http_server_port}")
+        self.log_info(
+            f"HTTP server started on {self._http_server_host}:{self._http_server_port}"
+        )
 
     async def http_server_stop(self):
         if not self._enable_http_server or self._http_server_task is None:
@@ -244,5 +239,3 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
 
             host = ray.util.get_node_ip_address()
         return f"{host}:{self._http_server_port}"
-
-

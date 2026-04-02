@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Optional
 
 from omegaconf import DictConfig, OmegaConf
@@ -23,6 +22,7 @@ from agentlightning.algorithm.base import Algorithm
 from agentlightning.types import Dataset
 
 from .entrypoint import run_rlinf_training
+
 
 class RlinfAlgorithm(Algorithm):
     """Add rlinf tag to agentlightning algorithm."""
@@ -55,4 +55,3 @@ class RlinfAlgorithm(Algorithm):
             adapter=adapter,
             eval=self.eval,
         )
-
