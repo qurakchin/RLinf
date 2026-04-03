@@ -233,10 +233,10 @@ class AgentLightningRolloutWorker(Worker):
     ) -> dict[str, float]:
         if not rollout_results:
             return {
-                "agent/reward": 0.0,
-                "agent/n_rollouts": 0,
-                "agent/n_rollouts_w_trace": 0,
-                "agent/n_rollouts_w_reward": 0,
+                "agent/mean/reward": 0.0,
+                "agent/count/n_rollouts": 0,
+                "agent/count/n_rollouts_w_trace": 0,
+                "agent/count/n_rollouts_w_reward": 0,
             }
 
         all_rewards: list[float] = []
@@ -295,23 +295,23 @@ class AgentLightningRolloutWorker(Worker):
         )
 
         metrics = {
-            "agent/reward": float(training_reward),
-            "agent/n_rollouts": n_rollouts,
-            "agent/n_rollouts_w_trace": n_rollouts_w_trace,
-            "agent/n_rollouts_w_reward": n_rollouts_w_reward,
-            "agent/turn_count": total_turns,
-            "agent/mean_turn_count_per_rollout": float(total_turns / n_rollouts)
+            "agent/mean/reward": float(training_reward),
+            "agent/count/n_rollouts": n_rollouts,
+            "agent/count/n_rollouts_w_trace": n_rollouts_w_trace,
+            "agent/count/n_rollouts_w_reward": n_rollouts_w_reward,
+            "agent/sum/turn_count": total_turns,
+            "agent/mean/turn_count_per_rollout": float(total_turns / n_rollouts)
             if n_rollouts > 0
             else 0.0,
-            "agent/p90_prompt_length": p90_prompt_length,
-            "agent/mean_top10p_prompt_length": mean_top10p_prompt_length,
-            "agent/p90_response_length": p90_response_length,
-            "agent/mean_top10p_response_length": mean_top10p_response_length,
-            "agent/total_tool_calls": total_tool_calls,
-            "agent/mean_tool_calls_per_rollout": float(total_tool_calls / n_rollouts)
+            "agent/p90/prompt_length": p90_prompt_length,
+            "agent/mean_top10p/prompt_length": mean_top10p_prompt_length,
+            "agent/p90/response_length": p90_response_length,
+            "agent/mean_top10p/response_length": mean_top10p_response_length,
+            "agent/sum/total_tool_calls": total_tool_calls,
+            "agent/mean/tool_calls_per_rollout": float(total_tool_calls / n_rollouts)
             if n_rollouts > 0
             else 0.0,
-            "agent/mean_tool_calls_per_turn": float(total_tool_calls / total_turns)
+            "agent/mean/tool_calls_per_turn": float(total_tool_calls / total_turns)
             if total_turns > 0
             else 0.0,
         }
@@ -336,7 +336,7 @@ class AgentLightningRolloutWorker(Worker):
 
     async def _async_get_rollout_result_for_data_id(
         self, data_id: str
-    ) -> Optional[DynamicRolloutResult]:
+    ) -> DynamicRolloutResult:
         rollout_ids = self._data_id_to_rollout_ids[data_id]
         rollouts = [
             self._completed_rollout_ids[rollout_id] for rollout_id in rollout_ids
@@ -439,9 +439,8 @@ class AgentLightningRolloutWorker(Worker):
                     rollout_result = await self._async_get_rollout_result_for_data_id(
                         data_id
                     )
-                    if rollout_result is not None:
-                        rollout_results.append(rollout_result)
-                        output_channel.put(rollout_result, async_op=True)
+                    rollout_results.append(rollout_result)
+                    output_channel.put(rollout_result, async_op=True)
 
                     processed_data_ids.add(data_id)
 

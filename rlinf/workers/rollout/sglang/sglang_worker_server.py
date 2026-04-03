@@ -39,13 +39,11 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         placement: ModelParallelComponentPlacement,
         weight_reload: Literal["sync", "cpu", None] = "sync",
         config_rollout: Optional[DictConfig] = None,
-        enable_http_server: bool = True,
         http_server_host: str = "0.0.0.0",
         http_server_port: int = 8020,
     ):
         super().__init__(config, placement, weight_reload, config_rollout)
 
-        self._enable_http_server = enable_http_server
         sv = (self._cfg.rollout.get("sglang") or {}).get("server") or {}
         self._http_server_host = http_server_host or str(sv.get("host", "0.0.0.0"))
         self._http_server_port = int(sv.get("port", http_server_port)) + self._rank
@@ -54,8 +52,7 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         self._http_app = None
         self._openai_serving_chat = None
 
-        if self._enable_http_server:
-            self._setup_http_routes()
+        self._setup_http_routes()
 
     def _setup_http_routes(self):
         app = FastAPI(title="SGLangWorker-HTTP", version="1.0.0")
@@ -201,9 +198,6 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         )
 
     def http_server_start(self):
-        if not self._enable_http_server:
-            return
-
         if self._http_server_task is not None:
             self.log_warning("HTTP server is already running")
             return
@@ -214,7 +208,7 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         )
 
     async def http_server_stop(self):
-        if not self._enable_http_server or self._http_server_task is None:
+        if self._http_server_task is None:
             return
 
         self._http_server.should_exit = True
@@ -222,17 +216,13 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         self._http_server_task = None
         self.log_info("HTTP server stopped")
 
-    async def init_worker(self, *args, **kwargs):
-        kwargs.pop("start_http_server", None)
+    async def init_worker(self):
         await super().init_worker()
 
-        if self._enable_http_server:
-            self._init_openai_serving()
-            self.http_server_start()
+        self._init_openai_serving()
+        self.http_server_start()
 
     def get_server_address(self) -> str:
-        if not self._enable_http_server:
-            return None
         host = self._http_server_host
         if host == "0.0.0.0":
             import ray.util

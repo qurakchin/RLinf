@@ -20,7 +20,7 @@ import hydra
 from calc_agent import MathProblem, calc_agent
 from datasets import Dataset as HuggingFaceDataset
 
-from rlinf.entrypoint.agentlightning.algorithm import RlinfAlgorithm
+from rlinf.agents.agentlightning.algorithm import RlinfAlgorithm
 from rlinf.utils.utils import output_redirector
 
 

@@ -13,5 +13,9 @@ actor:
   pack_traj: False
 
 rollout:
-  sglang:
-    serving_mode: worker_http
+  model:
+    model_path: /path/to/Qwen2.5-1.5B-Instruct
+
+data:
+  train_data_paths: ["/path/to/train.parquet"]
+  val_data_paths: ["/path/to/test.parquet"]
