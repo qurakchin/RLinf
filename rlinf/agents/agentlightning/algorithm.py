@@ -16,10 +16,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from omegaconf import DictConfig, OmegaConf
-
 from agentlightning.algorithm.base import Algorithm
 from agentlightning.types import Dataset
+from omegaconf import DictConfig, OmegaConf
 
 from .entrypoint import run_rlinf_training
 

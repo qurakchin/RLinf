@@ -16,11 +16,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from omegaconf import DictConfig
-
 from agentlightning.adapter import TraceAdapter
 from agentlightning.store.base import LightningStore
 from agentlightning.types import Dataset
+from omegaconf import DictConfig
+
 from rlinf.config import validate_cfg
 from rlinf.runners.agentlightning_eval_runner import AgentLightningEvalRunner
 from rlinf.runners.agentlightning_runner import AgentLightningRLinfRunner
