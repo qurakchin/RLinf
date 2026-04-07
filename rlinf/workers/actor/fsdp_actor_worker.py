@@ -293,10 +293,9 @@ class FSDPActor(FSDPModelManager, Worker):
         rollout_state_dict = self.get_model_state_dict(
             cpu_offload=False, full_state_dict=False
         )
-
+        has_visual = any("visual." in k for k in rollout_state_dict.keys())
         model_bucket_list = self.divide_model_to_bucket(rollout_state_dict, has_visual)
         del rollout_state_dict
-        has_visual = any("visual." in k for k in rollout_state_dict.keys())
         for bucket_idx, model_bucket in enumerate(model_bucket_list):
             buffer = {}
             for k, v in model_bucket.items():

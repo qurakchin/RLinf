@@ -22,6 +22,7 @@ import torch.nn as nn
 from omegaconf import DictConfig
 from packaging.version import parse as parse_version
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
