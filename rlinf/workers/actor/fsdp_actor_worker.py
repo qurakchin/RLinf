@@ -293,10 +293,9 @@ class FSDPActor(FSDPModelManager, Worker):
             if has_visual:
                 if name.startswith("model.language_model."):
                     name = "model." + name[21:]
-                elif (
-                    parse_version(pkg_version("transformers")) <= parse_version("4.56.1")
-                    and name.startswith("model.")
-                ):
+                elif parse_version(pkg_version("transformers")) <= parse_version(
+                    "4.56.1"
+                ) and name.startswith("model."):
                     # NOTE:
                     # if transformers version is 4.56.1 or older(not tested),
                     # strip the leading "model." prefix for compatibility.
@@ -305,7 +304,9 @@ class FSDPActor(FSDPModelManager, Worker):
             model_bucket[name] = val
             if isinstance(val, DTensor):
                 current_capacity += (
-                    val.numel() * val.element_size() * torch.distributed.get_world_size()
+                    val.numel()
+                    * val.element_size()
+                    * torch.distributed.get_world_size()
                 )
             else:
                 current_capacity += val.numel() * val.element_size()
@@ -1086,12 +1087,12 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             model_bucket[name] = val
             if isinstance(val, DTensor):
                 current_capacity += (
-                    val.numel() * val.element_size() * torch.distributed.get_world_size()
+                    val.numel()
+                    * val.element_size()
+                    * torch.distributed.get_world_size()
                 )
             else:
-                current_capacity += (
-                    val.numel() * val.element_size()
-                )
+                current_capacity += val.numel() * val.element_size()
 
             if current_capacity >= bucket_capacity:
                 self.model_bucket_list.append(model_bucket)
@@ -1168,7 +1169,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         del buffer
 
         if self.enable_offload:
-            assert not self.is_weight_offloaded, "weight should be offloaded in sync_model_to_rollout"
+            assert not self.is_weight_offloaded, (
+                "weight should be offloaded in sync_model_to_rollout"
+            )
             self.offload_param_and_grad(True)
 
     async def recv_rollout_trajectories(self, input_channel: Channel) -> None:
