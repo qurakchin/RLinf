@@ -22,7 +22,6 @@ import torch
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.tensor import DTensor
-from torch.multiprocessing.reductions import reduce_tensor
 from torch.utils import _pytree
 
 import rlinf.algorithms  # noqa: F401
@@ -162,7 +161,7 @@ class FSDPActor(FSDPModelManager, Worker):
             cfg.data.rollout_batch_size * cfg.algorithm.group_size // self._world_size
         )
 
-        self._rollout_group_name = cfg.rollout.group_name
+        self.rollout_group_name = cfg.rollout.group_name
         self._component_placement = placement
         self.is_pipeline = self._component_placement.is_disaggregated
         self.ref_policy_state_dict = None
@@ -275,7 +274,7 @@ class FSDPActor(FSDPModelManager, Worker):
 
         torch.distributed.barrier()
 
-    def sync_model_to_rollout(self) -> None:
+    def sync_model_to_rollout(self):
         """
         Sync the model's full state dict to the rollout worker.
         """
@@ -296,31 +295,44 @@ class FSDPActor(FSDPModelManager, Worker):
         has_visual = any("visual." in k for k in rollout_state_dict.keys())
         model_bucket_list = self.divide_model_to_bucket(rollout_state_dict, has_visual)
         del rollout_state_dict
+        send_handles = []
+        buffer = {}
         for bucket_idx, model_bucket in enumerate(model_bucket_list):
-            buffer = {}
             for k, v in model_bucket.items():
                 if isinstance(v, DTensor):
                     v = v.full_tensor()
                 if rollout_dtype is not None:
                     v = v.to(rollout_dtype)
-                if not self.is_pipeline:
-                    v = reduce_tensor(v)
                 buffer[k] = v
             if bucket_idx == 0:
                 buffer["bucket_length"] = len(model_bucket_list)
+
+            for send_handle in send_handles:
+                send_handle.wait()
+            send_handles = []
+
             if not self.is_pipeline:
-                self.send(
+                send_handle = self.send(
                     buffer,
-                    self._rollout_group_name,
+                    self.rollout_group_name,
                     self._weight_dst_rank_in_rollout,
+                    async_op=True,
                 )
+                send_handles.append(send_handle)
             else:
                 for rank in self._weight_dst_rank_in_rollout:
-                    self.send(
+                    send_handle = self.send(
                         buffer,
-                        self._rollout_group_name,
+                        self.rollout_group_name,
                         rank,
+                        async_op=True,
                     )
+                    send_handles.append(send_handle)
+            buffer = {}
+
+        for send_handle in send_handles:
+            send_handle.wait()
+
         if self.enable_offload:
             assert not self.is_weight_offloaded, (
                 "weight should be offloaded in sync_model_to_rollout"
@@ -960,7 +972,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         super().__init__(cfg.actor, self._world_size, self._rank)
         self.cfg = cfg
         self._env_group_name = cfg.env.group_name
-        self._rollout_group_name = cfg.rollout.group_name
+        self.rollout_group_name = cfg.rollout.group_name
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
 
         # stage_num: default to 2, use for pipeline rollout process
@@ -1052,7 +1064,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             handles.append(
                 self.send(
                     len(model_bucket_list),
-                    self._rollout_group_name,
+                    self.rollout_group_name,
                     rank,
                     async_op=True,
                     options=self._sync_weight_comm_options,
@@ -1076,7 +1088,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 handles.append(
                     self.send(
                         buffer,
-                        self._rollout_group_name,
+                        self.rollout_group_name,
                         rank,
                         async_op=True,
                         options=self._sync_weight_comm_options,

@@ -114,23 +114,10 @@ class Scheduler(_Scheduler):
             "only sglang with 'sync' can run 'batch_load_hf_weight'"
         )
         model = self.tp_worker.worker.model_runner.model
-        rollout_sync_mode_collocated = (
-            self.rollout_sync_mode == RolloutSyncMode.COLLOCATED
-        )
         batch_weight = []
-        if rollout_sync_mode_collocated:
-            for name, handle in state_dict.items():
-                func, args = handle
-                list_args = list(args)
-                # NOTE: the key is to change device id to the current device id
-                # in case two processes have different CUDA_VISIBLE_DEVICES
-                list_args[6] = torch.cuda.current_device()
-                new_weight = func(*list_args)
-                batch_weight.append((name, new_weight))
-        else:
-            # disaggregate mode, recv tensor directly
-            for name, tensor in state_dict.items():
-                batch_weight.append((name, tensor))
+        # disaggregate mode, recv tensor directly
+        for name, tensor in state_dict.items():
+            batch_weight.append((name, tensor))
 
         model.load_weights(batch_weight)
 
