@@ -341,9 +341,7 @@ class MegatronActor(MegatronWorker):
         if len(self._weight_dst_rank_in_rollout) > 0:
             send_handles = []
             for bucket_idx, bucket_weight in enumerate(model_bucket_list):
-                buffer = self._get_rollout_model_state_dict(
-                    bucket_weight
-                )
+                buffer = self._get_rollout_model_state_dict(bucket_weight)
                 if bucket_idx == 0:
                     buffer["bucket_length"] = len(model_bucket_list)
 

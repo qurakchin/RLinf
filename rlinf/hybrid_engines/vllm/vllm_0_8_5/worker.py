@@ -14,7 +14,6 @@
 
 from typing import Any
 
-import torch
 from omegaconf import DictConfig
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
@@ -23,7 +22,7 @@ from vllm.v1.worker.gpu_worker import Worker as _VllmInnerWorker
 
 from rlinf.scheduler import Worker as _RLinfWorker
 from rlinf.scheduler import WorkerAddress
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
+from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.rollout.utils import RankMapper
 
 from . import weight_loader  # noqa all

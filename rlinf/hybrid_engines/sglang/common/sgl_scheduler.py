@@ -32,7 +32,6 @@ from sglang.srt.managers.scheduler import (
 from rlinf.scheduler import Worker, WorkerAddress
 from rlinf.utils.placement import (
     ModelParallelComponentPlacement,
-    RolloutSyncMode,
 )
 from rlinf.workers.rollout.utils import (
     RankMapper,
