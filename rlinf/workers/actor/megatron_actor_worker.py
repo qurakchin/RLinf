@@ -20,6 +20,7 @@ from megatron.core import parallel_state
 from megatron.training.training import unwrap_model
 from megatron.training.utils import average_losses_across_data_parallel_group
 from omegaconf import DictConfig
+from torch.multiprocessing.reductions import reduce_tensor
 
 from rlinf.algorithms.registry import policy_loss
 from rlinf.algorithms.utils import kl_penalty
@@ -342,7 +343,10 @@ class MegatronActor(MegatronWorker):
             send_handles = []
             for bucket_idx, bucket_weight in enumerate(model_bucket_list):
                 buffer = self._get_rollout_model_state_dict(bucket_weight)
+                if self.rollout_sync_mode == RolloutSyncMode.COLLOCATED:
+                    buffer = {k: reduce_tensor(v) for k, v in buffer.items()}
                 if bucket_idx == 0:
+                    # add the bucket_length message in bucket 0
                     buffer["bucket_length"] = len(model_bucket_list)
 
                 for send_handle in send_handles:

@@ -22,6 +22,7 @@ import torch
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.tensor import DTensor
+from torch.multiprocessing.reductions import reduce_tensor
 from torch.utils import _pytree
 
 import rlinf.algorithms  # noqa: F401
@@ -161,7 +162,7 @@ class FSDPActor(FSDPModelManager, Worker):
             cfg.data.rollout_batch_size * cfg.algorithm.group_size // self._world_size
         )
 
-        self.rollout_group_name = cfg.rollout.group_name
+        self._rollout_group_name = cfg.rollout.group_name
         self._component_placement = placement
         self.is_pipeline = self._component_placement.is_disaggregated
         self.ref_policy_state_dict = None
@@ -303,6 +304,8 @@ class FSDPActor(FSDPModelManager, Worker):
                     v = v.full_tensor()
                 if rollout_dtype is not None:
                     v = v.to(rollout_dtype)
+                if not self.is_pipeline:
+                    v = reduce_tensor(v)
                 buffer[k] = v
             if bucket_idx == 0:
                 buffer["bucket_length"] = len(model_bucket_list)
@@ -314,7 +317,7 @@ class FSDPActor(FSDPModelManager, Worker):
             if not self.is_pipeline:
                 send_handle = self.send(
                     buffer,
-                    self.rollout_group_name,
+                    self._rollout_group_name,
                     self._weight_dst_rank_in_rollout,
                     async_op=True,
                 )
@@ -323,7 +326,7 @@ class FSDPActor(FSDPModelManager, Worker):
                 for rank in self._weight_dst_rank_in_rollout:
                     send_handle = self.send(
                         buffer,
-                        self.rollout_group_name,
+                        self._rollout_group_name,
                         rank,
                         async_op=True,
                     )
@@ -972,7 +975,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         super().__init__(cfg.actor, self._world_size, self._rank)
         self.cfg = cfg
         self._env_group_name = cfg.env.group_name
-        self.rollout_group_name = cfg.rollout.group_name
+        self._rollout_group_name = cfg.rollout.group_name
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
 
         # stage_num: default to 2, use for pipeline rollout process
@@ -1064,7 +1067,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             handles.append(
                 self.send(
                     len(model_bucket_list),
-                    self.rollout_group_name,
+                    self._rollout_group_name,
                     rank,
                     async_op=True,
                     options=self._sync_weight_comm_options,
@@ -1088,7 +1091,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 handles.append(
                     self.send(
                         buffer,
-                        self.rollout_group_name,
+                        self._rollout_group_name,
                         rank,
                         async_op=True,
                         options=self._sync_weight_comm_options,

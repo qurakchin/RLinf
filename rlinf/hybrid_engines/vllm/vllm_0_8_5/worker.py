@@ -14,6 +14,7 @@
 
 from typing import Any
 
+import torch
 from omegaconf import DictConfig
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
@@ -22,7 +23,7 @@ from vllm.v1.worker.gpu_worker import Worker as _VllmInnerWorker
 
 from rlinf.scheduler import Worker as _RLinfWorker
 from rlinf.scheduler import WorkerAddress
-from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
 from rlinf.workers.rollout.utils import RankMapper
 
 from . import weight_loader  # noqa all
@@ -82,9 +83,21 @@ class VLLMWorker(_VllmInnerWorker):
 
     def batch_load_hf_weight(self, state_dict: dict[str, Any]) -> Any:
         model = self.model_runner.model
+        colocate = self.placement_mode == PlacementMode.COLLOCATED
         batch_weight = []
-        # disaggregate mode, recv tensor directly
-        model.load_weights(state_dict.items())
+        if colocate:
+            for name, handle in state_dict.items():
+                func, args = handle
+                list_args = list(args)
+                # NOTE: the key is to change device id to the current device id
+                # in case two processes have different CUDA_VISIBLE_DEVICES
+                list_args[6] = torch.cuda.current_device()
+                new_weight = func(*list_args)
+                batch_weight.append((name, new_weight))
+            model.load_weights(batch_weight)
+        else:
+            # disaggregate mode, recv tensor directly
+            model.load_weights(state_dict.items())
 
         for name, weight in batch_weight:
             del weight

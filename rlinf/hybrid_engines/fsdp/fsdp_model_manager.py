@@ -98,9 +98,7 @@ class FSDPModelManager:
         self.is_optimizer_offloaded = False
 
         # Bucket capacity for weight sync (in bytes), default 128MB
-        self.bucket_capacity = cfg.rollout.get(
-            "sync_bucket_capacity", 128 * 1024 * 1024
-        )
+        self.bucket_capacity = cfg.get("sync_bucket_capacity", 128 * 1024 * 1024)
 
     def _create_amp_context(self) -> ContextManager:
         """
