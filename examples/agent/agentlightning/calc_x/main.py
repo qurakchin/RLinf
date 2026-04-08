@@ -1,4 +1,4 @@
-# Copyright 2025 The RLinf Authors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -60,14 +60,12 @@ def train(cfg: Any):
     eval_mode = cfg.get("eval", False)
 
     algorithm = RlinfAlgorithm(config=cfg, eval=eval_mode)
-    store = None
-    llm_proxy = None
 
     trainer_kwargs = {
         "algorithm": algorithm,
         "n_runners": n_runners,
-        "store": store,
-        "llm_proxy": llm_proxy,
+        "store": None, # store=None -> InMemoryLightningStore by default;
+        "llm_proxy": None, # llm_proxy=None stays unset (no default LLMProxy).
     }
     trainer_kwargs["port"] = _find_available_port()
 
