@@ -24,7 +24,22 @@ from .entrypoint import run_rlinf_training
 
 
 class RlinfAlgorithm(Algorithm):
-    """Add rlinf tag to agentlightning algorithm."""
+    """Agent Lightning ``Algorithm`` that runs RL training on the RLinf stack.
+
+    In Agent Lightning, an ``Algorithm`` is the training strategy wired into
+    ``Trainer``: it uses the shared ``LightningStore`` and trace adapter from the
+    trainer and implements ``run`` to drive rollouts and learning.
+
+    ``RlinfAlgorithm`` is RLinf's implementation of that hook. It calls
+    ``run_rlinf_training``, which constructs RLinf cluster placement, distributed
+    workers (rollout, inference, actor, …), and the AgentLightning training or eval
+    runner—RLinf's RL training and resource-management path, configured by a Hydra
+    ``DictConfig``.
+
+    Args:
+        config: RLinf config (``DictConfig`` or dict), typically from ``@hydra.main``.
+        eval: If True, use evaluation routing instead of training.
+    """
 
     def __init__(
         self,
