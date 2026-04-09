@@ -152,9 +152,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             return
 
         self._weight_sync_requested = False
-        self._weight_sync_work = asyncio.create_task(
-            self.recv_actor_buckets()
-        )
+        self._weight_sync_work = asyncio.create_task(self.recv_actor_buckets())
 
     def _apply_synced_model_weights(self, param_state_dict):
         self.hf_model.load_state_dict(param_state_dict)
