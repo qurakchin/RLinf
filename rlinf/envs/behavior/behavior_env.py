@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import inspect
 import json
 import os
 import traceback
@@ -56,6 +57,18 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
         env = apply_env_wrapper(env, wrapper_name)
         apply_runtime_renderer_settings()
 
+        step_signature = inspect.signature(env.step)
+        step_params = step_signature.parameters.values()
+        step_supports_kwargs = any(
+            param.kind == inspect.Parameter.VAR_KEYWORD for param in step_params
+        )
+        step_supports_get_obs = step_supports_kwargs or "get_obs" in step_signature.parameters
+        step_supports_render = step_supports_kwargs or "render" in step_signature.parameters
+
+        def _step_env(actions, need_obs: bool):
+            if step_supports_get_obs and step_supports_render:
+                return env.step(actions, get_obs=need_obs, render=need_obs)
+            return env.step(actions)
 
         conn.send(
             {
@@ -79,6 +92,9 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
             elif cmd == "chunk_step":
                 chunk_actions = payload["chunk_actions"]
                 chunk_size = chunk_actions.shape[1]
+                skip_intermediate = bool(
+                    payload.get("skip_intermediate_obs_in_chunk", False)
+                )
 
                 raw_obs_list = []
                 chunk_rewards = []
@@ -88,9 +104,15 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
 
                 for i in range(chunk_size):
                     actions = chunk_actions[:, i]
-                    raw_obs, step_rewards, terminations, truncations, infos = env.step(
-                        actions
+                    is_last = i == chunk_size - 1
+                    need_obs = not skip_intermediate or is_last
+                    raw_obs, step_rewards, terminations, truncations, infos = _step_env(
+                        actions, need_obs=need_obs
                     )
+                    if not need_obs:
+                        # Normalize intermediate-step observations to None so downstream
+                        # code can skip parsing cleanly.
+                        raw_obs = None
 
                     raw_obs_list.append(raw_obs)
                     chunk_rewards.append(to_tensor(step_rewards))
@@ -154,6 +176,16 @@ class BehaviorEnv(gym.Env):
         self.logger = get_logger()
 
         self.auto_reset = cfg.auto_reset
+        self.max_episode_steps = cfg.max_episode_steps
+        self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
+        self._step_count = torch.zeros(
+            self.num_envs,
+            device=self.device,
+            dtype=torch.int32,
+        )
+        self.skip_intermediate_obs_in_chunk = bool(
+            OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
+        )
         if self.record_metrics:
             self._init_metrics()
         self._init_env()
@@ -292,6 +324,7 @@ class BehaviorEnv(gym.Env):
             "chunk_step",
             {
                 "chunk_actions": chunk_actions,
+                "skip_intermediate_obs_in_chunk": self.skip_intermediate_obs_in_chunk,
             },
         )
 
@@ -302,7 +335,13 @@ class BehaviorEnv(gym.Env):
             infos = self._record_metrics(raw_rewards_list[i], raw_infos_list[i])
             if self.ignore_terminations:
                 raw_terminations_list[i] = torch.zeros_like(raw_terminations_list[i])
-            obs_list.append(self._wrap_obs(raw_obs_list[i]))
+            raw_obs = raw_obs_list[i]
+            if raw_obs is None or (
+                isinstance(raw_obs, (list, tuple)) and all(obs is None for obs in raw_obs)
+            ):
+                obs_list.append(None)
+            else:
+                obs_list.append(self._wrap_obs(raw_obs))
             infos_list.append(infos)
 
         chunk_rewards = torch.stack(raw_rewards_list, dim=1)  # [num_envs, chunk_steps]

@@ -288,26 +288,13 @@ Using behavior as an example:
   RLinf first loads OmniGibson's base ``r1pro_behavior.yaml`` and then applies
   overrides from ``omni_config`` (see ``setup_omni_cfg`` in
   ``rlinf/envs/behavior/utils.py``).
-- ``omni_config.task.type: RLinfBehaviorTask`` and
-  ``omni_config.scene.type: RLinfInteractiveTraversableScene``:
-  RLinf ships a lightweight BEHAVIOR compatibility patch for
-  ``omnigibson==3.7.1``. Keep these two types in
+- ``omni_config.task.type: BehaviorTask`` and
+  ``omni_config.scene.type: InteractiveTraversableScene``:
+  RLinf now uses OmniGibson's upstream BEHAVIOR task and scene classes
+  directly. Keep these explicit type entries in
   ``examples/embodiment/config/env/behavior_r1pro.yaml`` when using RLinf's
-  BEHAVIOR setup. ``install_patch()`` is still called automatically by
-  ``rlinf/envs/behavior/behavior_env.py`` before ``VectorEnvironment`` is
-  created, but it only registers the RLinf classes and applies monkey patches.
-  It does not rewrite ``task.type`` or ``scene.type`` anymore, so these two
-  YAML entries must be set explicitly.
-- RLinf BEHAVIOR patch contents:
-  The patch fixes several multi-environment issues observed with
-  OmniGibson 3.7.1, including cross-scene ``BehaviorTask`` callbacks,
-  presampled robot poses being applied in world frame instead of scene frame,
-  cross-scene shared control views for the same robot type, and RLinf's
-  missing ``scene`` sub-config override in ``setup_omni_cfg``.
-- Version note:
-  The current patch is only tested and supported on ``omnigibson==3.7.1``.
-  RLinf raises an error during environment initialization if a different
-  OmniGibson version is detected.
+  BEHAVIOR setup so the intended OmniGibson classes are selected after
+  ``setup_omni_cfg`` applies overrides.
 - ``task_idx``:
   Current task id (0-49). RLinf maps it to the concrete task name and writes it
   into ``task.activity_name`` (see ``rlinf/envs/behavior/behavior_env.py``).
@@ -395,6 +382,15 @@ Using behavior as an example:
   RLinf training / evaluation loop.
 - ``omni_config.env.flatten_obs_space: False`` and ``flatten_action_space: False``:
   Keep structured observation / action spaces instead of flattening to 1D.
+- ``omni_config.env.skip_intermediate_obs_in_chunk``:
+  RLinf executes chunked BEHAVIOR actions by stepping several low-level robot
+  actions before returning control to the policy. When this flag is ``True``,
+  RLinf skips collecting intermediate observations inside that chunk and only
+  keeps the observations the policy actually consumes. This usually gives a
+  large environment-speed improvement because fewer camera observations are
+  wrapped, transferred, and recorded. One visible consequence is that saved
+  videos no longer include every low-level robot action frame; instead they only
+  show the frames the robot actually observes at chunk boundaries.
 - ``omni_config.macro.use_gpu_dynamics: False``:
   Disables GPU dynamics and usually improves performance; enable it only when
   advanced features like particles / fluids are required.
