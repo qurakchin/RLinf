@@ -93,6 +93,9 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
             elif cmd == "chunk_step":
                 chunk_actions = payload["chunk_actions"]
                 chunk_size = chunk_actions.shape[1]
+                skip_intermediate = bool(
+                    payload.get("skip_intermediate_obs_in_chunk", False)
+                )
 
                 raw_obs_list = []
                 chunk_rewards = []
