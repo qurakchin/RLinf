@@ -24,6 +24,7 @@ from omegaconf import DictConfig, OmegaConf
 from rlinf.envs.behavior.instance_loader import ActivityInstanceLoader
 from rlinf.envs.behavior.utils import (
     apply_env_wrapper,
+    apply_runtime_renderer_settings,
     convert_uint8_rgb,
     setup_omni_cfg,
 )
@@ -53,6 +54,8 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
         env = VectorEnvironment(num_envs, omni_cfg_dict)
         wrapper_name = OmegaConf.select(omni_cfg, "env.env_wrapper")
         env = apply_env_wrapper(env, wrapper_name)
+        apply_runtime_renderer_settings()
+
 
         conn.send(
             {
