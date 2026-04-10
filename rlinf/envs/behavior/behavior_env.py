@@ -16,6 +16,7 @@ import json
 import os
 import traceback
 from multiprocessing import get_context
+from threading import Thread
 
 import gymnasium as gym
 import torch
@@ -147,6 +148,12 @@ class BehaviorEnv(gym.Env):
         self.worker_info = worker_info
         self.record_metrics = record_metrics
         self._is_start = True
+        self.use_thread_worker = self.cfg.get("use_thread_worker", False)
+        self.num_env_subprocess = int(self.cfg.get("num_env_subprocess", 1))
+        self.env_shard_size = self._split_num_envs(self.num_envs, self.num_env_subprocess)
+        self.env_process_list = []
+        self.parent_conn_list = []
+        self.child_conn_list = []
 
         self.logger = get_logger()
 
@@ -154,6 +161,15 @@ class BehaviorEnv(gym.Env):
         if self.record_metrics:
             self._init_metrics()
         self._init_env()
+
+    def _split_num_envs(self, num_envs: int, num_processes: int) -> int:
+        """Split ``num_envs`` across ``num_processes`` shards as evenly as possible."""
+        assert num_processes > 0, f"num_processes({num_processes}) must be positive"
+        if self.use_thread_worker and num_processes > 1:
+            self.logger.warning(f"assign num_processes({num_processes}) to 1 when use_thread_worker is True")
+            num_processes = 1
+        assert num_envs % num_processes == 0, f"num_envs({num_envs}) must be divisible by num_processes({num_processes})"
+        return num_envs // num_processes
 
     def _load_tasks_cfg(self, activity_name: str):
         # Read task description
@@ -172,34 +188,185 @@ class BehaviorEnv(gym.Env):
 
     def _init_env(self):
         self._ctx = get_context("spawn")
-        self._parent_conn, child_conn = self._ctx.Pipe()
-        self._env_process = self._ctx.Process(
-            target=_behavior_env_worker,
-            args=(
-                self.cfg,
-                child_conn,
-                self.num_envs,
-            ),
-            daemon=True,
-        )
-        self._env_process.start()
-        child_conn.close()
+        if self.use_thread_worker:
+            process_cls = Thread
+        else:
+            process_cls = self._ctx.Process
 
-        msg = self._parent_conn.recv()
-        if msg.get("type") != "ready":
-            raise RuntimeError(
-                f"Failed to initialize behavior subprocess env: {msg.get('traceback', msg)}"
+        activity_name = None
+        for _ in range(self.num_env_subprocess):
+            parent_conn, child_conn = self._ctx.Pipe()
+            env_process = process_cls(
+                target=_behavior_env_worker,
+                args=(
+                    self.cfg,
+                    child_conn,
+                    self.env_shard_size,
+                ),
+                daemon=True,
             )
-        self._load_tasks_cfg(msg["activity_name"])
+            env_process.start()
+            if not self.use_thread_worker:
+                child_conn.close()
+                child_conn = None
+
+            msg = parent_conn.recv()
+            if msg.get("type") != "ready":
+                raise RuntimeError(
+                    f"Failed to initialize behavior subprocess env: {msg.get('traceback', msg)}"
+                )
+            if activity_name is None:
+                activity_name = msg["activity_name"]
+            elif msg["activity_name"] != activity_name:
+                raise RuntimeError(
+                    "Behavior env subprocesses reported different activity_name: "
+                    f"{activity_name!r} vs {msg['activity_name']!r}"
+                )
+            self.parent_conn_list.append(parent_conn)
+            self.child_conn_list.append(child_conn)
+            self.env_process_list.append(env_process)
+
+        self._load_tasks_cfg(activity_name)
+
+    @staticmethod
+    def _extend_per_env(dst: list, batch):
+        if isinstance(batch, (list, tuple)):
+            dst.extend(batch)
+        else:
+            dst.append(batch)
+
+    @staticmethod
+    def _cat_batch_dim(parts: list):
+        if not parts:
+            return parts
+        tensors = [p if torch.is_tensor(p) else torch.as_tensor(p) for p in parts]
+        return torch.cat(tensors, dim=0)
+
+    def _slice_actions_for_shards(self, actions):
+        if actions is None:
+            return [None] * self.num_env_subprocess
+        s = self.env_shard_size
+        return [
+            actions[i * s : (i + 1) * s] for i in range(self.num_env_subprocess)
+        ]
+
+    def _merge_step_results(self, shard_results: list):
+        raw_obs = []
+        rewards_parts = []
+        term_parts = []
+        trunc_parts = []
+        infos = []
+        for raw_obs_s, rew_s, term_s, trunc_s, infos_s in shard_results:
+            self._extend_per_env(raw_obs, raw_obs_s)
+            rewards_parts.append(rew_s)
+            term_parts.append(term_s)
+            trunc_parts.append(trunc_s)
+            self._extend_per_env(infos, infos_s)
+        return (
+            raw_obs,
+            self._cat_batch_dim(rewards_parts),
+            self._cat_batch_dim(term_parts),
+            self._cat_batch_dim(trunc_parts),
+            infos,
+        )
+
+    def _merge_chunk_results(self, shard_results: list):
+        chunk_size = len(shard_results[0][0])
+        merged_obs_lists = []
+        merged_rewards = []
+        merged_terms = []
+        merged_trunc = []
+        merged_infos = []
+        for t in range(chunk_size):
+            obs_t = []
+            r_t = []
+            term_t = []
+            trunc_t = []
+            info_t = []
+            for (
+                raw_obs_list,
+                raw_rewards_list,
+                raw_terminations_list,
+                raw_truncations_list,
+                raw_infos_list,
+            ) in shard_results:
+                self._extend_per_env(obs_t, raw_obs_list[t])
+                r_t.append(raw_rewards_list[t])
+                term_t.append(raw_terminations_list[t])
+                trunc_t.append(raw_truncations_list[t])
+                self._extend_per_env(info_t, raw_infos_list[t])
+            merged_obs_lists.append(obs_t)
+            merged_rewards.append(self._cat_batch_dim(r_t))
+            merged_terms.append(self._cat_batch_dim(term_t))
+            merged_trunc.append(self._cat_batch_dim(trunc_t))
+            merged_infos.append(info_t)
+        return (
+            merged_obs_lists,
+            merged_rewards,
+            merged_terms,
+            merged_trunc,
+            merged_infos,
+        )
+
+    def _call_all_subprocs(self, cmd: str, payloads: list) -> list:
+        """Send the same command to every shard; recv in parallel to avoid pipe backpressure."""
+        n = len(self.parent_conn_list)
+        assert len(payloads) == n, f"payloads length {len(payloads)} != num subprocesses {n}"
+        for conn, payload in zip(self.parent_conn_list, payloads):
+            conn.send((cmd, payload))
+
+        results: list = [None] * n
+        errors: list[str | None] = [None] * n
+
+        def _recv_shard(i: int):
+            msg = self.parent_conn_list[i].recv()
+            if msg.get("type") == "error":
+                errors[i] = msg["traceback"]
+            else:
+                results[i] = msg["result"]
+
+        recv_threads = [
+            Thread(target=_recv_shard, args=(i,), daemon=True) for i in range(n)
+        ]
+        for t in recv_threads:
+            t.start()
+        for t in recv_threads:
+            t.join()
+
+        err = next((e for e in errors if e is not None), None)
+        if err is not None:
+            raise RuntimeError(
+                f"Behavior subprocess env failed on command '{cmd}':\n{err}"
+            )
+        return results
 
     def _call_subproc(self, cmd: str, payload=None):
-        self._parent_conn.send((cmd, payload))
-        msg = self._parent_conn.recv()
-        if msg.get("type") == "error":
-            raise RuntimeError(
-                f"Behavior subprocess env failed on command '{cmd}':\n{msg['traceback']}"
-            )
-        return msg["result"]
+        n = len(self.parent_conn_list)
+
+        if cmd == "reset":
+            shard_results = self._call_all_subprocs("reset", [None] * n)
+            raw_obs = []
+            infos = []
+            for ro, inf in shard_results:
+                self._extend_per_env(raw_obs, ro)
+                self._extend_per_env(infos, inf)
+            return (raw_obs, infos)
+        if cmd == "step":
+            payloads = self._slice_actions_for_shards(payload)
+            shard_results = self._call_all_subprocs("step", payloads)
+            return self._merge_step_results(shard_results)
+        if cmd == "chunk_step":
+            chunk_actions = payload["chunk_actions"]
+            payloads = [
+                {"chunk_actions": ca}
+                for ca in self._slice_actions_for_shards(chunk_actions)
+            ]
+            shard_results = self._call_all_subprocs("chunk_step", payloads)
+            return self._merge_chunk_results(shard_results)
+        if cmd == "close":
+            self._call_all_subprocs("close", [None] * n)
+            return None
+        raise NotImplementedError(f"Unknown command: {cmd}")
 
     def _extract_obs_image(self, raw_obs):
         state = None
@@ -446,14 +613,29 @@ class BehaviorEnv(gym.Env):
         pass
 
     def close(self):
-        if not hasattr(self, "_parent_conn"):
+        if not self.parent_conn_list:
             return
         try:
             self._call_subproc("close")
         except Exception:
             pass
         finally:
-            if self._env_process.is_alive():
-                self._env_process.join(timeout=2)
-                if self._env_process.is_alive():
-                    self._env_process.terminate()
+            for proc in self.env_process_list:
+                if getattr(proc, "is_alive", lambda: False)():
+                    proc.join(timeout=2)
+                    if proc.is_alive() and not self.use_thread_worker:
+                        proc.terminate()
+            for ch in self.child_conn_list:
+                if ch is not None:
+                    try:
+                        ch.close()
+                    except Exception:
+                        pass
+            for pc in self.parent_conn_list:
+                try:
+                    pc.close()
+                except Exception:
+                    pass
+            self.child_conn_list.clear()
+            self.parent_conn_list.clear()
+            self.env_process_list.clear()
