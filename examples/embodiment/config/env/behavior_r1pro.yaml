@@ -107,7 +107,7 @@ omni_config:
           command_output_limits: default
 
   task:
-    type: RLinfBehaviorTask
+    type: BehaviorTask
     activity_name: turning_on_radio
     activity_definition_id: 0
     # activity_instance_id is only used when online object sampling is False.
@@ -140,7 +140,7 @@ omni_config:
       r_potential: 1.0
 
   scene:
-    type: RLinfInteractiveTraversableScene
+    type: InteractiveTraversableScene
     scene_model: house_double_floor_lower
     trav_map_resolution: 0.1
     default_erosion_radius: 0.0
