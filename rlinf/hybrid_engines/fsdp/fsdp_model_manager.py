@@ -643,7 +643,7 @@ class FSDPModelManager:
                 # for agent, we use sglang backend so the name mapping is needed
                 if name.startswith("model.language_model."):
                     name = "model." + name[21:]
-                elif parse_version(pkg_version("transformers")) <= parse_version(
+                if parse_version(pkg_version("transformers")) <= parse_version(
                     "4.56.1"
                 ) and name.startswith("model."):
                     # NOTE:
