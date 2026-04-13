@@ -14,13 +14,11 @@
 
 import os
 import warnings
-from importlib.metadata import version as pkg_version
 from typing import ContextManager, Union
 
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
-from packaging.version import parse as parse_version
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
