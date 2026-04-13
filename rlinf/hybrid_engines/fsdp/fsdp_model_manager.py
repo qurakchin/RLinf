@@ -643,13 +643,6 @@ class FSDPModelManager:
                 # for agent, we use sglang backend so the name mapping is needed
                 if name.startswith("model.language_model."):
                     name = "model." + name[21:]
-                if parse_version(pkg_version("transformers")) <= parse_version(
-                    "4.56.1"
-                ) and name.startswith("model."):
-                    # NOTE:
-                    # if transformers version is 4.56.1 or older(not tested),
-                    # strip the leading "model." prefix for compatibility.
-                    name = name[6:]
 
             model_bucket[name] = val
             if isinstance(val, DTensor):
