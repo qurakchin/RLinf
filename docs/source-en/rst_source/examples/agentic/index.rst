@@ -19,7 +19,7 @@ The following examples include math reasoning RL and agentic AI workflows, such 
      </div>
 
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/RLinf/misc/raw/main/pic/waiting_icon.jpg"
+       <img src="https://github.com/RLinf/misc/raw/main/pic/agentlightning_calcx.png"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
         <a href="agentlightning_calc_x.html" style="text-decoration: underline; color: blue;">
