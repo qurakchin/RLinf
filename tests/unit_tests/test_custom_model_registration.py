@@ -19,7 +19,7 @@ import time
 import torch
 from omegaconf import OmegaConf
 
-from rlinf.config import get_supported_model
+from rlinf.config import SupportedModel
 from rlinf.hybrid_engines.fsdp.utils import get_fsdp_wrap_policy
 from rlinf.models import get_model, register_model
 
@@ -55,11 +55,10 @@ def test_custom_model_registration_smoke():
         received["torch_dtype"] = torch_dtype
         return _DummyModel()
 
-    register_model(model_type, _builder, category="embodied")
+    register_model(model_type, _builder)
 
-    supported_model = get_supported_model(model_type)
+    supported_model = SupportedModel.get(model_type)
     assert supported_model.value == model_type
-    assert supported_model.category == "embodied"
 
     cfg = OmegaConf.create(
         {
@@ -83,7 +82,6 @@ def test_custom_model_registration_with_fsdp_wrap_policy():
     register_model(
         model_type,
         _builder,
-        category="embodied",
     )
 
     cfg = OmegaConf.create(

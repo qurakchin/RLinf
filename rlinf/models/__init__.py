@@ -16,11 +16,7 @@ from typing import Callable, Optional
 
 from omegaconf import DictConfig
 
-from rlinf.config import (
-    SupportedModel,
-    register_supported_model,
-    torch_dtype_from_precision,
-)
+from rlinf.config import SupportedModel, torch_dtype_from_precision
 from rlinf.scheduler import Worker
 
 ModelBuilder = Callable[[DictConfig, Optional[object]], object]
@@ -30,7 +26,6 @@ _MODEL_REGISTRY: dict[str, ModelBuilder] = {}
 def register_model(
     model_type: str,
     model_builder: ModelBuilder,
-    category: str = "embodied",
     force: bool = False,
 ):
     """Register a model builder for cfg.model_type."""
@@ -44,7 +39,7 @@ def register_model(
             "Set force=True to override it."
         )
     _MODEL_REGISTRY[model_type] = model_builder
-    register_supported_model(model_type, category=category, force=force)
+    SupportedModel.register(model_type, force=force)
 
 
 def _register_builtin_models():
