@@ -18,6 +18,8 @@ FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS base-image-embodied-frankasim
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS base-image-embodied-wan
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS base-image-embodied-liberopro
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS base-image-embodied-liberoplus
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS base-image-embodied-roboverse
+
 
 # Franka depends on ros-noetic, which is not available on Ubuntu 22.04
 FROM ubuntu:20.04 AS base-image-embodied-franka
@@ -149,7 +151,8 @@ RUN bash requirements/install.sh embodied --venv openvla --model openvla --env m
     bash requirements/install.sh embodied --venv openvla-oft --model openvla-oft --env maniskill_libero && \
     bash requirements/install.sh embodied --venv openpi --model openpi --env maniskill_libero && \
     bash requirements/install.sh embodied --venv gr00t --model gr00t --env maniskill_libero && \
-    bash requirements/install.sh embodied --venv dexbotic --model dexbotic --env maniskill_libero
+    bash requirements/install.sh embodied --venv dexbotic --model dexbotic --env maniskill_libero && \
+    bash requirements/install.sh embodied --venv starvla --model starvla --env maniskill_libero
 
 RUN source switch_env openvla && download_assets --dir /opt/assets --assets maniskill,openpi
 RUN link_assets
@@ -327,6 +330,17 @@ RUN bash requirements/install.sh embodied --venv openvla-oft --model openvla-oft
 
 # Set default env
 RUN echo "source ${UV_PATH}/openvla-oft/bin/activate" >> ~/.bashrc
+
+##################################################################################################
+# Embodied: RoboVerse
+##################################################################################################
+FROM embodied-common-image AS embodied-roboverse-image
+
+# Install openpi env for RoboVerse
+RUN bash requirements/install.sh embodied --venv openpi --model openpi --env roboverse
+
+# Set default env
+RUN echo "source ${UV_PATH}/openpi/bin/activate" >> ~/.bashrc
 
 ##################################################################################################
 # Final image selection

@@ -17,8 +17,8 @@ GITHUB_PREFIX=""
 NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
 SUPPORTED_TARGETS=("embodied" "agentic" "docs")
-SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic" "lingbotvla" "dreamzero")
-SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "liberopro" "liberoplus")
+SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic" "starvla" "lingbotvla" "dreamzero")
+SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "liberopro" "liberoplus" "roboverse")
 
 #=======================Utility Functions=======================
 
@@ -501,6 +501,13 @@ install_openpi_model() {
             install_flash_attn
             uv pip install numpydantic==1.7.0 pydantic==2.11.7 numpy==1.26.0
             ;;
+        roboverse)
+            create_and_sync_venv
+            install_common_embodied_deps
+            uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            install_flash_attn
+            install_roboverse_env
+            ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for OpenPI model." >&2
             exit 1
@@ -518,6 +525,44 @@ EOF
         "$VENV_DIR/lib/python${py_major_minor}/site-packages/transformers/"
     
     bash $SCRIPT_DIR/embodied/download_assets.sh --assets openpi
+    uv pip uninstall pynvml || true
+}
+
+install_starvla_model() {
+    case "$ENV_NAME" in
+        maniskill_libero)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_maniskill_libero_env
+            ;;
+        *)
+            echo "Environment '$ENV_NAME' is not supported for StarVLA model." >&2
+            exit 1
+            ;;
+    esac
+
+    local starvla_path
+    starvla_path=$(clone_or_reuse_repo STARVLA_PATH "$VENV_DIR/starVLA" https://github.com/starVLA/starVLA.git -b "${STARVLA_GIT_REF:-starVLA-1.2}" --depth 1)
+
+    # Prefer upstream StarVLA requirements first when available.
+    if [ -f "$starvla_path/requirements.txt" ]; then
+        uv pip install -r "$starvla_path/requirements.txt"
+    fi
+
+    # Enforce RLinf-compatible runtime pins to avoid known breakages.
+    uv pip install -r "$SCRIPT_DIR/embodied/models/starvla.txt"
+    uv pip install -e "$starvla_path" --no-deps
+
+    # Some StarVLA revisions call logger.log() on an overwatch logger that only
+    # provides warning/info/error. Keep this patch guarded and optional.
+    local framework_init="$starvla_path/starVLA/model/framework/__init__.py"
+    if [ "${STARVLA_SKIP_LOGGER_PATCH:-0}" != "1" ] && [ -f "$framework_init" ]; then
+        if grep "logger\\.log\\(" "$framework_init" >/dev/null 2>&1; then
+            sed -i 's/logger\.log(/logger.warning(/g' "$framework_init"
+        fi
+    fi
+
+    install_flash_attn
     uv pip uninstall pynvml || true
 }
 
@@ -899,6 +944,20 @@ install_wan_world_model() {
     uv pip install -r $SCRIPT_DIR/embodied/models/wan.txt
 }
 
+install_roboverse_env() {
+    local roboverse_dir
+    roboverse_dir=$(clone_or_reuse_repo ROBOVERSE_PATH "$VENV_DIR/roboverse" https://github.com/tiny-xie/roboverse.git)
+    uv pip install -e "${roboverse_dir}[mujoco]"
+    uv pip install git+${GITHUB_PREFIX}https://github.com/facebookresearch/pytorch3d.git@v0.7.9 --no-build-isolation
+    uv pip install -e "${roboverse_dir}[sapien3]"
+    uv pip install -e "${roboverse_dir}[genesis]"
+    
+    local pyroki_dir
+    pyroki_dir=$(clone_or_reuse_repo PYROKI_PATH "$roboverse_dir/pyroki" https://github.com/chungmin99/pyroki.git)
+    uv pip install -e "$pyroki_dir"
+    uv pip install "numpy==1.26.4" --force-reinstall
+}
+
 #=======================AGENTIC INSTALLER=======================
 
 install_agentic() {
@@ -965,6 +1024,9 @@ main() {
                     ;;
                 openpi)
                     install_openpi_model
+                    ;;
+                starvla)
+                    install_starvla_model
                     ;;
                 gr00t)
                     install_gr00t_model
