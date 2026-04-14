@@ -55,7 +55,7 @@ def test_custom_model_registration_smoke():
         received["torch_dtype"] = torch_dtype
         return _DummyModel()
 
-    register_model(model_type, _builder)
+    register_model(model_type, _builder, category="embodied")
 
     supported_model = SupportedModel.get(model_type)
     assert supported_model.value == model_type
@@ -82,6 +82,7 @@ def test_custom_model_registration_with_fsdp_wrap_policy():
     register_model(
         model_type,
         _builder,
+        category="embodied",
     )
 
     cfg = OmegaConf.create(

@@ -50,12 +50,14 @@ class SupportedModel:
     def register(cls, value: str, force: bool = False) -> "SupportedModel":
         if not value:
             raise ValueError("model_type must be a non-empty string.")
-        if value in cls.models and not force:
-            raise ValueError(
-                f"Model type `{value}` is already registered. "
-                "Set force=True to override it."
-            )
-        cls.models[value] = cls.__private_create__(value)
+        if value in cls.models:
+            if not force:
+                raise ValueError(
+                    f"Model type `{value}` is already registered. "
+                    "Set force=True to override it."
+                )
+        else:
+            cls.models[value] = cls.__private_create__(value)
         return cls.models[value]
 
     @classmethod
@@ -98,31 +100,21 @@ SupportedModel.QWEN2_5_VL_SFT = SupportedModel.register("qwen2.5_vl", force=True
 SupportedModel.QWEN3_VL_SFT = SupportedModel.register("qwen3_vl", force=True)
 SupportedModel.QWEN3_VL_MOE_SFT = SupportedModel.register("qwen3_vl_moe", force=True)
 
-EMBODIED_MODEL_VALUES = frozenset(
+EMBODIED_MODEL = set(
     {
-        SupportedModel.OPENVLA.value,
-        SupportedModel.OPENVLA_OFT.value,
-        SupportedModel.OPENPI.value,
-        SupportedModel.STARVLA.value,
-        SupportedModel.MLP_POLICY.value,
-        SupportedModel.GR00T.value,
-        SupportedModel.DEXBOTIC_PI.value,
-        SupportedModel.DREAMZERO.value,
-        SupportedModel.CNN_POLICY.value,
-        SupportedModel.FLOW_POLICY.value,
-        SupportedModel.CMA_POLICY.value,
-        SupportedModel.LINGBOTVLA.value,
-        SupportedModel.RESNET_REWARD.value,
-    }
-)
-NON_EMBODIED_MODEL_VALUES = frozenset(
-    {
-        SupportedModel.QWEN2_5.value,
-        SupportedModel.QWEN2_5_VL.value,
-        SupportedModel.QWEN3.value,
-        SupportedModel.QWEN3_MOE.value,
-        SupportedModel.QWEN3_VL_SFT.value,
-        SupportedModel.QWEN3_VL_MOE_SFT.value,
+        SupportedModel.OPENVLA,
+        SupportedModel.OPENVLA_OFT,
+        SupportedModel.OPENPI,
+        SupportedModel.STARVLA,
+        SupportedModel.MLP_POLICY,
+        SupportedModel.GR00T,
+        SupportedModel.DEXBOTIC_PI,
+        SupportedModel.DREAMZERO,
+        SupportedModel.CNN_POLICY,
+        SupportedModel.FLOW_POLICY,
+        SupportedModel.CMA_POLICY,
+        SupportedModel.LINGBOTVLA,
+        SupportedModel.RESNET_REWARD,
     }
 )
 
@@ -789,10 +781,10 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
 
 
 def validate_embodied_cfg(cfg):
-    model_type = SupportedModel.get(cfg.actor.model.model_type).value
-    assert model_type not in NON_EMBODIED_MODEL_VALUES, (
+    model_type = SupportedModel.get(cfg.actor.model.model_type)
+    assert model_type in EMBODIED_MODEL, (
         f"Model type: '{cfg.actor.model.model_type}' is not an embodied model. "
-        f"Supported embodied models: {sorted(EMBODIED_MODEL_VALUES)}."
+        f"Supported embodied models: {sorted([x.value for x in EMBODIED_MODEL])}."
     )
 
     # NOTE: Currently we only support actor_critic as PPO algorithm loss, and only support value_head as critic model.
