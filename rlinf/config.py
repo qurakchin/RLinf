@@ -1000,9 +1000,9 @@ def validate_reasoning_eval_cfg(cfg: DictConfig) -> DictConfig:
 
 
 def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
-    assert (
-        SupportedModel.get(cfg.rollout.model.model_type) == SupportedModel.QWEN2_5
-    ), f"Model type {cfg.rollout.model.model_type} is not supported"
+    assert SupportedModel.get(cfg.rollout.model.model_type) == SupportedModel.QWEN2_5, (
+        f"Model type {cfg.rollout.model.model_type} is not supported"
+    )
 
     assert cfg.algorithm.recompute_logprobs or cfg.rollout.return_logprobs, (
         "One of `algorithm.recompute_logprobs` or `rollout.return_logprobs` must be True to compute `prev_logprobs`."
