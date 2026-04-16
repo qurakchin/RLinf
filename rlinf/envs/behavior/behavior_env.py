@@ -161,6 +161,7 @@ class BehaviorEnv(gym.Env):
         record_metrics=True,
     ):
         self.cfg = cfg
+        self.reward_coef = cfg.get("reward_coef", 1)
 
         self.num_envs = num_envs
         self.ignore_terminations = cfg.ignore_terminations
@@ -462,6 +463,7 @@ class BehaviorEnv(gym.Env):
             "step", actions
         )
         obs = self._wrap_obs(raw_obs)
+        rewards = self._calc_step_reward(rewards)
         infos = self._record_metrics(rewards, infos)
         if self.ignore_terminations:
             terminations[:] = False
@@ -495,8 +497,11 @@ class BehaviorEnv(gym.Env):
         chunk_size = len(raw_obs_list)
         obs_list = []
         infos_list = []
+        scaled_rewards_list = []
         for i in range(chunk_size):
-            infos = self._record_metrics(raw_rewards_list[i], raw_infos_list[i])
+            step_rewards = self._calc_step_reward(raw_rewards_list[i])
+            scaled_rewards_list.append(step_rewards)
+            infos = self._record_metrics(step_rewards, raw_infos_list[i])
             if self.ignore_terminations:
                 raw_terminations_list[i] = torch.zeros_like(raw_terminations_list[i])
             raw_obs = raw_obs_list[i]
@@ -508,7 +513,7 @@ class BehaviorEnv(gym.Env):
                 obs_list.append(self._wrap_obs(raw_obs))
             infos_list.append(infos)
 
-        chunk_rewards = torch.stack(raw_rewards_list, dim=1)  # [num_envs, chunk_steps]
+        chunk_rewards = torch.stack(scaled_rewards_list, dim=1)  # [num_envs, chunk_steps]
         raw_terminations = torch.stack(
             raw_terminations_list, dim=1
         )  # [num_envs, chunk_steps]
@@ -678,3 +683,7 @@ class BehaviorEnv(gym.Env):
             self.child_conn_list.clear()
             self.parent_conn_list.clear()
             self.env_process_list.clear()
+
+    def _calc_step_reward(self, terminations):
+        reward = self.reward_coef * terminations
+        return reward
