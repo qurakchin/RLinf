@@ -94,6 +94,7 @@ def main(cfg) -> None:
         rollout=rollout_group,
         env=env_group,
         reward=reward_group,
+        component_placement=component_placement,
     )
 
     runner.init_workers()

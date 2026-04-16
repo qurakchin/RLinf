@@ -9,8 +9,8 @@ hydra:
   run:
     dir: .
   output_subdir: null
-  searchpath:
-    - file://${oc.env:EMBODIED_PATH}/config/
+  # searchpath:
+  #   - file://${oc.env:EMBODIED_PATH}/config/
 
 cluster:
   num_nodes: 1
@@ -112,7 +112,7 @@ actor:
   enable_offload: True
 
   model:
-    model_path: "/path/to/model/pi05"
+    model_path: ${rollout.model.model_path}
     add_value_head: True
     num_images_in_input: 3
     proprio_dim: 32
