@@ -62,6 +62,9 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
         )
         step_supports_get_obs = step_supports_kwargs or "get_obs" in step_signature.parameters
         step_supports_render = step_supports_kwargs or "render" in step_signature.parameters
+        skip_intermediate_obs_in_chunk = bool(
+            OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
+        )
 
         def _step_env(actions, need_obs: bool):
             if step_supports_get_obs and step_supports_render:
@@ -90,9 +93,6 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
             elif cmd == "chunk_step":
                 chunk_actions = payload["chunk_actions"]
                 chunk_size = chunk_actions.shape[1]
-                skip_intermediate = bool(
-                    payload.get("skip_intermediate_obs_in_chunk", False)
-                )
 
                 raw_obs_list = []
                 chunk_rewards = []
@@ -103,7 +103,7 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
                 for i in range(chunk_size):
                     actions = chunk_actions[:, i]
                     is_last = i == chunk_size - 1
-                    need_obs = not skip_intermediate or is_last
+                    need_obs = not skip_intermediate_obs_in_chunk or is_last
                     raw_obs, step_rewards, terminations, truncations, infos = _step_env(
                         actions, need_obs=need_obs
                     )
@@ -187,9 +187,6 @@ class BehaviorEnv(gym.Env):
             self.num_envs,
             device=self.device,
             dtype=torch.int32,
-        )
-        self.skip_intermediate_obs_in_chunk = bool(
-            OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
         if self.record_metrics:
             self._init_metrics()
@@ -488,10 +485,7 @@ class BehaviorEnv(gym.Env):
             raw_infos_list,
         ) = self._call_subproc(
             "chunk_step",
-            {
-                "chunk_actions": chunk_actions,
-                "skip_intermediate_obs_in_chunk": self.skip_intermediate_obs_in_chunk,
-            },
+            {"chunk_actions": chunk_actions},
         )
 
         chunk_size = len(raw_obs_list)
