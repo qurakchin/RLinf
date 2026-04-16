@@ -30,6 +30,7 @@ from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.metric_utils import compute_evaluate_metrics, print_metrics_table
 from rlinf.utils.runner_utils import check_progress
 from rlinf.utils.timers import Timer
+from rlinf.utils.placement import HybridComponentPlacement
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class EmbodiedRunner:
         ],
         rollout: Union["MultiStepRolloutWorker", "AsyncMultiStepRolloutWorker"],
         env: Union["EnvWorker", "AsyncEnvWorker"],
+        component_placement: "HybridComponentPlacement"=None,
         reward: Union["EmbodiedRewardWorker"] = None,
         critic=None,
     ):
@@ -68,6 +70,7 @@ class EmbodiedRunner:
         self.actor = actor
         self.rollout = rollout
         self.env = env
+        self.component_placement = component_placement
         self.critic = critic
         self.reward = reward
         self.weight_sync_interval = self.cfg.runner.weight_sync_interval
@@ -131,16 +134,142 @@ class EmbodiedRunner:
             (print_metrics_table, (step, total_steps, start_time, metrics, start_step))
         )
 
-    def init_workers(self):
-        # create worker in order to decrease the maximum memory usage
-        rollout_handle = self.rollout.init_worker()
-        env_handle = self.env.init_worker()
-        if self.reward is not None:
-            self.reward.init_worker().wait()
+    def init_worker_parallel(self):
+        workers = [
+            worker_name
+            for worker_name in ["actor", "rollout", "reward", "env"]
+            # for worker_name in ["actor", "rollout"]
+            if hasattr(self, worker_name) and getattr(self, worker_name) is not None
+        ]
+        if not workers:
+            return
 
-        rollout_handle.wait()
-        env_handle.wait()
-        self.actor.init_worker().wait()
+        if self.component_placement is None:
+            raise RuntimeError(
+                "init_worker_parallel: component_placement is required. "
+                "Please pass HybridComponentPlacement from main when creating runner."
+            )
+
+        worker_placement_map: dict[str, set[str]] = {}
+        for worker_name in workers:
+            try:
+                parsed_ranks = set(
+                    self.component_placement.get_hardware_ranks(worker_name)
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"init_worker_parallel: failed to get placement for [{worker_name}]"
+                ) from e
+            if not parsed_ranks:
+                raise RuntimeError(
+                    f"init_worker_parallel: empty placement for [{worker_name}]"
+                )
+
+            try:
+                strategy = self.component_placement.get_strategy(worker_name)
+                node_group_labels = getattr(strategy, "_node_group_labels", None)
+            except Exception as e:
+                raise RuntimeError(
+                    f"init_worker_parallel: failed to get strategy for [{worker_name}]"
+                ) from e
+
+            if node_group_labels is None:
+                node_group_key = "default"
+            elif isinstance(node_group_labels, list):
+                if len(node_group_labels) == 1:
+                    node_group_key = str(node_group_labels[0])
+                else:
+                    node_group_key = ",".join(str(label) for label in node_group_labels)
+            else:
+                node_group_key = str(node_group_labels)
+
+            # Prefix with node_group key to avoid rank collision across groups.
+            worker_placement_map[worker_name] = {
+                f"{node_group_key}:{rank}" for rank in parsed_ranks
+            }
+
+        self.logger.info(
+            f"init_worker_parallel: placement_gpu_map={worker_placement_map}"
+        )
+
+        # Build static DAG by GPU conflicts:
+        # if two workers share GPU, add edge by worker order: earlier -> later.
+        dag = {worker: set() for worker in workers}
+        indegree = dict.fromkeys(workers, 0)
+        for i, src in enumerate(workers):
+            for dst in workers[i + 1 :]:
+                if worker_placement_map.get(src, set()) & worker_placement_map.get(
+                    dst, set()
+                ):
+                    dag[src].add(dst)
+                    indegree[dst] += 1
+
+        # Compute topo layers only for logging/debugging.
+        ready = [worker for worker in workers if indegree[worker] == 0]
+        visited = 0
+        indegree_for_log = dict(indegree)
+        while ready:
+            current_layer = ready
+            next_ready = []
+            for worker in current_layer:
+                visited += 1
+                for nxt in dag[worker]:
+                    indegree_for_log[nxt] -= 1
+                    if indegree_for_log[nxt] == 0:
+                        next_ready.append(nxt)
+            ready = next_ready
+
+        if visited != len(workers):
+            raise RuntimeError(f"init_worker_parallel: invalid dag={dag}")
+
+        self.logger.info(f"init_worker_parallel: static_dag={dag}")
+
+        # Run with static DAG + dynamic scheduling:
+        # as soon as one worker is done, release its successors immediately.
+        indegree_runtime = dict(indegree)
+        pending = list(workers)
+        running: dict[str, Handle] = {}
+
+        while pending or running:
+            launched_any = False
+            for worker_name in list(pending):
+                if indegree_runtime[worker_name] != 0:
+                    continue
+                self.logger.info(f"init_worker_parallel: start init [{worker_name}]")
+                running[worker_name] = getattr(self, worker_name).init_worker()
+                pending.remove(worker_name)
+                launched_any = True
+
+            if not running and pending and not launched_any:
+                raise RuntimeError(
+                    f"init_worker_parallel: scheduler stalled, dag={dag}"
+                )
+
+            finished_workers = [
+                worker_name for worker_name, handle in running.items() if handle.done()
+            ]
+            if not finished_workers:
+                time.sleep(0.01)
+                continue
+
+            for done_worker in finished_workers:
+                handle = running.pop(done_worker)
+                try:
+                    handle.wait()
+                except Exception as e:
+                    raise RuntimeError(
+                        f"init_worker_parallel: worker [{done_worker}] init failed."
+                    ) from e
+                self.logger.info(f"init_worker_parallel: finish init [{done_worker}]")
+
+                for nxt in dag[done_worker]:
+                    indegree_runtime[nxt] -= 1
+
+    def init_workers(self):
+        # initialize workers [actor, rollout, reward, env] in dag.
+        # initialize in order in same device to decrease the maximum memory usage
+        # initialize paralled in different devices to increase the initialization speed
+        self.init_worker_parallel()
 
         resume_dir = self.cfg.runner.get("resume_dir", None)
         if resume_dir is None:
