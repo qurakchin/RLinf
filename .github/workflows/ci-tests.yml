@@ -96,6 +96,7 @@ jobs:
               - 'rlinf/runners/*embodied*.py'
               - 'rlinf/runners/*reward*.py'
               - 'examples/embodiment/**'
+              - 'examples/recap/process/**'
               - 'examples/reward/**'
               - 'tests/e2e_tests/embodied/**'
               - 'tests/e2e_tests/training_backend/**'
@@ -132,6 +133,8 @@ jobs:
               - *shared
               - 'rlinf/workers/sft/**'
               - 'rlinf/runners/sft_runner.py'
+              - 'examples/recap/cfg/**'
+              - 'examples/recap/value/**'
               - 'examples/sft/**'
               - 'tests/e2e_tests/sft/**'
               - '.github/workflows/sft-e2e-tests.yml'
@@ -155,6 +158,7 @@ jobs:
               - *sft
               - *unit
               - *scheduler
+              - '.pre-commit-config.yaml'
               - docs/**/*.py
               - '.github/workflows/ci-tests.yml'
             all_changes_filter: &all_changes
@@ -163,6 +167,7 @@ jobs:
               - '**/*.py'
               - 'tests/**'
               - '.github/workflows/*tests.yml'
+              - '.pre-commit-config.yaml'
               - '*.yaml'
             all_changes_no_delete_filter:
               - added|modified: *all_changes
