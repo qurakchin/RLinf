@@ -24,8 +24,8 @@ RLinf 基础环境请参考 `RLinf Installation <https://rlinf.readthedocs.io/en
 
 下载并解压 ``calc_x`` 数据集（Google Drive），下载链接见 `这里 <https://drive.google.com/file/d/1FQMyKLLd6hP9dw9rfZn1EZOWNvKaDsqw/view>`_。
 
-
-----------------
+训练
+----
 
 进入示例目录：
 
@@ -50,6 +50,18 @@ RLinf 基础环境请参考 `RLinf Installation <https://rlinf.readthedocs.io/en
 .. code-block:: bash
 
    bash run_calc_x.sh qwen2.5-1.5b-enginehttp-multiturn
+
+训练曲线
+--------
+
+以下为一次 ``calc_x`` 训练运行的指标曲线示例（具体曲线会因配置与随机种子而有所不同）：
+
+.. figure:: https://github.com/RLinf/misc/raw/main/pic/agentlightning_calcx.png
+   :width: 90%
+   :align: center
+   :alt: AgentLightning calc_x 训练曲线
+
+   AgentLightning ``calc_x`` 训练曲线
 
 测试
 ----

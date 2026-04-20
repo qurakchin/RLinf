@@ -22,8 +22,10 @@ from agentlightning.types import Dataset
 from omegaconf import DictConfig
 
 from rlinf.config import validate_cfg
-from rlinf.runners.agentlightning_eval_runner import AgentLightningEvalRunner
-from rlinf.runners.agentlightning_runner import AgentLightningRLinfRunner
+from rlinf.runners.agentlightning_runner import (
+    AgentLightningEvalRunner,
+    AgentLightningRLinfRunner,
+)
 from rlinf.scheduler import Cluster
 from rlinf.scheduler.placement import PackedPlacementStrategy
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode

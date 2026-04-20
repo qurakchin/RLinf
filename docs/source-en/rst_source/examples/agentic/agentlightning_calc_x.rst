@@ -51,6 +51,18 @@ Start training:
 
    bash run_calc_x.sh qwen2.5-1.5b-enginehttp-multiturn
 
+Training curves
+---------------
+
+Example training / metric curves from a ``calc_x`` run (logged metrics may vary by config and seed):
+
+.. figure:: https://github.com/RLinf/misc/raw/main/pic/agentlightning_calcx.png
+   :width: 90%
+   :align: center
+   :alt: AgentLightning calc_x training curves
+
+   AgentLightning ``calc_x`` training curves
+
 Evaluation
 ----------
 
