@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 import inspect
 import json
 import os
@@ -54,13 +55,23 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
         env = apply_env_wrapper(env, wrapper_name)
         apply_runtime_renderer_settings()
 
+        # Isaac Sim's `omni.kit.app` calls ``gc.disable()`` at startup.
+        # OmniGibson has self-referential cycles and leaks memory when
+        # cyclic GC is disabled. Since we do not need real-time performance,
+        # enable cyclic GC here so that we do not encounter OOMs in long runs.
+        gc.enable()
+
         step_signature = inspect.signature(env.step)
         step_params = step_signature.parameters.values()
         step_supports_kwargs = any(
             param.kind == inspect.Parameter.VAR_KEYWORD for param in step_params
         )
-        step_supports_get_obs = step_supports_kwargs or "get_obs" in step_signature.parameters
-        step_supports_render = step_supports_kwargs or "render" in step_signature.parameters
+        step_supports_get_obs = (
+            step_supports_kwargs or "get_obs" in step_signature.parameters
+        )
+        step_supports_render = (
+            step_supports_kwargs or "render" in step_signature.parameters
+        )
 
         def _step_env(actions, need_obs: bool):
             if step_supports_get_obs and step_supports_render:
@@ -334,7 +345,8 @@ class BehaviorEnv(gym.Env):
                 raw_terminations_list[i] = torch.zeros_like(raw_terminations_list[i])
             raw_obs = raw_obs_list[i]
             if raw_obs is None or (
-                isinstance(raw_obs, (list, tuple)) and all(obs is None for obs in raw_obs)
+                isinstance(raw_obs, (list, tuple))
+                and all(obs is None for obs in raw_obs)
             ):
                 obs_list.append(None)
             else:
