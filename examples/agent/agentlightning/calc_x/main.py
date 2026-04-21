@@ -20,7 +20,7 @@ import hydra
 from calc_agent import MathProblem, calc_agent
 from datasets import Dataset as HuggingFaceDataset
 
-from rlinf.agents.agentlightning.algorithm import RlinfAlgorithm
+from rlinf.agents.agentlightning.algorithm import RLinf
 from rlinf.utils.utils import output_redirector
 
 
@@ -59,7 +59,7 @@ def train(cfg: Any):
 
     eval_mode = cfg.get("eval", False)
 
-    algorithm = RlinfAlgorithm(config=cfg, eval=eval_mode)
+    algorithm = RLinf(config=cfg, eval=eval_mode)
 
     trainer_kwargs = {
         "algorithm": algorithm,

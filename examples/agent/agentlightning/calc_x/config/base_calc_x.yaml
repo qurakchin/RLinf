@@ -6,7 +6,7 @@ hydra:
     dir: .
   output_subdir: null
 
-# main.py: when true, RlinfAlgorithm uses AgentLightningEvalRunner (HF weights from rollout.model.model_path).
+# main.py: when true, RLinf uses AgentLightningEvalRunner (HF weights from rollout.model.model_path).
 eval: false
 
 cluster:

@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__all__ = ["RlinfAlgorithm"]
+__all__ = ["RLinf"]
 
 
 def __getattr__(name: str) -> type:
-    if name == "RlinfAlgorithm":
-        from .algorithm import RlinfAlgorithm
+    if name == "RLinf":
+        from .algorithm import RLinf
 
-        return RlinfAlgorithm
+        return RLinf
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

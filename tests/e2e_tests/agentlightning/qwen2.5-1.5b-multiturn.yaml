@@ -6,20 +6,23 @@ hydra:
     dir: .
   output_subdir: null
 
+# main.py: when true, RLinf uses AgentLightningEvalRunner (HF weights from rollout.model.model_path).
+eval: false
+
 cluster:
   num_nodes: 1
   component_placement:
     actor,rollout,reward: all
 
-
 runner:
   task_type: reasoning
   logger:
     log_path: ${runner.output_dir}/${runner.experiment_name}
-    project_name: rlinf
+    project_name: rlinf-calc-x-e2e-multiturn
     experiment_name: ${runner.experiment_name}
     logger_backends: ["tensorboard"]
 
+  # E2E: short run
   max_epochs: 1
   max_steps: 1
   val_check_interval: 0
@@ -38,7 +41,7 @@ algorithm:
   group_size: 4
   n_minibatches: 1
   training_batch_size_per_gpu: 1
-  rollout_batch_size_per_gpu: null 
+  rollout_batch_size_per_gpu: null
 
   logprob_forward_micro_batch_size: 4
 
@@ -59,7 +62,7 @@ algorithm:
   clip_ratio_high: 0.3
 
   adv_type: grpo_dynamic
-  advantage_mode: turn 
+  advantage_mode: turn
   normalize_advantages: False #
   early_stop_imp_ratio: null
   use_valid_token_scale: False
@@ -81,10 +84,8 @@ inference:
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
     sequence_parallel: False
-
 agentloop:
   is_dynamic_rollout_batch: True
-
 rollout:
   group_name: "RolloutGroup"
 
@@ -103,6 +104,7 @@ rollout:
   rollout_backend: sglang
 
   sglang:
+    serving_mode: worker_http
     attention_backend: triton
     decode_log_interval: 500000
     use_torch_compile: False
@@ -138,6 +140,7 @@ data:
   type: math
   max_prompt_length: 4096
   filter_prompt_by_length: False
+  # E2E: smaller batch than example base
   rollout_batch_size: 16
   val_rollout_batch_size: null
   num_workers: 8
@@ -160,6 +163,8 @@ actor:
   offload_weight: True
   offload_grad: True
   enable_dp_load_balance: True
+
+  pack_traj: False
 
   calculate_flops: False
 
@@ -288,4 +293,5 @@ critic:
 
 
 agentlightning:
+  # E2E: fewer runners than example base
   n_runners: 5
