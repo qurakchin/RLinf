@@ -14,27 +14,17 @@
 
 from __future__ import annotations
 
+import typing
 from typing import Any
 
-from agentlightning.adapter import TraceAdapter
-from agentlightning.store.base import LightningStore
-from agentlightning.types import Dataset
+if typing.TYPE_CHECKING:
+    from agentlightning.adapter import TraceAdapter
+    from agentlightning.store.base import LightningStore
+    from agentlightning.types import Dataset
+
 from omegaconf import DictConfig
 
 from rlinf.config import validate_cfg
-from rlinf.runners.agentlightning_runner import (
-    AgentLightningEvalRunner,
-    AgentLightningRLinfRunner,
-)
-from rlinf.scheduler import Cluster
-from rlinf.scheduler.placement import PackedPlacementStrategy
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
-from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
-from rlinf.workers.agent.agentlightning_rollout_worker import (
-    AgentLightningRolloutWorker,
-)
-from rlinf.workers.inference.utils import get_inference_backend_worker
-from rlinf.workers.rollout.utils import get_rollout_backend_worker
 
 
 def run_rlinf_training(
@@ -46,6 +36,20 @@ def run_rlinf_training(
     eval: bool = False,
 ) -> None:
     """Run rlinf training and evaluation for agentlightning task."""
+    from rlinf.runners.agentlightning_runner import (
+        AgentLightningEvalRunner,
+        AgentLightningRLinfRunner,
+    )
+    from rlinf.scheduler import Cluster
+    from rlinf.scheduler.placement import PackedPlacementStrategy
+    from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
+    from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
+    from rlinf.workers.agent.agentlightning_rollout_worker import (
+        AgentLightningRolloutWorker,
+    )
+    from rlinf.workers.inference.utils import get_inference_backend_worker
+    from rlinf.workers.rollout.utils import get_rollout_backend_worker
+
     cfg = config
     cfg = validate_cfg(cfg)
 

@@ -14,58 +14,76 @@
 
 from __future__ import annotations
 
+import typing
 from typing import Any, Optional
 
-from agentlightning.algorithm.base import Algorithm
-from agentlightning.types import Dataset
+if typing.TYPE_CHECKING:
+    from agentlightning.algorithm.base import Algorithm
+    from agentlightning.types import Dataset
+
 from omegaconf import DictConfig, OmegaConf
 
-from .entrypoint import run_rlinf_training
+_RlinfAlgorithm: type | None = None
 
 
-class RlinfAlgorithm(Algorithm):
-    """Agent Lightning ``Algorithm`` that runs RL training on the RLinf stack.
+def _make_rlinf_algorithm_class() -> type:
+    from agentlightning.algorithm.base import Algorithm
+    from .entrypoint import run_rlinf_training
 
-    In Agent Lightning, an ``Algorithm`` is the training strategy wired into
-    ``Trainer``: it uses the shared ``LightningStore`` and trace adapter from the
-    trainer and implements ``run`` to drive rollouts and learning.
+    class RlinfAlgorithm(Algorithm):
+        """Agent Lightning ``Algorithm`` that runs RL training on the RLinf stack.
 
-    ``RlinfAlgorithm`` is RLinf's implementation of that hook. It calls
-    ``run_rlinf_training``, which constructs RLinf cluster placement, distributed
-    workers (rollout, inference, actor, …), and the AgentLightning training or eval
-    runner—RLinf's RL training and resource-management path, configured by a Hydra
-    ``DictConfig``.
+        In Agent Lightning, an ``Algorithm`` is the training strategy wired into
+        ``Trainer``: it uses the shared ``LightningStore`` and trace adapter from the
+        trainer and implements ``run`` to drive rollouts and learning.
 
-    Args:
-        config: RLinf config (``DictConfig`` or dict), typically from ``@hydra.main``.
-        eval: If True, use evaluation routing instead of training.
-    """
+        ``RlinfAlgorithm`` is RLinf's implementation of that hook. It calls
+        ``run_rlinf_training``, which constructs RLinf cluster placement, distributed
+        workers (rollout, inference, actor, …), and the AgentLightning training or eval
+        runner—RLinf's RL training and resource-management path, configured by a Hydra
+        ``DictConfig``.
 
-    def __init__(
-        self,
-        config: dict[str, Any] | DictConfig,
-        eval: bool = False,
-    ):
-        super().__init__()
+        Args:
+            config: RLinf config (``DictConfig`` or dict), typically from ``@hydra.main``.
+            eval: If True, use evaluation routing instead of training.
+        """
 
-        if isinstance(config, dict):
-            self.config = OmegaConf.create(config)
-        else:
-            self.config = config
-        self.eval = eval
+        def __init__(
+            self,
+            config: dict[str, Any] | DictConfig,
+            eval: bool = False,
+        ):
+            super().__init__()
 
-    def run(
-        self,
-        train_dataset: Optional[Dataset[Any]] = None,
-        val_dataset: Optional[Dataset[Any]] = None,
-    ) -> None:
-        store = self.get_store()
-        adapter = self.get_adapter()
-        run_rlinf_training(
-            config=self.config,
-            train_dataset=train_dataset,
-            val_dataset=val_dataset,
-            store=store,
-            adapter=adapter,
-            eval=self.eval,
-        )
+            if isinstance(config, dict):
+                self.config = OmegaConf.create(config)
+            else:
+                self.config = config
+            self.eval = eval
+
+        def run(
+            self,
+            train_dataset: Optional[Dataset[Any]] = None,
+            val_dataset: Optional[Dataset[Any]] = None,
+        ) -> None:
+            store = self.get_store()
+            adapter = self.get_adapter()
+            run_rlinf_training(
+                config=self.config,
+                train_dataset=train_dataset,
+                val_dataset=val_dataset,
+                store=store,
+                adapter=adapter,
+                eval=self.eval,
+            )
+
+    return RlinfAlgorithm
+
+
+def __getattr__(name: str):
+    global _RlinfAlgorithm
+    if name == "RlinfAlgorithm":
+        if _RlinfAlgorithm is None:
+            _RlinfAlgorithm = _make_rlinf_algorithm_class()
+        return _RlinfAlgorithm
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

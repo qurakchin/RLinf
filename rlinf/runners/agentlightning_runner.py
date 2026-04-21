@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import logging
 import os
 import typing
 from typing import Any, Optional
 
 import torch
-from agentlightning.adapter.triplet import TraceToTripletBase
-from agentlightning.store.base import LightningStore
 from omegaconf.dictconfig import DictConfig
 from torch.utils.data import Dataset, RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -30,13 +30,15 @@ from rlinf.scheduler import Channel
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.utils.runner_utils import check_progress
-from rlinf.workers.agent.agentlightning_rollout_worker import (
-    AgentLightningRolloutWorker,
-)
 
 if typing.TYPE_CHECKING:
+    from agentlightning.adapter.triplet import TraceToTripletBase
+    from agentlightning.store.base import LightningStore
     from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
     from rlinf.workers.inference.megatron_inference_worker import MegatronInference
+    from rlinf.workers.agent.agentlightning_rollout_worker import (
+        AgentLightningRolloutWorker,
+    )
     from rlinf.workers.rollout.sglang.sglang_worker_server import (
         SGLangWorkerWithHTTPServer,
     )
@@ -54,7 +56,7 @@ class AgentLightningRLinfRunner(ReasoningRunner):
         actor: MAMegatronActor,
         store: LightningStore,
         adapter: TraceToTripletBase,
-        agentlightning_rollout_worker: AgentLightningRolloutWorker,
+        agentlightning_rollout_worker: "AgentLightningRolloutWorker",
     ):
         super().__init__(
             cfg,
@@ -293,7 +295,7 @@ class AgentLightningEvalRunner:
         actor: "MAMegatronActor",
         store: LightningStore,
         adapter: TraceToTripletBase,
-        agentlightning_rollout_worker: AgentLightningRolloutWorker,
+        agentlightning_rollout_worker: "AgentLightningRolloutWorker",
     ):
         if "CUDA_LAUNCH_BLOCKING" not in os.environ:
             os.environ["CUDA_LAUNCH_BLOCKING"] = "1"

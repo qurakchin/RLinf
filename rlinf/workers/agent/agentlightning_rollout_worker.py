@@ -12,27 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import socket
+import typing
 import uuid
 from typing import Any, Optional, cast
 
 import numpy as np
 import torch
-from agentlightning import NamedResources, RolloutLegacy
-from agentlightning.adapter.triplet import TraceToTripletBase
-from agentlightning.llm_proxy import LLMProxy, ModelConfig
-from agentlightning.store.base import LightningStore
-from agentlightning.types.core import (
-    EnqueueRolloutRequest,
-    Rollout,
-    RolloutConfig,
-    Task,
-    Triplet,
-)
 from omegaconf import DictConfig, OmegaConf
+
+if typing.TYPE_CHECKING:
+    from agentlightning import NamedResources, RolloutLegacy
+    from agentlightning.adapter.triplet import TraceToTripletBase
+    from agentlightning.llm_proxy import LLMProxy, ModelConfig
+    from agentlightning.store.base import LightningStore
+    from agentlightning.types.core import (
+        EnqueueRolloutRequest,
+        Rollout,
+        RolloutConfig,
+        Task,
+        Triplet,
+    )
 
 from rlinf.data.io_struct import DynamicRolloutResult
 from rlinf.scheduler import Channel, Worker
@@ -73,14 +78,16 @@ class AgentLightningRolloutWorker(Worker):
 
     def init_worker(
         self,
-        store: LightningStore,
-        adapter: TraceToTripletBase,
+        store: "LightningStore",
+        adapter: "TraceToTripletBase",
         server_addresses: Optional[list[str]] = None,
         group_size: int = 1,
         model: str = "default-model",
         reward_fillna_value: float = 0.0,
         is_eval_mode: bool = False,
     ):
+        from agentlightning.llm_proxy import LLMProxy
+
         self.store = store
         self.llm_proxy = LLMProxy(
             port=_find_available_port(),
@@ -99,6 +106,12 @@ class AgentLightningRolloutWorker(Worker):
         self,
         data: dict[str, Any],
     ):
+        from agentlightning import NamedResources
+        from agentlightning.types.core import (
+            EnqueueRolloutRequest,
+            RolloutConfig,
+        )
+
         if (
             self._resources_id is None
             and self.server_addresses
@@ -159,6 +172,8 @@ class AgentLightningRolloutWorker(Worker):
         self._total_tasks_queued += len(rollouts)
 
     async def _update_proxy_server(self):
+        from agentlightning.llm_proxy import ModelConfig
+
         model_name = (
             os.path.basename(str(self.model))
             if os.path.sep in str(self.model)
@@ -182,7 +197,10 @@ class AgentLightningRolloutWorker(Worker):
         )
         await self.llm_proxy.restart()
 
-    async def _change_to_triplets(self, rollout: Rollout) -> RolloutLegacy:
+    async def _change_to_triplets(self, rollout: "Rollout") -> "RolloutLegacy":
+        from agentlightning import RolloutLegacy
+        from agentlightning.types.core import Task
+
         spans = await self.store.query_spans(rollout.rollout_id, attempt_id="latest")
 
         triplets = self.adapter.adapt(spans)
@@ -212,7 +230,7 @@ class AgentLightningRolloutWorker(Worker):
 
         return result_rollout
 
-    def _count_tool_calls_in_triplet(self, triplet: Triplet) -> int:
+    def _count_tool_calls_in_triplet(self, triplet: "Triplet") -> int:
         if not isinstance(triplet.response, dict):
             return 0
         response_raw_content = triplet.response.get("raw_content")
@@ -229,7 +247,7 @@ class AgentLightningRolloutWorker(Worker):
     def _compute_rollout_metrics(
         self,
         rollout_results: list[DynamicRolloutResult],
-        rollouts: list[RolloutLegacy],
+        rollouts: list["RolloutLegacy"],
     ) -> dict[str, float]:
         if not rollout_results:
             return {
@@ -401,6 +419,8 @@ class AgentLightningRolloutWorker(Worker):
     async def process_rollout_batch(
         self, input_channel: Channel, output_channel: Channel
     ):
+        from agentlightning.types.core import Rollout
+
         with self.worker_timer():
             batch_data = input_channel.get()
 
@@ -453,6 +473,8 @@ class AgentLightningRolloutWorker(Worker):
             return metrics
 
     async def process_eval_batch(self, input_channel: Channel):
+        from agentlightning.types.core import Rollout
+
         with self.worker_timer():
             batch_data = input_channel.get()
 
