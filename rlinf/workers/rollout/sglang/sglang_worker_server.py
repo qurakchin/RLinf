@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import asyncio
-import dataclasses
 import time
 from typing import Literal, Optional
 
@@ -21,14 +20,24 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from omegaconf import DictConfig
-from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
-from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
-from sglang.srt.managers.template_manager import TemplateManager
-from sglang.srt.server_args import ServerArgs
 
-from rlinf.config import torch_dtype_from_precision
+try:
+    from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
+    from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
+    from sglang.srt.managers.template_manager import TemplateManager
+except ImportError:
+    from sglang.srt.openai_api.adapter import (
+        v1_chat_generate_request,
+        v1_chat_generate_response,
+    )
+    from sglang.srt.openai_api.protocol import ChatCompletionRequest
+
+    OpenAIServingChat = None  # type: ignore[misc, assignment]
+    TemplateManager = None  # type: ignore[misc, assignment]
+
+_LEGACY_OPENAI = OpenAIServingChat is None
+
 from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.workers.rollout.sglang import Engine
 from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
 
 
@@ -44,9 +53,9 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
     ):
         super().__init__(config, placement, weight_reload, config_rollout)
 
-        sv = (self._cfg.rollout.get("sglang") or {}).get("server") or {}
-        self._http_server_host = http_server_host or str(sv.get("host", "0.0.0.0"))
-        self._http_server_port = int(sv.get("port", http_server_port)) + self._rank
+        server_cfg = (self._cfg.rollout.get("sglang") or {}).get("server") or {}
+        self._http_server_host = http_server_host or str(server_cfg.get("host", "0.0.0.0"))
+        self._http_server_port = int(server_cfg.get("port", http_server_port)) + self._rank
         self._http_server = None
         self._http_server_task = None
         self._http_app = None
@@ -85,6 +94,7 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         )
 
     def _init_openai_serving(self):
+
         tokenizer_manager = self._engine.tokenizer_manager
         template_manager = TemplateManager()
         template_manager.initialize_templates(
@@ -111,9 +121,18 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
             if request.top_k is None and "top_k" in self._sampling_params:
                 request.top_k = self._sampling_params["top_k"]
 
-            adapted_request, _ = self._openai_serving_chat._convert_to_internal_request(
-                request
-            )
+            tokenizer_manager = self._engine.tokenizer_manager
+            if _LEGACY_OPENAI:
+                adapted_request, _ = v1_chat_generate_request(
+                    [request],
+                    tokenizer_manager,
+                    request_ids=[getattr(request, "rid", None)],
+                )
+            else:
+                adapted_request, _ = self._openai_serving_chat._convert_to_internal_request(
+                    request
+                )
+
             adapted_request.return_logprob = self._return_logprobs
             prompt_token_ids = None
             if (
@@ -124,19 +143,26 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
                 if hasattr(prompt_token_ids, "tolist"):
                     prompt_token_ids = prompt_token_ids.tolist()
 
-            generator = self._openai_serving_chat.tokenizer_manager.generate_request(
-                adapted_request
-            )
+            generator = tokenizer_manager.generate_request(adapted_request)
             result = await generator.__anext__()
 
             if not isinstance(result, list):
                 result = [result]
 
-            response = self._openai_serving_chat._build_chat_response(
-                request,
-                result,
-                int(time.time()),
-            )
+            created = int(time.time())
+            if _LEGACY_OPENAI:
+                response = v1_chat_generate_response(
+                    request,
+                    result,
+                    created,
+                    tool_call_parser=self._cfg_rollout.sglang.get(
+                        "tool_call_parser", None
+                    ),
+                )
+            else:
+                response = self._openai_serving_chat._build_chat_response(
+                    request, result, created
+                )
 
             response_dict = response.model_dump(exclude_none=True)
 
@@ -153,49 +179,6 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
                 status_code=500,
                 content={"error": {"message": str(e), "type": type(e).__name__}},
             )
-
-    def _init_engine(self):
-        use_cudagraph = not self._cfg_rollout.enforce_eager
-
-        load_format = "dummy"
-        if self.weight_reload == "sync":
-            if self._cfg_rollout.validate_weight or getattr(
-                self._cfg_rollout, "validate_weight_first_sync", False
-            ):
-                load_format = "auto"
-        else:
-            load_format = "auto"
-
-        server_args = ServerArgs(
-            model_path=self._cfg_rollout.model.model_path,
-            disable_cuda_graph=not use_cudagraph,
-            cuda_graph_max_bs=min(
-                self._cfg_rollout.cuda_graph_max_bs,
-                self._cfg_rollout.max_running_requests,
-            ),
-            tp_size=self._cfg_rollout.tensor_parallel_size,
-            mem_fraction_static=self._cfg_rollout.gpu_memory_utilization,
-            enable_memory_saver=use_cudagraph,
-            enable_torch_compile=self._cfg_rollout.sglang.use_torch_compile,
-            torch_compile_max_bs=min(
-                self._cfg_rollout.sglang.torch_compile_max_bs,
-                self._cfg_rollout.max_running_requests,
-            ),
-            load_format=load_format,
-            dtype=torch_dtype_from_precision(self._cfg_rollout.model.precision),
-            skip_tokenizer_init=not self._cfg_rollout.detokenize,
-            decode_log_interval=self._cfg_rollout.sglang.decode_log_interval,
-            attention_backend=self._cfg_rollout.sglang.attention_backend,
-            log_level="warning",
-            max_running_requests=self._cfg_rollout.max_running_requests,
-            dist_init_addr=f"127.0.0.1:{str(self.acquire_free_port())}",
-            tool_call_parser=self._cfg_rollout.sglang.get("tool_call_parser", None),
-        )
-
-        self.log_on_first_rank(f"{server_args=}")
-        self._engine = Engine(
-            **dataclasses.asdict(server_args),
-        )
 
     def http_server_start(self):
         if self._http_server_task is not None:
