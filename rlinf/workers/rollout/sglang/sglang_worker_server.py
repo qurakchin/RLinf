@@ -15,67 +15,21 @@
 import asyncio
 import dataclasses
 import time
-import uuid
-from typing import Any, Callable, Literal, Optional, Type
+from typing import Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from omegaconf import DictConfig
+from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
+from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
+from sglang.srt.managers.template_manager import TemplateManager
 from sglang.srt.server_args import ServerArgs
 
 from rlinf.config import torch_dtype_from_precision
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.rollout.sglang import Engine
 from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
-
-
-def _load_sglang_openai_stack() -> tuple[
-    Literal["entrypoints", "openai_api"],
-    Type[Any],
-    Optional[Type[Any]],
-    Optional[Type[Any]],
-    Optional[Callable[..., Any]],
-    Optional[Callable[..., Any]],
-]:
-    """Prefer SGLang 0.5+ ``entrypoints.openai``; fall back to 0.4.x ``openai_api``."""
-    try:
-        from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
-        from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
-        from sglang.srt.managers.template_manager import TemplateManager
-
-        return "entrypoints", ChatCompletionRequest, OpenAIServingChat, TemplateManager, None, None
-    except ImportError:
-        from sglang.srt.openai_api.adapter import (
-            v1_chat_generate_request,
-            v1_chat_generate_response,
-        )
-        from sglang.srt.openai_api.protocol import ChatCompletionRequest
-
-        return (
-            "openai_api",
-            ChatCompletionRequest,
-            None,
-            None,
-            v1_chat_generate_request,
-            v1_chat_generate_response,
-        )
-
-
-(
-    _SGLANG_OPENAI_BACKEND,
-    ChatCompletionRequest,
-    OpenAIServingChat,
-    TemplateManager,
-    _v1_chat_generate_request,
-    _v1_chat_generate_response,
-) = _load_sglang_openai_stack()
-
-
-def _chat_completion_to_dict(response: Any) -> dict[str, Any]:
-    if hasattr(response, "model_dump"):
-        return response.model_dump(exclude_none=True)
-    return response.dict(exclude_none=True)
 
 
 class SGLangWorkerWithHTTPServer(SGLangWorker):
@@ -132,19 +86,15 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
 
     def _init_openai_serving(self):
         tokenizer_manager = self._engine.tokenizer_manager
-        if _SGLANG_OPENAI_BACKEND == "entrypoints":
-            assert OpenAIServingChat is not None and TemplateManager is not None
-            template_manager = TemplateManager()
-            template_manager.initialize_templates(
-                tokenizer_manager=tokenizer_manager,
-                model_path=self._cfg_rollout.model.model_path,
-            )
-            self._openai_serving_chat = OpenAIServingChat(
-                tokenizer_manager=tokenizer_manager,
-                template_manager=template_manager,
-            )
-        else:
-            self._openai_serving_chat = None
+        template_manager = TemplateManager()
+        template_manager.initialize_templates(
+            tokenizer_manager=tokenizer_manager,
+            model_path=self._cfg_rollout.model.model_path,
+        )
+        self._openai_serving_chat = OpenAIServingChat(
+            tokenizer_manager=tokenizer_manager,
+            template_manager=template_manager,
+        )
 
     async def _handle_chat_completion(self, request: ChatCompletionRequest):
         try:
@@ -161,112 +111,48 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
             if request.top_k is None and "top_k" in self._sampling_params:
                 request.top_k = self._sampling_params["top_k"]
 
-            if _SGLANG_OPENAI_BACKEND == "entrypoints":
-                return await self._handle_chat_completion_entrypoints(request)
+            adapted_request, _ = self._openai_serving_chat._convert_to_internal_request(
+                request
+            )
+            adapted_request.return_logprob = self._return_logprobs
+            prompt_token_ids = None
+            if (
+                hasattr(adapted_request, "input_ids")
+                and adapted_request.input_ids is not None
+            ):
+                prompt_token_ids = adapted_request.input_ids
+                if hasattr(prompt_token_ids, "tolist"):
+                    prompt_token_ids = prompt_token_ids.tolist()
 
-            return await self._handle_chat_completion_openai_api(request)
+            generator = self._openai_serving_chat.tokenizer_manager.generate_request(
+                adapted_request
+            )
+            result = await generator.__anext__()
+
+            if not isinstance(result, list):
+                result = [result]
+
+            response = self._openai_serving_chat._build_chat_response(
+                request,
+                result,
+                int(time.time()),
+            )
+
+            response_dict = response.model_dump(exclude_none=True)
+
+            if result and len(result) > 0 and "output_ids" in result[0]:
+                response_dict["response_token_ids"] = [result[0]["output_ids"]]
+
+            if prompt_token_ids is not None:
+                response_dict["prompt_token_ids"] = prompt_token_ids
+
+            return response_dict
 
         except Exception as e:
             return JSONResponse(
                 status_code=500,
                 content={"error": {"message": str(e), "type": type(e).__name__}},
             )
-
-    async def _handle_chat_completion_entrypoints(self, request: ChatCompletionRequest):
-        assert self._openai_serving_chat is not None
-
-        adapted_request, _ = self._openai_serving_chat._convert_to_internal_request(
-            request
-        )
-        adapted_request.return_logprob = self._return_logprobs
-        prompt_token_ids = None
-        if (
-            hasattr(adapted_request, "input_ids")
-            and adapted_request.input_ids is not None
-        ):
-            prompt_token_ids = adapted_request.input_ids
-            if hasattr(prompt_token_ids, "tolist"):
-                prompt_token_ids = prompt_token_ids.tolist()
-
-        generator = self._openai_serving_chat.tokenizer_manager.generate_request(
-            adapted_request
-        )
-        result = await generator.__anext__()
-
-        if not isinstance(result, list):
-            result = [result]
-
-        response = self._openai_serving_chat._build_chat_response(
-            request,
-            result,
-            int(time.time()),
-        )
-
-        response_dict = _chat_completion_to_dict(response)
-
-        if result and len(result) > 0 and "output_ids" in result[0]:
-            response_dict["response_token_ids"] = [result[0]["output_ids"]]
-
-        if prompt_token_ids is not None:
-            response_dict["prompt_token_ids"] = prompt_token_ids
-
-        return response_dict
-
-    async def _handle_chat_completion_openai_api(self, request: ChatCompletionRequest):
-        assert _v1_chat_generate_request is not None and _v1_chat_generate_response is not None
-
-        tokenizer_manager = self._engine.tokenizer_manager
-        rid = request.rid if request.rid is not None else str(uuid.uuid4())
-        request.rid = rid
-
-        adapted_request, request_out = _v1_chat_generate_request(
-            [request],
-            tokenizer_manager,
-            request_ids=[rid],
-        )
-        if self._return_logprobs:
-            adapted_request.return_logprob = True
-
-        ret = await tokenizer_manager.generate_request(adapted_request, None).__anext__()
-
-        if not isinstance(ret, list):
-            ret = [ret]
-
-        created = int(time.time())
-        response = _v1_chat_generate_response(
-            request_out,
-            ret,
-            created,
-            cache_report=tokenizer_manager.server_args.enable_cache_report,
-            tool_call_parser=tokenizer_manager.server_args.tool_call_parser,
-            reasoning_parser=getattr(
-                tokenizer_manager.server_args, "reasoning_parser", None
-            ),
-        )
-
-        from starlette.responses import Response
-
-        if isinstance(response, Response):
-            return response
-
-        response_dict = _chat_completion_to_dict(response)
-
-        prompt_token_ids = None
-        if (
-            hasattr(adapted_request, "input_ids")
-            and adapted_request.input_ids is not None
-        ):
-            prompt_token_ids = adapted_request.input_ids
-            if hasattr(prompt_token_ids, "tolist"):
-                prompt_token_ids = prompt_token_ids.tolist()
-
-        if ret and len(ret) > 0 and "output_ids" in ret[0]:
-            response_dict["response_token_ids"] = [ret[0]["output_ids"]]
-
-        if prompt_token_ids is not None:
-            response_dict["prompt_token_ids"] = prompt_token_ids
-
-        return response_dict
 
     def _init_engine(self):
         use_cudagraph = not self._cfg_rollout.enforce_eager
