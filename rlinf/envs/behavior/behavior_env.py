@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 import inspect
 import json
 import os
@@ -55,13 +56,23 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
         env = apply_env_wrapper(env, wrapper_name)
         apply_runtime_renderer_settings()
 
+        # Isaac Sim's `omni.kit.app` calls ``gc.disable()`` at startup.
+        # OmniGibson has self-referential cycles and leaks memory when
+        # cyclic GC is disabled. Since we do not need real-time performance,
+        # enable cyclic GC here so that we do not encounter OOMs in long runs.
+        gc.enable()
+
         step_signature = inspect.signature(env.step)
         step_params = step_signature.parameters.values()
         step_supports_kwargs = any(
             param.kind == inspect.Parameter.VAR_KEYWORD for param in step_params
         )
-        step_supports_get_obs = step_supports_kwargs or "get_obs" in step_signature.parameters
-        step_supports_render = step_supports_kwargs or "render" in step_signature.parameters
+        step_supports_get_obs = (
+            step_supports_kwargs or "get_obs" in step_signature.parameters
+        )
+        step_supports_render = (
+            step_supports_kwargs or "render" in step_signature.parameters
+        )
         skip_intermediate_obs_in_chunk = bool(
             OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
@@ -173,7 +184,9 @@ class BehaviorEnv(gym.Env):
         self._is_start = True
         self.use_thread_worker = self.cfg.get("use_thread_worker", False)
         self.num_env_subprocess = int(self.cfg.get("num_env_subprocess", 1))
-        self.env_shard_size = self._split_num_envs(self.num_envs, self.num_env_subprocess)
+        self.env_shard_size = self._split_num_envs(
+            self.num_envs, self.num_env_subprocess
+        )
         self.env_process_list = []
         self.parent_conn_list = []
         self.child_conn_list = []
@@ -196,9 +209,13 @@ class BehaviorEnv(gym.Env):
         """Split ``num_envs`` across ``num_processes`` shards as evenly as possible."""
         assert num_processes > 0, f"num_processes({num_processes}) must be positive"
         if self.use_thread_worker and num_processes > 1:
-            self.logger.warning(f"assign num_processes({num_processes}) to 1 when use_thread_worker is True")
+            self.logger.warning(
+                f"assign num_processes({num_processes}) to 1 when use_thread_worker is True"
+            )
             num_processes = 1
-        assert num_envs % num_processes == 0, f"num_envs({num_envs}) must be divisible by num_processes({num_processes})"
+        assert num_envs % num_processes == 0, (
+            f"num_envs({num_envs}) must be divisible by num_processes({num_processes})"
+        )
         return num_envs // num_processes
 
     def _load_tasks_cfg(self, activity_name: str):
@@ -276,9 +293,7 @@ class BehaviorEnv(gym.Env):
         if actions is None:
             return [None] * self.num_env_subprocess
         s = self.env_shard_size
-        return [
-            actions[i * s : (i + 1) * s] for i in range(self.num_env_subprocess)
-        ]
+        return [actions[i * s : (i + 1) * s] for i in range(self.num_env_subprocess)]
 
     def _merge_step_results(self, shard_results: list):
         raw_obs = []
@@ -341,7 +356,9 @@ class BehaviorEnv(gym.Env):
     def _call_all_subprocs(self, cmd: str, payloads: list) -> list:
         """Send the same command to every shard; recv in parallel to avoid pipe backpressure."""
         n = len(self.parent_conn_list)
-        assert len(payloads) == n, f"payloads length {len(payloads)} != num subprocesses {n}"
+        assert len(payloads) == n, (
+            f"payloads length {len(payloads)} != num subprocesses {n}"
+        )
         for conn, payload in zip(self.parent_conn_list, payloads):
             conn.send((cmd, payload))
 
@@ -500,14 +517,17 @@ class BehaviorEnv(gym.Env):
                 raw_terminations_list[i] = torch.zeros_like(raw_terminations_list[i])
             raw_obs = raw_obs_list[i]
             if raw_obs is None or (
-                isinstance(raw_obs, (list, tuple)) and all(obs is None for obs in raw_obs)
+                isinstance(raw_obs, (list, tuple))
+                and all(obs is None for obs in raw_obs)
             ):
                 obs_list.append(None)
             else:
                 obs_list.append(self._wrap_obs(raw_obs))
             infos_list.append(infos)
 
-        chunk_rewards = torch.stack(scaled_rewards_list, dim=1)  # [num_envs, chunk_steps]
+        chunk_rewards = torch.stack(
+            scaled_rewards_list, dim=1
+        )  # [num_envs, chunk_steps]
         raw_terminations = torch.stack(
             raw_terminations_list, dim=1
         )  # [num_envs, chunk_steps]

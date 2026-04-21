@@ -393,9 +393,17 @@ class RecordVideo(gym.Wrapper):
                     obs_list = [obs_list[i] for i in valid_indices]
                     if isinstance(infos_list, (list, tuple)):
                         infos_list = [infos_list[i] for i in valid_indices]
-                    if torch is not None and isinstance(rewards, torch.Tensor) and rewards.ndim == 2:
+                    if (
+                        torch is not None
+                        and isinstance(rewards, torch.Tensor)
+                        and rewards.ndim == 2
+                    ):
                         rewards = rewards[:, valid_indices]
-                    if torch is not None and isinstance(terminations, torch.Tensor) and terminations.ndim == 2:
+                    if (
+                        torch is not None
+                        and isinstance(terminations, torch.Tensor)
+                        and terminations.ndim == 2
+                    ):
                         terminations = terminations[:, valid_indices]
 
             final_obs = None

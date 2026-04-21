@@ -28,9 +28,9 @@ from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.logging import get_logger
 from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.metric_utils import compute_evaluate_metrics, print_metrics_table
+from rlinf.utils.placement import HybridComponentPlacement
 from rlinf.utils.runner_utils import check_progress
 from rlinf.utils.timers import Timer
-from rlinf.utils.placement import HybridComponentPlacement
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class EmbodiedRunner:
         ],
         rollout: Union["MultiStepRolloutWorker", "AsyncMultiStepRolloutWorker"],
         env: Union["EnvWorker", "AsyncEnvWorker"],
-        component_placement: "HybridComponentPlacement"=None,
+        component_placement: "HybridComponentPlacement" = None,
         reward: Union["EmbodiedRewardWorker"] = None,
         critic=None,
     ):
