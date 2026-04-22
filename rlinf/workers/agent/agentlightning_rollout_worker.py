@@ -14,10 +14,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-import socket
 import typing
 import uuid
 from typing import Any, Optional, cast
@@ -43,12 +41,10 @@ from rlinf.data.io_struct import DynamicRolloutResult
 from rlinf.scheduler import Channel, Worker
 from rlinf.utils.placement import ModelParallelComponentPlacement
 
-
-def _find_available_port() -> int:
-    """Find an available port by binding to port 0."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
+# Passed to LightningStore.wait_for_rollouts: non-zero timeout lets the store await
+# inside wait_for_rollout instead of using timeout=0 (immediate return) plus a
+# separate asyncio.sleep poll loop.
+_ROLLOUT_WAIT_POLL_TIMEOUT_S = 0.1
 
 
 class AgentLightningRolloutWorker(Worker):
@@ -90,7 +86,7 @@ class AgentLightningRolloutWorker(Worker):
 
         self.store = store
         self.llm_proxy = LLMProxy(
-            port=_find_available_port(),
+            port=self.acquire_free_port(),
             model_list=[],
             store=store,
         )
@@ -422,7 +418,7 @@ class AgentLightningRolloutWorker(Worker):
         from agentlightning.types.core import Rollout
 
         with self.worker_timer():
-            batch_data = input_channel.get()
+            batch_data = await input_channel.get(async_op=True).async_wait()
 
             await self._async_setup_data(
                 data=batch_data,
@@ -440,7 +436,8 @@ class AgentLightningRolloutWorker(Worker):
                 ]
 
                 completed_batch = await self.store.wait_for_rollouts(
-                    rollout_ids=rollout_ids_to_query, timeout=0.0
+                    rollout_ids=rollout_ids_to_query,
+                    timeout=_ROLLOUT_WAIT_POLL_TIMEOUT_S,
                 )
 
                 for rollout in completed_batch:
@@ -464,9 +461,6 @@ class AgentLightningRolloutWorker(Worker):
 
                     processed_data_ids.add(data_id)
 
-                if len(processed_data_ids) < initial_data_ids_count:
-                    await asyncio.sleep(0.1)
-
             rollouts_list = list(self._completed_rollout_ids.values())
             metrics = self._compute_rollout_metrics(rollout_results, rollouts_list)
             self._clear_data()
@@ -476,7 +470,7 @@ class AgentLightningRolloutWorker(Worker):
         from agentlightning.types.core import Rollout
 
         with self.worker_timer():
-            batch_data = input_channel.get()
+            batch_data = await input_channel.get(async_op=True).async_wait()
 
             await self._async_setup_data(
                 data=batch_data,
@@ -493,7 +487,8 @@ class AgentLightningRolloutWorker(Worker):
                 ]
 
                 completed_batch = await self.store.wait_for_rollouts(
-                    rollout_ids=rollout_ids_to_query, timeout=0.0
+                    rollout_ids=rollout_ids_to_query,
+                    timeout=_ROLLOUT_WAIT_POLL_TIMEOUT_S,
                 )
 
                 for rollout in completed_batch:
@@ -509,9 +504,6 @@ class AgentLightningRolloutWorker(Worker):
                     if data_id in processed_data_ids:
                         continue
                     processed_data_ids.add(data_id)
-
-                if len(processed_data_ids) < initial_data_ids_count:
-                    await asyncio.sleep(0.1)
 
             all_rewards: list[float] = []
             for rollout_legacy in self._completed_rollout_ids.values():
