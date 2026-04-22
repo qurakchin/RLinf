@@ -613,23 +613,23 @@ class BehaviorEnv(gym.Env):
         info_lists = []
         for env_idx, (reward, info) in enumerate(zip(rewards, infos)):
             done_dict = info.get("done", {})
+            step_success = done_dict.get("success", False)
+            end_success = info.get("success", step_success)
+            episode_length = info.get("episode_length", 0)
             episode_info = {
-                "success": done_dict.get("success", False),
-                "episode_length": info.get("episode_length", 0),
+                "episode_length": episode_length,
             }
             self.returns[env_idx] += reward
-            self.success_once[env_idx] = self.success_once[env_idx] | done_dict.get(
-                "success", False
-            )
+            self.success_once[env_idx] = self.success_once[env_idx] | step_success
             episode_info["success_once"] = self.success_once[env_idx].clone()
+            episode_info["success_at_end"] = end_success
 
             episode_info["return"] = self.returns[env_idx].clone()
-            episode_info["episode_len"] = self.elapsed_steps.clone()
+            episode_info["episode_len"] = episode_length
             episode_info["reward"] = (
-                episode_info["return"] / episode_info["episode_len"]
+                episode_info["return"]
+                / torch.clamp(to_tensor(episode_length), min=1).to(self.device)
             )
-            if self.ignore_terminations:
-                episode_info["success_at_end"] = info["success"]
 
             info_lists.append(episode_info)
 
