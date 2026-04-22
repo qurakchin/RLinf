@@ -9,8 +9,7 @@ use_fixed_reset_state_ids: False
 max_steps_per_rollout_epoch: 2000
 max_episode_steps: 2000 # max episode steps for truncation
 skip_intermediate_obs_in_chunk: True
-use_thread_worker: False
-num_env_subprocess: 1
+num_env_subprocess: 1 # parallel env running in env workers to speed up env.step
 
 video_cfg:
   save_video: False

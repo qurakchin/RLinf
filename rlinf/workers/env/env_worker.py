@@ -247,7 +247,9 @@ class EnvWorker(Worker):
         n = self._num_env_subprocess(self.cfg.env.eval)
         return self.eval_env_list[stage_id * n : (stage_id + 1) * n]
 
-    def _split_stage_env_sizes(self, num_envs_per_stage: int, num_env_subprocess: int) -> list[int]:
+    def _split_stage_env_sizes(
+        self, num_envs_per_stage: int, num_env_subprocess: int
+    ) -> list[int]:
         assert num_env_subprocess > 0, (
             f"num_env_subprocess({num_env_subprocess}) must be positive"
         )
@@ -292,7 +294,9 @@ class EnvWorker(Worker):
         return merged_infos
 
     def _merge_env_group_chunk_outputs(self, chunk_outputs: list[tuple]):
-        obs_lists, reward_lists, term_lists, trunc_lists, info_lists = zip(*chunk_outputs)
+        obs_lists, reward_lists, term_lists, trunc_lists, info_lists = zip(
+            *chunk_outputs
+        )
         chunk_len = len(obs_lists[0])
         merged_obs_list = []
         merged_infos_list = []
@@ -301,7 +305,9 @@ class EnvWorker(Worker):
                 self._merge_env_group_obs([obs_list[t] for obs_list in obs_lists])
             )
             merged_infos_list.append(
-                self._merge_env_group_infos([infos_list_i[t] for infos_list_i in info_lists])
+                self._merge_env_group_infos(
+                    [infos_list_i[t] for infos_list_i in info_lists]
+                )
             )
         merged_rewards = torch.cat(list(reward_lists), dim=0)
         merged_terms = torch.cat(list(term_lists), dim=0)
@@ -322,7 +328,9 @@ class EnvWorker(Worker):
             obs, infos = env.reset()
             obs_list.append(obs)
             infos_list.append(infos)
-        return self._merge_env_group_obs(obs_list), self._merge_env_group_infos(infos_list)
+        return self._merge_env_group_obs(obs_list), self._merge_env_group_infos(
+            infos_list
+        )
 
     def _setup_env_and_wrappers(self, env_cls, env_cfg, num_envs_per_stage: int):
         env_list = []
@@ -337,7 +345,9 @@ class EnvWorker(Worker):
                     cfg=env_cfg,
                     num_envs=shard_num_envs,
                     seed_offset=seed_base * len(split_sizes) + sub_id,
-                    total_num_processes=self._world_size * self.stage_num * len(split_sizes),
+                    total_num_processes=self._world_size
+                    * self.stage_num
+                    * len(split_sizes),
                     worker_info=self.worker_info,
                 )
                 if env_cfg.video_cfg.save_video:
@@ -355,7 +365,9 @@ class EnvWorker(Worker):
                         export_format=getattr(
                             env_cfg.data_collection, "export_format", "pickle"
                         ),
-                        robot_type=getattr(env_cfg.data_collection, "robot_type", "panda"),
+                        robot_type=getattr(
+                            env_cfg.data_collection, "robot_type", "panda"
+                        ),
                         fps=getattr(env_cfg.data_collection, "fps", 10),
                         only_success=getattr(
                             env_cfg.data_collection, "only_success", False
@@ -525,10 +537,16 @@ class EnvWorker(Worker):
         env_info = {}
 
         env_group = self.get_train_envs(stage_id)
-        obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = (
-            await self._call_env_chunk_step(
-                env_group, chunk_actions, self.cfg.env.train,
-            )
+        (
+            obs_list,
+            chunk_rewards,
+            chunk_terminations,
+            chunk_truncations,
+            infos_list,
+        ) = await self._call_env_chunk_step(
+            env_group,
+            chunk_actions,
+            self.cfg.env.train,
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None
@@ -598,10 +616,16 @@ class EnvWorker(Worker):
         env_info = {}
 
         env_group = self.get_eval_envs(stage_id)
-        obs_list, _, chunk_terminations, chunk_truncations, infos_list = (
-            await self._call_env_chunk_step(
-                env_group, chunk_actions, self.cfg.env.eval,
-            )
+        (
+            obs_list,
+            _,
+            chunk_terminations,
+            chunk_truncations,
+            infos_list,
+        ) = await self._call_env_chunk_step(
+            env_group,
+            chunk_actions,
+            self.cfg.env.eval,
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None

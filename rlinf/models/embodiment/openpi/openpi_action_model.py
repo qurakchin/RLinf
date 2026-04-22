@@ -32,8 +32,10 @@ from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.utils.logging import get_logger
 from rlinf.utils.nested_dict_process import copy_dict_tensor
 
+
 def _to_numpy(x):
     return np.asarray(x.detach().cpu()) if torch.is_tensor(x) else x
+
 
 @dataclass(frozen=True)
 class OpenPi0Config(Pi0Config):
