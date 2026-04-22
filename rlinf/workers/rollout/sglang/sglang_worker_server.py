@@ -17,7 +17,7 @@ import time
 from typing import Literal, Optional
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from omegaconf import DictConfig
 
@@ -36,6 +36,17 @@ except ImportError:
     TemplateManager = None  # type: ignore[misc, assignment]
 
 _LEGACY_OPENAI = OpenAIServingChat is None
+
+
+def _patch_chat_body_assistant_content(body: object) -> None:
+    """LiteLLM/OpenAI clients may omit `content` when null; older SGLang (e.g. 0.4.x)
+    ChatCompletionMessageGenericParam requires the key (value may be null). 0.5.2+
+    uses Field(default=None); this patch is harmless there."""
+    msgs = body.get("messages")
+    for m in msgs:
+        if isinstance(m, dict) and m.get("role") == "assistant" and "content" not in m:
+            m["content"] = None
+
 
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
@@ -67,7 +78,10 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         app = FastAPI(title="SGLangWorker-HTTP", version="1.0.0")
 
         @app.post("/v1/chat/completions")
-        async def handle_chat_completion(request: ChatCompletionRequest):
+        async def handle_chat_completion(raw_request: Request):
+            body = await raw_request.json()
+            _patch_chat_body_assistant_content(body)
+            request = ChatCompletionRequest.model_validate(body)
             return await self._handle_chat_completion(request)
 
         @app.get("/health")
@@ -93,7 +107,9 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
             )
         )
 
-    def _init_openai_serving(self):
+    def _init_openai_serving(self) -> None:
+        if _LEGACY_OPENAI:
+            return
 
         tokenizer_manager = self._engine.tokenizer_manager
         template_manager = TemplateManager()
