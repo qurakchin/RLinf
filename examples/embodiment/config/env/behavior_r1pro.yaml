@@ -2,7 +2,7 @@ env_type: behavior
 total_num_envs: null
 auto_reset: False
 ignore_terminations: False
-use_rel_reward: True
+use_rel_reward: False
 seed: 0
 group_size: 1
 use_fixed_reset_state_ids: False
@@ -111,26 +111,44 @@ omni_config:
   task:
     type: BehaviorTask
     activity_name: turning_on_radio
+    # Selects the BDDL problem definition for activity_name. A definition changes
+    # the task semantics, such as required objects, initial predicates, and goal
+    # predicates. For example, this points to problem0.bddl for turning_on_radio.
     activity_definition_id: 0
-    # activity_instance_id is only used when online object sampling is False.
+    # Selects cached initial states under the chosen definition. An instance
+    # changes concrete object states and robot poses, not the BDDL goal itself.
+    # It can be a single id (e.g. 242), a comma/range string, or a YAML list.
+    # In official challenge eval.py, public eval ids 0..19 are indices into
+    # metadata/test_instances.csv; here use the real ids from that CSV, because
+    # RLinf matches cached filenames directly.
     activity_instance_id: 0
     predefined_problem: null
-    # activity_instance_dir should point to a directory of cached task instance JSON files.
-    # RLinf scans filenames directly and supports official *_template.json and
-    # *_template-tro_state.json instances.
-    # Use rlinf/envs/behavior/instance_generator.py to generate compatible files.
-    # If set and instance_resample_mode is disabled, RLinf loads activity_instance_id from this directory.
-    # This directory must match scene.scene_model.
+    # Directory containing cached instance JSON files for this activity and
+    # scene. Challenge-style paths look like:
+    #   .../2025-challenge-task-instances/scenes/<scene_model>/json/
+    #   <scene_model>_task_<activity_name>_instances/
+    # RLinf scans filenames such as:
+    #   <scene>_task_<activity>_<definition_id>_<instance_id>_template.json
+    #   <scene>_task_<activity>_<definition_id>_<instance_id>_template-tro_state.json
+    # Leave null to use OmniGibson's default cached scene selected by
+    # activity_instance_id, without RLinf reset-time instance loading.
     activity_instance_dir: null
-    # Cached instance file format: template | tro_state.
-    # template reloads the full cached template; tro_state applies task-relevant object states and,
-    # when present, cached robot poses. Official tro_state files without robot_poses are supported;
-    # RLinf clears stale robot_poses metadata in that case so reset falls back to the default pose.
+    # Cached file format when activity_instance_dir is set:
+    # - template: reload the full cached scene template.
+    # - tro_state: apply task-relevant object states in-place and, when present,
+    #   cached robot poses. Official tro_state files without robot_poses are
+    #   supported; RLinf clears stale robot_poses metadata in that case.
     instance_file_format: tro_state
-    # Reset-time instance resampling mode: disabled | offline | online.
-    # offline: sample cached instances from activity_instance_dir before each reset.
-    # template files are reloaded as full scene templates; tro_state files are applied in-place.
-    # online: use BDDL online object sampling during reset.
+    # Reset-time instance policy:
+    # - disabled: do not resample. Use exactly one activity_instance_id. If
+    #   activity_instance_dir is set, RLinf loads that cached file each reset;
+    #   otherwise OmniGibson loads its default cached scene for the id.
+    # - offline: before each reset, sample cached files from activity_instance_dir.
+    #   If activity_instance_id is a list/range, sample only from that subset;
+    #   otherwise sample from all matching files in the directory.
+    # - online: use BDDL online object sampling at reset. Requires
+    #   activity_instance_dir: null, online_object_sampling: True, and
+    #   use_presampled_robot_pose: False.
     instance_resample_mode: disabled
     online_object_sampling: False
     debug_object_sampling: null

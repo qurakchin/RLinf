@@ -18,7 +18,7 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from rlinf.envs.behavior.utils import sync_robot_after_pose_override
 
@@ -242,7 +242,7 @@ class ActivityInstanceLoader:
         self,
         omni_cfg: DictConfig,
         activity_name: str,
-        activity_instance_id: int,
+        activity_instance_id: int | None,
         instance_resample_mode: str,
         activity_instances: tuple[ActivityInstanceFile, ...],
     ):
@@ -270,6 +270,14 @@ class ActivityInstanceLoader:
             omni_cfg, "task.activity_definition_id"
         )
         activity_instance_id = OmegaConf.select(omni_cfg, "task.activity_instance_id")
+        requested_instance_ids = None
+        if isinstance(activity_instance_id, ListConfig):
+            activity_instance_id = OmegaConf.to_container(activity_instance_id)
+        if isinstance(activity_instance_id, (list, tuple)):
+            requested_instance_ids = list(activity_instance_id)
+            if not requested_instance_ids:
+                raise ValueError("task.activity_instance_id list must not be empty.")
+            activity_instance_id = requested_instance_ids[0]
         activity_instance_dir = OmegaConf.select(omni_cfg, "task.activity_instance_dir")
         instance_resample_mode = OmegaConf.select(
             omni_cfg, "task.instance_resample_mode"
@@ -321,6 +329,12 @@ class ActivityInstanceLoader:
                     "task.instance_resample_mode='online' requires "
                     "task.use_presampled_robot_pose to be False."
                 )
+            OmegaConf.update(
+                omni_cfg,
+                "task.activity_instance_id",
+                activity_instance_id,
+                merge=False,
+            )
             return cls(
                 omni_cfg=omni_cfg,
                 activity_name=activity_name,
@@ -335,6 +349,12 @@ class ActivityInstanceLoader:
                     "task.activity_instance_dir must be set when "
                     "task.instance_resample_mode is 'offline'."
                 )
+            OmegaConf.update(
+                omni_cfg,
+                "task.activity_instance_id",
+                activity_instance_id,
+                merge=False,
+            )
             return cls(
                 omni_cfg=omni_cfg,
                 activity_name=activity_name,
@@ -354,7 +374,7 @@ class ActivityInstanceLoader:
                 "'tro_state' when task.activity_instance_dir is set."
             )
 
-        activity_instances = tuple(
+        discovered_activity_instances = tuple(
             discover_activity_instance_files(
                 activity_instance_dir=activity_instance_dir,
                 activity_name=activity_name,
@@ -363,12 +383,35 @@ class ActivityInstanceLoader:
             )
         )
         if instance_resample_mode == "disabled":
-            instance_ids = {entry.instance_id for entry in activity_instances}
+            if requested_instance_ids is not None:
+                raise ValueError(
+                    "task.instance_resample_mode='disabled' requires exactly one "
+                    "task.activity_instance_id."
+                )
+            instance_ids = {entry.instance_id for entry in discovered_activity_instances}
             if activity_instance_id not in instance_ids:
                 raise ValueError(
                     f"task.activity_instance_id={activity_instance_id} is not present in "
                     f"task.activity_instance_dir={activity_instance_dir}."
                 )
+            activity_instances = discovered_activity_instances
+        elif requested_instance_ids is not None:
+            by_id = {entry.instance_id: entry for entry in discovered_activity_instances}
+            activity_instances = tuple(by_id[i] for i in requested_instance_ids)
+        else:
+            activity_instances = discovered_activity_instances
+
+        # Challenge tro_state instances are applied after construction; bootstrap
+        # OmniGibson from the complete seed template first.
+        bootstrap_activity_instance_id = (
+            0 if instance_file_format == "tro_state" else activity_instance_id
+        )
+        OmegaConf.update(
+            omni_cfg,
+            "task.activity_instance_id",
+            bootstrap_activity_instance_id,
+            merge=False,
+        )
 
         return cls(
             omni_cfg=omni_cfg,
