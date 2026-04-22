@@ -436,8 +436,7 @@ class AgentLightningRolloutWorker(Worker):
                 ]
 
                 completed_batch = await self.store.wait_for_rollouts(
-                    rollout_ids=rollout_ids_to_query,
-                    timeout=_ROLLOUT_WAIT_POLL_TIMEOUT_S,
+                    rollout_ids=rollout_ids_to_query, timeout=0.1
                 )
 
                 for rollout in completed_batch:
@@ -487,8 +486,7 @@ class AgentLightningRolloutWorker(Worker):
                 ]
 
                 completed_batch = await self.store.wait_for_rollouts(
-                    rollout_ids=rollout_ids_to_query,
-                    timeout=_ROLLOUT_WAIT_POLL_TIMEOUT_S,
+                    rollout_ids=rollout_ids_to_query, timeout=0.1
                 )
 
                 for rollout in completed_batch:
