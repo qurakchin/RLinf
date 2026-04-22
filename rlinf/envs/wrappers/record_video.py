@@ -377,9 +377,8 @@ class RecordVideo(gym.Wrapper):
         self.add_new_frames(obs, info, reward, terminations)
         return obs, reward, terminated, truncated, info
 
-    def chunk_step(self, *args, **kwargs):
-        """Step a chunk and record all frames from the chunk."""
-        result = self.env.chunk_step(*args, **kwargs)
+    def record_video_in_result(self, result) -> None:
+        """Record video frames from a chunk_step / async_chunk_step result tuple."""
         if isinstance(result, tuple) and len(result) >= 5:
             obs_list, rewards, terminations, _truncations, infos_list = result[:5]
 
@@ -388,7 +387,7 @@ class RecordVideo(gym.Wrapper):
             if isinstance(obs_list, (list, tuple)):
                 valid_indices = [i for i, obs in enumerate(obs_list) if obs is not None]
                 if len(valid_indices) == 0:
-                    return result
+                    return
                 if len(valid_indices) != len(obs_list):
                     obs_list = [obs_list[i] for i in valid_indices]
                     if isinstance(infos_list, (list, tuple)):
@@ -433,6 +432,17 @@ class RecordVideo(gym.Wrapper):
                 self.add_new_frames(reset_obs, None)
             else:
                 self.add_new_frames(obs_list, infos_list, rewards, terminations)
+
+    def chunk_step(self, *args, **kwargs):
+        """Step a chunk and record all frames from the chunk."""
+        result = self.env.chunk_step(*args, **kwargs)
+        self.record_video_in_result(result)
+        return result
+
+    async def async_chunk_step(self, *args, **kwargs):
+        """Async-step a chunk and record all frames from the chunk."""
+        result = await self.env.async_chunk_step(*args, **kwargs)
+        self.record_video_in_result(result)
         return result
 
     def flush_video(self, video_sub_dir: Optional[str] = None):
