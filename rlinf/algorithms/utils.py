@@ -16,6 +16,8 @@ from typing import Optional
 
 import torch
 
+from rlinf.utils.utils import get_trainable_action_loss_mask
+
 
 def huber_loss(error: torch.Tensor, delta: float) -> torch.Tensor:
     return torch.where(
@@ -342,6 +344,15 @@ def preprocess_loss_inputs(
             ).sum(dim=[1, 2])
         if versions is not None:
             versions = versions.reshape(bsz, -1, single_action_dim)[:, 0, 0]
+
+    loss_mask = get_trainable_action_loss_mask(
+        loss_mask,
+        logprobs,
+        trainable_action_groups=kwargs.get("trainable_action_groups", None),
+        model_type=kwargs.get("model_type", None),
+        env_type=kwargs.get("env_type", None),
+        action_dim=single_action_dim,
+    )
 
     target_shape = logprobs.shape
     advantages = expand_to_target_dim(advantages, target_shape)

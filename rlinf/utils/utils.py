@@ -29,6 +29,15 @@ from torch.optim import Optimizer
 
 from rlinf.scheduler import Worker
 
+R1PRO_BEHAVIOR_ACTION_SLICES = {
+    "base": slice(0, 3),
+    "trunk": slice(3, 7),
+    "arm_left": slice(7, 14),
+    "arm_right": slice(14, 21),
+    "gripper_left": slice(21, 22),
+    "gripper_right": slice(22, 23),
+}
+
 
 def clear_memory(sync=True):
     if sync:
@@ -173,6 +182,55 @@ def masked_mean_ratio(
 ):
     # for embodied tasks
     return (values / loss_mask_ratio * mask).mean()
+
+
+def get_trainable_action_loss_mask(
+    loss_mask,
+    target,
+    *,
+    trainable_action_groups=None,
+    model_type=None,
+    env_type=None,
+    action_dim=7,
+):
+    if not trainable_action_groups:
+        return loss_mask
+
+    from rlinf.config import SupportedModel
+
+    if SupportedModel(model_type) != SupportedModel.OPENPI:
+        raise ValueError(
+            "trainable_action_groups is currently only supported for OpenPI models."
+        )
+    if env_type != "behavior" or action_dim != 23:
+        raise ValueError(
+            "trainable_action_groups is currently only supported for "
+            "the BEHAVIOR R1Pro 23D action layout."
+        )
+
+    aliases = {
+        "all": tuple(R1PRO_BEHAVIOR_ACTION_SLICES),
+        "mobile": ("base", "trunk"),
+        "mobile_base": ("base", "trunk"),
+        "arms": ("arm_left", "arm_right", "gripper_left", "gripper_right"),
+        "arms_only": ("arm_left", "arm_right"),
+        "grippers": ("gripper_left", "gripper_right"),
+    }
+    action_dim_mask = torch.zeros(target.shape[-1], dtype=torch.bool, device=target.device)
+    for group in trainable_action_groups:
+        group = group.strip().lower().replace("-", "_")
+        for name in aliases.get(group, (group,)):
+            if name not in R1PRO_BEHAVIOR_ACTION_SLICES:
+                raise ValueError(f"Unknown trainable_action_group: {group}")
+            action_dim_mask[R1PRO_BEHAVIOR_ACTION_SLICES[name]] = True
+
+    action_dim_mask = action_dim_mask.view(*([1] * (target.dim() - 1)), -1).expand_as(target)
+    if loss_mask is None:
+        return action_dim_mask
+
+    while loss_mask.dim() < target.dim():
+        loss_mask = loss_mask.unsqueeze(-1)
+    return loss_mask.to(dtype=torch.bool).expand_as(target) & action_dim_mask
 
 
 def get_loss_agg_func(
