@@ -382,15 +382,6 @@ Using behavior as an example:
   RLinf training / evaluation loop.
 - ``omni_config.env.flatten_obs_space: False`` and ``flatten_action_space: False``:
   Keep structured observation / action spaces instead of flattening to 1D.
-- ``omni_config.env.skip_intermediate_obs_in_chunk``:
-  RLinf executes chunked BEHAVIOR actions by stepping several low-level robot
-  actions before returning control to the policy. When this flag is ``True``,
-  RLinf skips collecting intermediate observations inside that chunk and only
-  keeps the observations the policy actually consumes. This usually gives a
-  large environment-speed improvement because fewer camera observations are
-  wrapped, transferred, and recorded. One visible consequence is that saved
-  videos no longer include every low-level robot action frame; instead they only
-  show the frames the robot actually observes at chunk boundaries.
 - ``omni_config.macro.use_gpu_dynamics: False``:
   Disables GPU dynamics and usually improves performance; enable it only when
   advanced features like particles / fluids are required.
@@ -404,6 +395,15 @@ Using behavior as an example:
 - ``omni_config.macro.use_numpy_controller_backend: True``:
   Uses the numpy controller backend, which is usually faster in single-process
   or moderate-parallel settings.
+- ``skip_intermediate_obs_in_chunk``:
+  RLinf executes chunked BEHAVIOR actions by stepping several low-level robot
+  actions before returning control to the policy. When this flag is ``True``,
+  RLinf skips collecting intermediate observations inside that chunk and only
+  keeps the observations the policy actually consumes. This usually gives a
+  large environment-speed improvement because fewer camera observations are
+  wrapped, transferred, and recorded. One visible consequence is that saved
+  videos no longer include every low-level robot action frame; instead they only
+  show the frames the robot actually observes at chunk boundaries.
 
 --------------
 
