@@ -9,6 +9,7 @@ runner:
 
 algorithm:
   advantage_mode: trajectory
+  loss_scales: ["group_level"]
 
 actor:
   pack_traj: True
