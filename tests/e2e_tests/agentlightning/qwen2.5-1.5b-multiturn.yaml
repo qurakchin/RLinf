@@ -150,8 +150,8 @@ data:
   shuffle: True
   validation_shuffle: False
   seed: 42
-  train_data_paths: ["/workspace/dataset/calc_x/train.parquet"]
-  val_data_paths: ["/workspace/dataset/calc_x/test.parquet"]
+  train_data_paths: ["/workspace/dataset/calc/train.parquet"]
+  val_data_paths: ["/workspace/dataset/calc/test.parquet"]
 
 actor:
   group_name: "ActorGroup"
