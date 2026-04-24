@@ -101,7 +101,8 @@ class BehaviorProcess:
     def step_env(self, actions, need_obs: bool):
         if self.step_supports_get_obs and self.step_supports_render:
             raw_obs, step_rewards, terminations, truncations, infos = self.env.step(actions, get_obs=need_obs, render=need_obs)
-        raw_obs, step_rewards, terminations, truncations, infos = self.env.step(actions)
+        else:
+            raw_obs, step_rewards, terminations, truncations, infos = self.env.step(actions)
         if not need_obs:
             # Normalize intermediate-step observations to None so downstream
             # code can skip parsing cleanly.
@@ -236,7 +237,6 @@ class BehaviorEnv(gym.Env):
         self.worker_info = worker_info
         self.record_metrics = record_metrics
         self._is_start = True
-        self.use_thread_worker = self.cfg.get("use_thread_worker", False)
         self.num_env_subprocess = int(self.cfg.get("num_env_subprocess", 1))
         self.num_env_shard = self._split_num_envs(
             self.num_envs, self.num_env_subprocess
@@ -254,11 +254,6 @@ class BehaviorEnv(gym.Env):
     def _split_num_envs(self, num_envs: int, num_processes: int) -> int:
         """Split ``num_envs`` across ``num_processes`` shards as evenly as possible."""
         assert num_processes > 0, f"num_processes({num_processes}) must be positive"
-        if self.use_thread_worker and num_processes > 1:
-            self.logger.warning(
-                f"assign num_processes({num_processes}) to 1 when use_thread_worker is True"
-            )
-            num_processes = 1
         assert num_envs % num_processes == 0, (
             f"num_envs({num_envs}) must be divisible by num_processes({num_processes})"
         )
@@ -299,12 +294,19 @@ class BehaviorEnv(gym.Env):
         activity_name = activity_names[0]
         self._load_tasks_cfg(activity_name)
 
-    def _call_all_subprocs(self, cmd: str, payload_shards: list | None = None):
-        if payload_shards is None:
+    def call_subprocs_shards(self, cmd: str, payloads: list | None = None):
+        """Send the same command to every shard; recv in parallel to avoid pipe backpressure."""
+        if payloads is None:
             payload_shards = [None] * len(self.env_proxys)
-        assert len(payload_shards) == len(self.env_proxys), (
-            f"payload_shards length {len(payload_shards)} != num subprocesses {len(self.env_proxys)}"
-        )
+        else:
+            assert len(payloads) == self.num_envs, (
+                f"payload_shards length {len(payload_shards)} != num subprocesses {self.num_envs}"
+            )
+            s = self.num_env_shard
+            payload_shards = [
+                payloads[i * s : (i + 1) * s]
+                for i in range(self.num_env_subprocess)
+            ]
         for env_proxy, payload_shard in zip(self.env_proxys, payload_shards):
             env_proxy.call_subproc(cmd, payload_shard)
 
@@ -318,15 +320,8 @@ class BehaviorEnv(gym.Env):
             all_msgs = [env_proxy.wait_for_subproc(cmd) for env_proxy in self.env_proxys]
         return [BehaviorProcessProxy.msg_postprocess(msg, cmd) for msg in all_msgs]
 
-    def env_slice_actions(self, actions):
-        s = self.num_env_shard
-        return [
-            actions[i * s : (i + 1) * s]
-            for i in range(self.num_env_subprocess)
-        ]
-
     def env_reset(self):
-        shard_results = self._call_all_subprocs("reset")
+        shard_results = self.call_subprocs_shards("reset")
         all_raw_obs, all_infos = [], []
         for raw_obs, infos in shard_results:
             all_raw_obs.extend(raw_obs)
@@ -383,8 +378,7 @@ class BehaviorEnv(gym.Env):
         )
 
     def env_chunk_step(self, chunk_actions):
-        chunk_actions_shards = self.env_slice_actions(chunk_actions)
-        shard_results = self._call_all_subprocs("chunk_step", chunk_actions_shards)
+        shard_results = self.call_subprocs_shards("chunk_step", chunk_actions)
         return self.merge_chunk_results(shard_results, chunk_actions.shape[1])
 
     def env_close(self):
