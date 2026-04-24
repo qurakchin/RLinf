@@ -13,12 +13,12 @@
 # limitations under the License.
 
 import gc
-import asyncio
 import inspect
 import json
 import os
 import traceback
 from multiprocessing import get_context
+from threading import Thread
 
 import gymnasium as gym
 import torch
@@ -37,13 +37,32 @@ from rlinf.utils.logging import get_logger
 __all__ = ["BehaviorEnv"]
 
 
-def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
-    env = None
-    try:
+class BehaviorProcess:
+    @staticmethod
+    def process_loop(cfg: DictConfig, conn, num_envs: int):
+        process = None
+        try:
+            process = BehaviorProcess(cfg, conn, num_envs)
+            process.loop()
+        except Exception:
+            if process is not None and process.conn is not None:
+                process.conn.send({"traceback": traceback.format_exc()})
+        finally:
+            if process is not None:
+                if process.env is not None:
+                    try:
+                        process.env.close()
+                    except Exception:
+                        pass
+                if process.conn is not None:
+                    process.conn.close()
+
+    def __init__(self, cfg: DictConfig, conn, num_envs: int):
+        self.conn = conn
         from omnigibson.envs import VectorEnvironment
 
         omni_cfg = setup_omni_cfg(cfg)
-        instance_loader = ActivityInstanceLoader.from_omni_cfg(omni_cfg)
+        self.instance_loader = ActivityInstanceLoader.from_omni_cfg(omni_cfg)
 
         # create env and apply env wrapper if enabled
         omni_cfg_dict = OmegaConf.to_container(
@@ -51,9 +70,9 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
             resolve=True,
             throw_on_missing=True,
         )
-        env = VectorEnvironment(num_envs, omni_cfg_dict)
+        self.env = VectorEnvironment(num_envs, omni_cfg_dict)
         wrapper_name = OmegaConf.select(omni_cfg, "env.env_wrapper")
-        env = apply_env_wrapper(env, wrapper_name)
+        self.env = apply_env_wrapper(self.env, wrapper_name)
         apply_runtime_renderer_settings()
 
         # Isaac Sim's `omni.kit.app` calls ``gc.disable()`` at startup.
@@ -62,104 +81,139 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
         # enable cyclic GC here so that we do not encounter OOMs in long runs.
         gc.enable()
 
-        step_signature = inspect.signature(env.step)
+        step_signature = inspect.signature(self.env.step)
         step_params = step_signature.parameters.values()
         step_supports_kwargs = any(
             param.kind == inspect.Parameter.VAR_KEYWORD for param in step_params
         )
-        step_supports_get_obs = (
+        self.step_supports_get_obs = (
             step_supports_kwargs or "get_obs" in step_signature.parameters
         )
-        step_supports_render = (
+        self.step_supports_render = (
             step_supports_kwargs or "render" in step_signature.parameters
         )
-        skip_intermediate_obs_in_chunk = bool(
+        self.skip_intermediate_obs_in_chunk = bool(
             OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
 
-        def _step_env(actions, need_obs: bool):
-            if step_supports_get_obs and step_supports_render:
-                return env.step(actions, get_obs=need_obs, render=need_obs)
-            return env.step(actions)
+        self.conn.send({"result": self.instance_loader.activity_name})
 
-        conn.send(
-            {
-                "type": "ready",
-                "activity_name": instance_loader.activity_name,
-            }
-        )
+    def step_env(self, actions, need_obs: bool):
+        if self.step_supports_get_obs and self.step_supports_render:
+            raw_obs, step_rewards, terminations, truncations, infos = self.env.step(actions, get_obs=need_obs, render=need_obs)
+        raw_obs, step_rewards, terminations, truncations, infos = self.env.step(actions)
+        if not need_obs:
+            # Normalize intermediate-step observations to None so downstream
+            # code can skip parsing cleanly.
+            raw_obs = None
+        return raw_obs, to_tensor(step_rewards), to_tensor(terminations), to_tensor(truncations), infos
 
+    def reset(self, payload):
+        self.instance_loader.prepare_reset(self.env)
+        raw_obs, infos = self.env.reset()
+        self.conn.send({"result": (raw_obs, infos)})
+
+    def chunk_step(self, chunk_actions):
+        chunk_size = chunk_actions.shape[1]
+        results = []
+        for i in range(chunk_size):
+            actions = chunk_actions[:, i]
+            is_last = i == chunk_size - 1
+            need_obs = not self.skip_intermediate_obs_in_chunk or is_last
+            results.append(self.step_env(actions, need_obs=need_obs))
+        results = tuple(zip(*results))
+        self.conn.send({"result": results})
+
+    def loop(self):
+        cmd_handlers = {
+            "reset": self.reset,
+            "chunk_step": self.chunk_step,
+        }
         while True:
-            cmd, payload = conn.recv()
-
-            if cmd == "reset":
-                instance_loader.prepare_reset(env)
-                raw_obs, infos = env.reset()
-                conn.send({"type": "ok", "result": (raw_obs, infos)})
-
-            elif cmd == "step":
-                result = env.step(payload)
-                conn.send({"type": "ok", "result": result})
-
-            elif cmd == "chunk_step":
-                chunk_actions = payload["chunk_actions"]
-                chunk_size = chunk_actions.shape[1]
-
-                raw_obs_list = []
-                chunk_rewards = []
-                raw_chunk_terminations = []
-                raw_chunk_truncations = []
-                infos_list = []
-
-                for i in range(chunk_size):
-                    actions = chunk_actions[:, i]
-                    is_last = i == chunk_size - 1
-                    need_obs = not skip_intermediate_obs_in_chunk or is_last
-                    raw_obs, step_rewards, terminations, truncations, infos = _step_env(
-                        actions, need_obs=need_obs
-                    )
-                    if not need_obs:
-                        # Normalize intermediate-step observations to None so downstream
-                        # code can skip parsing cleanly.
-                        raw_obs = None
-
-                    raw_obs_list.append(raw_obs)
-                    chunk_rewards.append(to_tensor(step_rewards))
-                    raw_chunk_terminations.append(to_tensor(terminations))
-                    raw_chunk_truncations.append(to_tensor(truncations))
-                    infos_list.append(infos)
-
-                conn.send(
-                    {
-                        "type": "ok",
-                        "result": (
-                            raw_obs_list,
-                            chunk_rewards,
-                            raw_chunk_terminations,
-                            raw_chunk_truncations,
-                            infos_list,
-                        ),
-                    }
-                )
-
+            cmd, payload = self.conn.recv()
+            if cmd in cmd_handlers:
+                cmd_handlers[cmd](payload)
             elif cmd == "close":
-                env.close()
-                conn.send({"type": "ok", "result": None})
+                self.env.close()
+                self.env = None
+                self.conn.send({"result": None})
+                self.conn.close()
+                self.conn = None
                 break
             else:
                 raise NotImplementedError(f"Unknown command: {cmd}")
 
-    except Exception:
-        conn.send({"type": "error", "traceback": traceback.format_exc()})
 
-    finally:
-        if env is not None:
-            try:
-                env.close()
-            except Exception:
-                pass
-        conn.close()
+class ThreadWithResult(Thread):
+    def __init__(self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None):
+        super().__init__(group, target, name, args, kwargs, daemon=daemon)
+        self.result = None
+        self.start()
 
+    def run(self):
+        if self._target:
+            self.result = self._target(*self._args, **self._kwargs)
+
+    def join(self):
+        super().join()
+        return self.result
+
+class BehaviorProcessProxy:
+    def __init__(self, cfg: DictConfig, num_env_shard: int):
+        spawn_ctx = get_context("spawn")
+        self.parent_conn, child_conn = spawn_ctx.Pipe()
+        self.env_process = spawn_ctx.Process(
+            target=BehaviorProcess.process_loop,
+            args=(
+                cfg,
+                child_conn,
+                num_env_shard,
+            ),
+            daemon=True,
+        )
+        self.env_process.start()
+        child_conn.close()
+        self.last_cmd = 'initialize'
+
+    def wait_ready_msg(self):
+        msg = self.wait_for_subproc("initialize")
+        return BehaviorProcessProxy.msg_postprocess(msg, "initialize")
+
+    def call_subproc(self, cmd: str, payload=None):
+        assert self.last_cmd is None, f"last cmd({self.last_cmd}) not finished before calling new cmd({cmd})"
+        self.parent_conn.send((cmd, payload))
+        self.last_cmd = cmd
+
+    def wait_for_subproc_threaded(self, cmd: str):
+        assert self.last_cmd == cmd, f"last cmd({self.last_cmd}) called not equal to the cmd to wait for({cmd})"
+        self.last_cmd = None
+        return ThreadWithResult(target=self.parent_conn.recv, daemon=True)
+
+    def wait_for_subproc(self, cmd: str):
+        assert self.last_cmd == cmd, f"last cmd({self.last_cmd}) called not equal to the cmd to wait for({cmd})"
+        self.last_cmd = None
+        return self.parent_conn.recv()
+
+    @staticmethod
+    def msg_postprocess(msg: dict, cmd: str):
+        if msg.get("traceback", None) is not None:
+            raise RuntimeError(
+                f"Behavior subprocess env failed on command '{cmd}':\n{msg['traceback']}"
+            )
+        return msg["result"]
+
+    def wait_for_close(self):
+        assert self.last_cmd == "close", f"last cmd({self.last_cmd}) called but wait for close"
+        if self.env_process.is_alive():
+            self.env_process.join(timeout=2)
+            if self.env_process.is_alive():
+                self.env_process.terminate()
+        self.env_process = None
+        try:
+            self.parent_conn.close()
+            self.parent_conn = None
+        except Exception:
+            pass
 
 class BehaviorEnv(gym.Env):
     def __init__(
@@ -182,6 +236,11 @@ class BehaviorEnv(gym.Env):
         self.worker_info = worker_info
         self.record_metrics = record_metrics
         self._is_start = True
+        self.use_thread_worker = self.cfg.get("use_thread_worker", False)
+        self.num_env_subprocess = int(self.cfg.get("num_env_subprocess", 1))
+        self.num_env_shard = self._split_num_envs(
+            self.num_envs, self.num_env_subprocess
+        )
 
         self.logger = get_logger()
 
@@ -191,6 +250,19 @@ class BehaviorEnv(gym.Env):
         if self.record_metrics:
             self._init_metrics()
         self._init_env()
+
+    def _split_num_envs(self, num_envs: int, num_processes: int) -> int:
+        """Split ``num_envs`` across ``num_processes`` shards as evenly as possible."""
+        assert num_processes > 0, f"num_processes({num_processes}) must be positive"
+        if self.use_thread_worker and num_processes > 1:
+            self.logger.warning(
+                f"assign num_processes({num_processes}) to 1 when use_thread_worker is True"
+            )
+            num_processes = 1
+        assert num_envs % num_processes == 0, (
+            f"num_envs({num_envs}) must be divisible by num_processes({num_processes})"
+        )
+        return num_envs // num_processes
 
     def _load_tasks_cfg(self, activity_name: str):
         # Read task description
@@ -208,35 +280,118 @@ class BehaviorEnv(gym.Env):
         self.task_description = task_description_map[activity_name]
 
     def _init_env(self):
-        self._ctx = get_context("spawn")
-        self._parent_conn, child_conn = self._ctx.Pipe()
-        self._env_process = self._ctx.Process(
-            target=_behavior_env_worker,
-            args=(
+        self.env_proxys = [
+            BehaviorProcessProxy(
                 self.cfg,
-                child_conn,
-                self.num_envs,
-            ),
-            daemon=True,
+                self.num_env_shard,
+            )
+            for _ in range(self.num_env_subprocess)
+        ]
+        activity_names = [
+            env_proxy.wait_ready_msg()
+            for env_proxy in self.env_proxys
+        ]
+
+        if len(set(activity_names)) != 1:
+            raise RuntimeError(
+                f"Behavior env subprocesses reported different activity_name: {activity_names}"
+            )
+        activity_name = activity_names[0]
+        self._load_tasks_cfg(activity_name)
+
+    def _call_all_subprocs(self, cmd: str, payload_shards: list | None = None):
+        if payload_shards is None:
+            payload_shards = [None] * len(self.env_proxys)
+        assert len(payload_shards) == len(self.env_proxys), (
+            f"payload_shards length {len(payload_shards)} != num subprocesses {len(self.env_proxys)}"
         )
-        self._env_process.start()
-        child_conn.close()
+        for env_proxy, payload_shard in zip(self.env_proxys, payload_shards):
+            env_proxy.call_subproc(cmd, payload_shard)
 
-        msg = self._parent_conn.recv()
-        if msg.get("type") != "ready":
-            raise RuntimeError(
-                f"Failed to initialize behavior subprocess env: {msg.get('traceback', msg)}"
-            )
-        self._load_tasks_cfg(msg["activity_name"])
+        if self.num_env_subprocess > 1:
+            recv_threads = [
+                env_proxy.wait_for_subproc_threaded(cmd)
+                for env_proxy in self.env_proxys
+            ]
+            all_msgs = [thread.join() for thread in recv_threads]
+        else:
+            all_msgs = [env_proxy.wait_for_subproc(cmd) for env_proxy in self.env_proxys]
+        return [BehaviorProcessProxy.msg_postprocess(msg, cmd) for msg in all_msgs]
 
-    def _call_subproc(self, cmd: str, payload=None):
-        self._parent_conn.send((cmd, payload))
-        msg = self._parent_conn.recv()
-        if msg.get("type") == "error":
-            raise RuntimeError(
-                f"Behavior subprocess env failed on command '{cmd}':\n{msg['traceback']}"
-            )
-        return msg["result"]
+    def env_slice_actions(self, actions):
+        s = self.num_env_shard
+        return [
+            actions[i * s : (i + 1) * s]
+            for i in range(self.num_env_subprocess)
+        ]
+
+    def env_reset(self):
+        shard_results = self._call_all_subprocs("reset")
+        all_raw_obs, all_infos = [], []
+        for raw_obs, infos in shard_results:
+            all_raw_obs.extend(raw_obs)
+            all_infos.extend(infos)
+        return all_raw_obs, all_infos
+
+    def merge_chunk_results(self, shard_results: list, chunk_size: int):
+        def extend_per_env(dst: list, batch):
+            if isinstance(batch, (list, tuple)):
+                dst.extend(batch)
+            else:
+                dst.append(batch)
+
+        def cat_batch_dim(parts: list):
+            if not parts:
+                return parts
+            tensors = [p if torch.is_tensor(p) else torch.as_tensor(p) for p in parts]
+            return torch.cat(tensors, dim=0)
+
+        merged_obs_lists = []
+        merged_rewards = []
+        merged_terms = []
+        merged_trunc = []
+        merged_infos = []
+        for t in range(chunk_size):
+            obs_t = []
+            r_t = []
+            term_t = []
+            trunc_t = []
+            info_t = []
+            for (
+                raw_obs_list,
+                raw_rewards_list,
+                raw_terminations_list,
+                raw_truncations_list,
+                raw_infos_list,
+            ) in shard_results:
+                extend_per_env(obs_t, raw_obs_list[t])
+                r_t.append(raw_rewards_list[t])
+                term_t.append(raw_terminations_list[t])
+                trunc_t.append(raw_truncations_list[t])
+                extend_per_env(info_t, raw_infos_list[t])
+            merged_obs_lists.append(obs_t)
+            merged_rewards.append(cat_batch_dim(r_t))
+            merged_terms.append(cat_batch_dim(term_t))
+            merged_trunc.append(cat_batch_dim(trunc_t))
+            merged_infos.append(info_t)
+        return (
+            merged_obs_lists,
+            merged_rewards,
+            merged_terms,
+            merged_trunc,
+            merged_infos,
+        )
+
+    def env_chunk_step(self, chunk_actions):
+        chunk_actions_shards = self.env_slice_actions(chunk_actions)
+        shard_results = self._call_all_subprocs("chunk_step", chunk_actions_shards)
+        return self.merge_chunk_results(shard_results, chunk_actions.shape[1])
+
+    def env_close(self):
+        for env_proxy in self.env_proxys:
+            env_proxy.call_subproc("close")
+        for env_proxy in self.env_proxys:
+            env_proxy.wait_for_close()
 
     def _extract_obs_image(self, raw_obs):
         state = None
@@ -283,39 +438,17 @@ class BehaviorEnv(gym.Env):
         }
         return obs
 
-    def _calc_step_reward(self, terminations):
-        reward = self.reward_coef * terminations
+    def _calc_step_reward(self, reward):
+        reward = self.reward_coef * reward
         return reward
 
     def reset(self):
-        raw_obs, infos = self._call_subproc("reset")
+        raw_obs, infos = self.env_reset()
         obs = self._wrap_obs(raw_obs)
         rewards = torch.zeros(self.num_envs, dtype=bool)
         infos = self._record_metrics(rewards, infos)
         self._reset_metrics()
         return obs, infos
-
-    def step(
-        self, actions=None
-    ) -> tuple[dict, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
-        if isinstance(actions, torch.Tensor):
-            actions = actions.detach().cpu()
-        raw_obs, rewards, terminations, truncations, infos = self._call_subproc(
-            "step", actions
-        )
-        obs = self._wrap_obs(raw_obs)
-        rewards = self._calc_step_reward(rewards)
-        infos = self._record_metrics(rewards, infos)
-        if self.ignore_terminations:
-            terminations[:] = False
-
-        return (
-            obs,
-            to_tensor(rewards),
-            to_tensor(terminations),
-            to_tensor(truncations),
-            infos,
-        )
 
     def chunk_step(self, chunk_actions):
         # chunk_actions: [num_envs, chunk_step, action_dim]
@@ -327,20 +460,12 @@ class BehaviorEnv(gym.Env):
             raw_terminations_list,
             raw_truncations_list,
             raw_infos_list,
-        ) = self._call_subproc(
-            "chunk_step",
-            {
-                "chunk_actions": chunk_actions,
-            },
-        )
+        ) = self.env_chunk_step(chunk_actions)
 
-        chunk_size = len(raw_obs_list)
+        chunk_size = chunk_actions.shape[1]
         obs_list = []
         infos_list = []
-        scaled_rewards_list = [
-            self._calc_step_reward(i)
-            for i in raw_rewards_list
-        ]
+        scaled_rewards_list = [self._calc_step_reward(i) for i in raw_rewards_list]
         for i in range(chunk_size):
             infos = self._record_metrics(scaled_rewards_list[i], raw_infos_list[i])
             if self.ignore_terminations:
@@ -409,9 +534,6 @@ class BehaviorEnv(gym.Env):
             chunk_truncations,
             infos_list,
         )
-
-    async def async_chunk_step(self, chunk_actions):
-        return await asyncio.to_thread(self.chunk_step, chunk_actions)
 
     @property
     def device(self):
@@ -504,19 +626,4 @@ class BehaviorEnv(gym.Env):
         pass
 
     def close(self):
-        if not hasattr(self, "_parent_conn"):
-            return
-        try:
-            self._call_subproc("close")
-        except Exception:
-            pass
-        finally:
-            if self._env_process.is_alive():
-                self._env_process.join(timeout=2)
-                if self._env_process.is_alive():
-                    self._env_process.terminate()
-            try:
-                self._parent_conn.close()
-            except Exception:
-                pass
-
+        self.env_close()

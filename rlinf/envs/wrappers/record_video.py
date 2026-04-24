@@ -439,12 +439,6 @@ class RecordVideo(gym.Wrapper):
         self.record_video_in_result(result)
         return result
 
-    async def async_chunk_step(self, *args, **kwargs):
-        """Async-step a chunk and record all frames from the chunk."""
-        result = await self.env.async_chunk_step(*args, **kwargs)
-        self.record_video_in_result(result)
-        return result
-
     def flush_video(self, video_sub_dir: Optional[str] = None):
         """Write buffered frames to an MP4 file (async)."""
         self._flush_segment(video_sub_dir=video_sub_dir, finalize=True)

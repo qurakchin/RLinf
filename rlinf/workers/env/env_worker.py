@@ -144,8 +144,6 @@ class EnvWorker(Worker):
                 env_cfg=self.cfg.env.train,
                 num_envs_per_stage=self.train_num_envs_per_stage,
             )
-            if self._num_env_subprocess(self.cfg.env.train) > 1:
-                self._validate_async_chunk_step(self.env_list)
         if self.enable_eval:
             eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
             self.eval_env_list = self._setup_env_and_wrappers(
@@ -153,8 +151,6 @@ class EnvWorker(Worker):
                 env_cfg=self.cfg.env.eval,
                 num_envs_per_stage=self.eval_num_envs_per_stage,
             )
-            if self._num_env_subprocess(self.cfg.env.eval) > 1:
-                self._validate_async_chunk_step(self.eval_env_list)
 
         if not self.only_eval:
             self._init_env()
@@ -229,154 +225,42 @@ class EnvWorker(Worker):
         override_cfg["reward_image_key"] = env_cfg.main_image_key
         setattr(env_cfg, "override_cfg", OmegaConf.create(override_cfg))
 
-    def _validate_async_chunk_step(self, env_list):
-        for env in env_list:
-            if not hasattr(env, "async_chunk_step"):
-                raise AttributeError(
-                    "num_env_subprocess > 1 requires every env to support async_chunk_step"
-                )
-
-    def _num_env_subprocess(self, env_cfg: DictConfig) -> int:
-        return int(env_cfg.get("num_env_subprocess", 1))
-
-    def get_train_envs(self, stage_id: int) -> list:
-        n = self._num_env_subprocess(self.cfg.env.train)
-        return self.env_list[stage_id * n : (stage_id + 1) * n]
-
-    def get_eval_envs(self, stage_id: int) -> list:
-        n = self._num_env_subprocess(self.cfg.env.eval)
-        return self.eval_env_list[stage_id * n : (stage_id + 1) * n]
-
-    def _split_stage_env_sizes(
-        self, num_envs_per_stage: int, num_env_subprocess: int
-    ) -> list[int]:
-        assert num_env_subprocess > 0, (
-            f"num_env_subprocess({num_env_subprocess}) must be positive"
-        )
-        assert num_envs_per_stage % num_env_subprocess == 0, (
-            f"num_envs_per_stage({num_envs_per_stage}) must be divisible by "
-            f"num_env_subprocess({num_env_subprocess})"
-        )
-        shard_size = num_envs_per_stage // num_env_subprocess
-        return [shard_size] * num_env_subprocess
-
-    def _merge_env_group_obs(self, obs_list: list[dict[str, Any] | None]):
-        if not obs_list or obs_list[0] is None:
-            return None
-        merged_obs = {}
-        for key in obs_list[0]:
-            values = [obs[key] for obs in obs_list]
-            if torch.is_tensor(values[0]):
-                merged_obs[key] = torch.cat(values, dim=0)
-            elif isinstance(values[0], list):
-                merged_obs[key] = sum(values, [])
-            else:
-                merged_obs[key] = values
-        return merged_obs
-
-    def _merge_env_group_infos(self, infos_list: list[dict[str, Any]]):
-        if not infos_list:
-            return {}
-        merged_infos = {}
-        for key in infos_list[0]:
-            values = [infos[key] for infos in infos_list if key in infos]
-            if not values:
-                continue
-            first = values[0]
-            if torch.is_tensor(first):
-                merged_infos[key] = torch.cat(values, dim=0)
-            elif isinstance(first, dict):
-                merged_infos[key] = self._merge_env_group_infos(values)
-            elif isinstance(first, list):
-                merged_infos[key] = sum(values, [])
-            else:
-                merged_infos[key] = values[-1]
-        return merged_infos
-
-    def _merge_env_group_chunk_outputs(self, chunk_outputs: list[tuple]):
-        obs_lists, reward_lists, term_lists, trunc_lists, info_lists = zip(
-            *chunk_outputs
-        )
-        chunk_len = len(obs_lists[0])
-        merged_obs_list = []
-        merged_infos_list = []
-        for t in range(chunk_len):
-            merged_obs_list.append(
-                self._merge_env_group_obs([obs_list[t] for obs_list in obs_lists])
-            )
-            merged_infos_list.append(
-                self._merge_env_group_infos(
-                    [infos_list_i[t] for infos_list_i in info_lists]
-                )
-            )
-        merged_rewards = torch.cat(list(reward_lists), dim=0)
-        merged_terms = torch.cat(list(term_lists), dim=0)
-        merged_truncs = torch.cat(list(trunc_lists), dim=0)
-        return (
-            merged_obs_list,
-            merged_rewards,
-            merged_terms,
-            merged_truncs,
-            merged_infos_list,
-        )
-
-    def _reset_env_group(self, env_group):
-        obs_list = []
-        infos_list = []
-        for env in env_group:
-            env.is_start = True
-            obs, infos = env.reset()
-            obs_list.append(obs)
-            infos_list.append(infos)
-        return self._merge_env_group_obs(obs_list), self._merge_env_group_infos(
-            infos_list
-        )
-
     def _setup_env_and_wrappers(self, env_cls, env_cfg, num_envs_per_stage: int):
         env_list = []
-        split_sizes = self._split_stage_env_sizes(
-            num_envs_per_stage, self._num_env_subprocess(env_cfg)
-        )
 
         for stage_id in range(self.stage_num):
-            seed_base = self._rank * self.stage_num + stage_id
-            for sub_id, shard_num_envs in enumerate(split_sizes):
-                env = env_cls(
-                    cfg=env_cfg,
-                    num_envs=shard_num_envs,
-                    seed_offset=seed_base * len(split_sizes) + sub_id,
-                    total_num_processes=self._world_size
-                    * self.stage_num
-                    * len(split_sizes),
-                    worker_info=self.worker_info,
-                )
-                if env_cfg.video_cfg.save_video:
-                    env = RecordVideo(env, env_cfg.video_cfg)
-                if env_cfg.get("data_collection", None) and getattr(
-                    env_cfg.data_collection, "enabled", False
-                ):
-                    from rlinf.envs.wrappers import CollectEpisode
+            env = env_cls(
+                cfg=env_cfg,
+                num_envs=num_envs_per_stage,
+                seed_offset=self._rank * self.stage_num + stage_id,
+                total_num_processes=self._world_size * self.stage_num,
+                worker_info=self.worker_info,
+            )
+            if env_cfg.video_cfg.save_video:
+                env = RecordVideo(env, env_cfg.video_cfg)
+            if env_cfg.get("data_collection", None) and getattr(
+                env_cfg.data_collection, "enabled", False
+            ):
+                from rlinf.envs.wrappers import CollectEpisode
 
-                    env = CollectEpisode(
-                        env,
-                        save_dir=env_cfg.data_collection.save_dir,
-                        rank=self._rank,
-                        num_envs=shard_num_envs,
-                        export_format=getattr(
-                            env_cfg.data_collection, "export_format", "pickle"
-                        ),
-                        robot_type=getattr(
-                            env_cfg.data_collection, "robot_type", "panda"
-                        ),
-                        fps=getattr(env_cfg.data_collection, "fps", 10),
-                        only_success=getattr(
-                            env_cfg.data_collection, "only_success", False
-                        ),
-                        finalize_interval=getattr(
-                            env_cfg.data_collection, "finalize_interval", 100
-                        ),
-                    )
-                env_list.append(env)
+                env = CollectEpisode(
+                    env,
+                    save_dir=env_cfg.data_collection.save_dir,
+                    rank=self._rank,
+                    num_envs=num_envs_per_stage,
+                    export_format=getattr(
+                        env_cfg.data_collection, "export_format", "pickle"
+                    ),
+                    robot_type=getattr(env_cfg.data_collection, "robot_type", "panda"),
+                    fps=getattr(env_cfg.data_collection, "fps", 10),
+                    only_success=getattr(
+                        env_cfg.data_collection, "only_success", False
+                    ),
+                    finalize_interval=getattr(
+                        env_cfg.data_collection, "finalize_interval", 100
+                    ),
+                )
+            env_list.append(env)
         return env_list
 
     def _setup_dst_rank_map(self) -> dict[str, list[tuple[int, int]]]:
@@ -485,38 +369,12 @@ class EnvWorker(Worker):
 
     def _init_env(self):
         for i in range(self.stage_num):
-            env_group = self.get_train_envs(i)
             if self.cfg.env.train.auto_reset:
-                extracted_obs, _ = self._reset_env_group(env_group)
+                extracted_obs, _ = self.env_list[i].reset()
                 self.last_obs_list.append(extracted_obs)
                 self.last_intervened_info_list.append((None, None))
-            if self.enable_offload:
-                for env in env_group:
-                    if hasattr(env, "offload"):
-                        env.offload()
-
-    async def _call_env_chunk_step(self, env_group, chunk_actions, env_cfg):
-        n = self._num_env_subprocess(env_cfg)
-        split_sizes = self._split_stage_env_sizes(chunk_actions.shape[0], n)
-        if isinstance(chunk_actions, np.ndarray):
-            split_points = np.cumsum(split_sizes)[:-1]
-            chunk_action_splits = np.split(chunk_actions, split_points, axis=0)
-        else:
-            chunk_action_splits = torch.split(chunk_actions, split_sizes, dim=0)
-
-        if self._num_env_subprocess(env_cfg) > 1:
-            chunk_outputs = await asyncio.gather(
-                *[
-                    env.async_chunk_step(chunk_actions_i)
-                    for env, chunk_actions_i in zip(env_group, chunk_action_splits)
-                ]
-            )
-        else:
-            chunk_outputs = [
-                env.chunk_step(chunk_actions_i)
-                for env, chunk_actions_i in zip(env_group, chunk_action_splits)
-            ]
-        return self._merge_env_group_chunk_outputs(chunk_outputs)
+            if self.enable_offload and hasattr(self.env_list[i], "offload"):
+                self.env_list[i].offload()
 
     @Worker.timer("env_interact_step")
     async def env_interact_step(
@@ -536,17 +394,8 @@ class EnvWorker(Worker):
         )
         env_info = {}
 
-        env_group = self.get_train_envs(stage_id)
-        (
-            obs_list,
-            chunk_rewards,
-            chunk_terminations,
-            chunk_truncations,
-            infos_list,
-        ) = await self._call_env_chunk_step(
-            env_group,
-            chunk_actions,
-            self.cfg.env.train,
+        obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = (
+            self.env_list[stage_id].chunk_step(chunk_actions)
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None
@@ -617,17 +466,8 @@ class EnvWorker(Worker):
         )
         env_info = {}
 
-        env_group = self.get_eval_envs(stage_id)
-        (
-            obs_list,
-            _,
-            chunk_terminations,
-            chunk_truncations,
-            infos_list,
-        ) = await self._call_env_chunk_step(
-            env_group,
-            chunk_actions,
-            self.cfg.env.eval,
+        obs_list, _, chunk_terminations, chunk_truncations, infos_list = (
+            self.eval_env_list[stage_id].chunk_step(chunk_actions)
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None
@@ -852,19 +692,22 @@ class EnvWorker(Worker):
         return adjusted_rewards
 
     def finish_rollout(self, mode="train"):
+        # reset
         if mode == "train":
-            flush_video = self.cfg.env.train.video_cfg.save_video
-            for env in self.env_list:
-                if flush_video and isinstance(env, RecordVideo):
-                    env.flush_video()
-                env.update_reset_state_ids()
+            for i in range(self.stage_num):
+                if self.cfg.env.train.video_cfg.save_video and isinstance(
+                    self.env_list[i], RecordVideo
+                ):
+                    self.env_list[i].flush_video()
+                self.env_list[i].update_reset_state_ids()
         elif mode == "eval":
-            flush_video = self.cfg.env.eval.video_cfg.save_video
-            for env in self.eval_env_list:
-                if flush_video and isinstance(env, RecordVideo):
-                    env.flush_video()
+            for i in range(self.stage_num):
+                if self.cfg.env.eval.video_cfg.save_video and isinstance(
+                    self.eval_env_list[i], RecordVideo
+                ):
+                    self.eval_env_list[i].flush_video()
                 if not self.cfg.env.eval.auto_reset:
-                    env.update_reset_state_ids()
+                    self.eval_env_list[i].update_reset_state_ids()
 
     def send_env_batch(
         self,
@@ -994,8 +837,8 @@ class EnvWorker(Worker):
         env_outputs: list[EnvOutput] = []
         if not self.cfg.env.train.auto_reset:
             for stage_id in range(self.stage_num):
-                env_group = self.get_train_envs(stage_id)
-                extracted_obs, infos = self._reset_env_group(env_group)
+                self.env_list[stage_id].is_start = True
+                extracted_obs, infos = self.env_list[stage_id].reset()
                 dones = get_zero_dones()
                 terminations = dones.clone()
                 truncations = dones.clone()
@@ -1253,11 +1096,11 @@ class EnvWorker(Worker):
         for eval_rollout_epoch in range(self.cfg.algorithm.eval_rollout_epoch):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
                 for stage_id in range(self.stage_num):
-                    env_group = self.get_eval_envs(stage_id)
+                    self.eval_env_list[stage_id].is_start = True
                     self.eval_prev_done[stage_id] = torch.zeros(
                         self.eval_num_envs_per_stage, dtype=torch.bool
                     )
-                    extracted_obs, infos = self._reset_env_group(env_group)
+                    extracted_obs, infos = self.eval_env_list[stage_id].reset()
                     env_output = EnvOutput(
                         obs=extracted_obs,
                         final_obs=(
@@ -1309,10 +1152,11 @@ class EnvWorker(Worker):
                     )
 
             self.finish_rollout(mode="eval")
-        if self.cfg.env.eval.get("enable_offload", False):
-            for env in self.eval_env_list:
-                if hasattr(env, "offload"):
-                    env.offload()
+        for stage_id in range(self.stage_num):
+            if self.cfg.env.eval.get("enable_offload", False) and hasattr(
+                self.eval_env_list[stage_id], "offload"
+            ):
+                self.eval_env_list[stage_id].offload()
 
         for key, value in eval_metrics.items():
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
