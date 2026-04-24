@@ -556,9 +556,11 @@ class EnvWorker(Worker):
         final_obs = (
             self._build_chunk_final_obs(obs_list, infos_list)
             if self.use_external_reward_model
-            else infos["final_observation"]
-            if isinstance(infos, dict) and "final_observation" in infos
-            else None
+            else (
+                infos["final_observation"]
+                if isinstance(infos, dict) and "final_observation" in infos
+                else None
+            )
         )
         if not self.cfg.env.train.auto_reset:
             if self.cfg.env.train.ignore_terminations:
@@ -635,9 +637,11 @@ class EnvWorker(Worker):
         final_obs = (
             self._build_chunk_final_obs(obs_list, infos_list)
             if self.use_external_reward_model
-            else infos["final_observation"]
-            if isinstance(infos, dict) and "final_observation" in infos
-            else None
+            else (
+                infos["final_observation"]
+                if isinstance(infos, dict) and "final_observation" in infos
+                else None
+            )
         )
 
         current_dones = chunk_dones[:, -1]  # [num_envs] bool
@@ -1001,9 +1005,11 @@ class EnvWorker(Worker):
                     dones=dones,
                     terminations=terminations,
                     truncations=truncations,
-                    final_obs=infos["final_observation"]
-                    if "final_observation" in infos
-                    else None,
+                    final_obs=(
+                        infos["final_observation"]
+                        if "final_observation" in infos
+                        else None
+                    ),
                     intervene_actions=None,
                     intervene_flags=None,
                 )
@@ -1122,12 +1128,16 @@ class EnvWorker(Worker):
                     )
                     chunk_step_result = ChunkStepResult(
                         actions=rollout_result.forward_inputs.get("action", None),
-                        prev_logprobs=rollout_result.prev_logprobs
-                        if self.collect_prev_infos
-                        else None,
-                        prev_values=rollout_result.prev_values
-                        if self.collect_prev_infos
-                        else None,
+                        prev_logprobs=(
+                            rollout_result.prev_logprobs
+                            if self.collect_prev_infos
+                            else None
+                        ),
+                        prev_values=(
+                            rollout_result.prev_values
+                            if self.collect_prev_infos
+                            else None
+                        ),
                         forward_inputs=rollout_result.forward_inputs,
                         versions=rollout_result.versions,
                         dones=env_output.dones,
@@ -1191,9 +1201,9 @@ class EnvWorker(Worker):
                     env_output, rollout_result.bootstrap_values, reward_model_output
                 )
                 chunk_step_result = ChunkStepResult(
-                    prev_values=rollout_result.prev_values
-                    if self.collect_prev_infos
-                    else None,
+                    prev_values=(
+                        rollout_result.prev_values if self.collect_prev_infos else None
+                    ),
                     dones=env_output.dones,
                     truncations=env_output.truncations,
                     terminations=env_output.terminations,
@@ -1250,9 +1260,11 @@ class EnvWorker(Worker):
                     extracted_obs, infos = self._reset_env_group(env_group)
                     env_output = EnvOutput(
                         obs=extracted_obs,
-                        final_obs=infos["final_observation"]
-                        if "final_observation" in infos
-                        else None,
+                        final_obs=(
+                            infos["final_observation"]
+                            if "final_observation" in infos
+                            else None
+                        ),
                     )
                     env_batch = env_output.to_dict()
                     self.send_env_batch(
