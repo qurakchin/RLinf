@@ -1442,7 +1442,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         == SupportedModel.GR00T
                     ):
                         prev_logprobs = output_dict["prev_logprobs"]
-
                     kwargs = {
                         "loss_type": self.cfg.algorithm.loss_type,
                         "logprob_type": self.cfg.algorithm.logprob_type,
@@ -1460,6 +1459,11 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         "huber_delta": self.cfg.algorithm.get("huber_delta", None),
                         "loss_mask": loss_mask,
                         "loss_mask_sum": loss_mask_sum,
+                        "trainable_action_groups": self.cfg.actor.model.get(
+                            "trainable_action_groups", None
+                        ),
+                        "model_type": self.cfg.actor.model.model_type,
+                        "env_type": self.cfg.env.train.env_type,
                         "max_episode_steps": self.cfg.env.train.max_episode_steps,
                         "task_type": self.cfg.runner.task_type,
                         "critic_warmup": self.optimizer_steps

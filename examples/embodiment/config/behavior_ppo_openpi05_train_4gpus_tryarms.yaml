@@ -23,25 +23,21 @@ runner:
 
 algorithm:
   rollout_epoch: 16
-  reward_coef: 4096.0
-  filter_rewards: True
-  rewards_lower_bound: 1
-  rewards_upper_bound: 9
-  # gamma: 0.9995
-  gamma: 1
-  sampling_params:
-    temperature_train: 0.6
+  eval_rollout_epoch: 1
+  reward_coef: 1.0
 
 env:
   group_name: "EnvGroup"
 
   train:
     total_num_envs: 8
-    max_episode_steps: 4096
-    max_steps_per_rollout_epoch: 4096
+    max_episode_steps: 2048
+    max_steps_per_rollout_epoch: 2048
     reward_coef: ${algorithm.reward_coef}
+    ignore_terminations: False
     video_cfg:
       save_video: True
+      # max_buffered_frames: 4096  # set to 4096 to save full video in one mp4 file
       video_base_dir: ${runner.logger.log_path}/video/train
     skip_intermediate_obs_in_chunk: False  # set to False to save full video
     omni_config:
@@ -51,7 +47,7 @@ env:
         rendering_frequency: 30
       task:
         activity_instance_dir: ${oc.env:OMNIGIBSON_DATA_PATH}/2025-challenge-task-instances/scenes/house_double_floor_lower/json/house_double_floor_lower_task_turning_on_radio_instances
-        activity_instance_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100]  # 训练集
+        activity_instance_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
         instance_file_format: tro_state
         instance_resample_mode: offline
         online_object_sampling: False
@@ -62,33 +58,39 @@ env:
     num_env_subprocess: 2
   eval:
     total_num_envs: 8
-    max_episode_steps: 2048
-    max_steps_per_rollout_epoch: 2048
+    max_episode_steps: 4096
+    max_steps_per_rollout_epoch: 4096
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
-    # skip_intermediate_obs_in_chunk: False # set to False to save full video
-    # uncomment to use instance id
-    # omni_config:
-    #   task:
-    #     activity_instance_dir: /path/to/BEHAVIOR-1K-datasets/2025-challenge-task-instances/scenes/house_double_floor_lower/json/house_double_floor_lower_task_turning_on_radio_instances
-    #     instance_file_format: tro_state
-    #     instance_resample_mode: offline
-    #     online_object_sampling: False
-    #     use_presampled_robot_pose: True
+    skip_intermediate_obs_in_chunk: False  # set to False to save full video
+    omni_config:
+      env:
+        action_frequency: 30
+        physics_frequency: 120
+        rendering_frequency: 30
+      task:
+        activity_instance_dir: ${oc.env:OMNIGIBSON_DATA_PATH}/2025-challenge-task-instances/scenes/house_double_floor_lower/json/house_double_floor_lower_task_turning_on_radio_instances
+        activity_instance_id: [242, 295, 211, 203, 109, 181, 197, 187]  #  214, 139
+        instance_file_format: tro_state
+        instance_resample_mode: offline
+        online_object_sampling: False
+        use_presampled_robot_pose: True
+        reward_config:
+          reward_mode: task
+          task_specific_reward_name: turning_on_radio
 
 actor:
   micro_batch_size: 4
-  global_batch_size: 512
+  global_batch_size: 2048
   optim:
-    lr: 5.0e-6  # 先从比较小的值开始尝试
+    lr: 5.0e-6
     value_lr: 1.0e-4
-    clip_grad: 1.0  # 这个值影响不大
   model:
-    num_steps: 10
+    trainable_action_groups: ["arms"]  # 只让双臂对应的 action 维度参与 PPO loss
     openpi:
       noise_level: 0.3  # 0.5会影响初始成功率
-      value_after_vlm: True  # 这个值需要打开，不然更新value head的时候会扰动vlm的参数
+      value_after_vlm: True  # 这个值需要打开，不然 value head是接在 action head 之后的
       ignore_last: True  # 避免机械臂乱甩的问题
 
 rollout:
