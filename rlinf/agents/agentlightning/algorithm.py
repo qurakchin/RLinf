@@ -18,7 +18,6 @@ import typing
 from typing import Any, Optional
 
 if typing.TYPE_CHECKING:
-    from agentlightning.algorithm.base import Algorithm
     from agentlightning.types import Dataset
 
 from omegaconf import DictConfig, OmegaConf
@@ -28,6 +27,7 @@ _RLinf: type | None = None
 
 def _make_rlinf_class() -> type:
     from agentlightning.algorithm.base import Algorithm
+
     from .entrypoint import run_rlinf_training
 
     class RLinf(Algorithm):

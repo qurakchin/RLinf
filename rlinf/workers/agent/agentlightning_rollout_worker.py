@@ -27,13 +27,11 @@ from omegaconf import DictConfig, OmegaConf
 if typing.TYPE_CHECKING:
     from agentlightning import NamedResources, RolloutLegacy
     from agentlightning.adapter.triplet import TraceToTripletBase
-    from agentlightning.llm_proxy import LLMProxy, ModelConfig
+    from agentlightning.llm_proxy import LLMProxy
     from agentlightning.store.base import LightningStore
     from agentlightning.types.core import (
         EnqueueRolloutRequest,
         Rollout,
-        RolloutConfig,
-        Task,
         Triplet,
     )
 
@@ -102,7 +100,6 @@ class AgentLightningRolloutWorker(Worker):
         self,
         data: dict[str, Any],
     ):
-        from agentlightning import NamedResources
         from agentlightning.types.core import (
             EnqueueRolloutRequest,
             RolloutConfig,

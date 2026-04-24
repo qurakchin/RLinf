@@ -34,11 +34,12 @@ from rlinf.utils.runner_utils import check_progress
 if typing.TYPE_CHECKING:
     from agentlightning.adapter.triplet import TraceToTripletBase
     from agentlightning.store.base import LightningStore
+
     from rlinf.workers.actor.ma_megatron_actor_worker import MAMegatronActor
-    from rlinf.workers.inference.megatron_inference_worker import MegatronInference
     from rlinf.workers.agent.agentlightning_rollout_worker import (
         AgentLightningRolloutWorker,
     )
+    from rlinf.workers.inference.megatron_inference_worker import MegatronInference
     from rlinf.workers.rollout.sglang.sglang_worker_server import (
         SGLangWorkerWithHTTPServer,
     )

@@ -21,6 +21,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from omegaconf import DictConfig
 
+from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
+
 try:
     from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
     from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
@@ -48,10 +51,6 @@ def _patch_chat_body_assistant_content(body: object) -> None:
             m["content"] = None
 
 
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
-
-
 class SGLangWorkerWithHTTPServer(SGLangWorker):
     def __init__(
         self,
@@ -65,8 +64,12 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
         super().__init__(config, placement, weight_reload, config_rollout)
 
         server_cfg = (self._cfg.rollout.get("sglang") or {}).get("server") or {}
-        self._http_server_host = http_server_host or str(server_cfg.get("host", "0.0.0.0"))
-        self._http_server_port = int(server_cfg.get("port", http_server_port)) + self._rank
+        self._http_server_host = http_server_host or str(
+            server_cfg.get("host", "0.0.0.0")
+        )
+        self._http_server_port = (
+            int(server_cfg.get("port", http_server_port)) + self._rank
+        )
         self._http_server = None
         self._http_server_task = None
         self._http_app = None
@@ -145,8 +148,8 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
                     request_ids=[getattr(request, "rid", None)],
                 )
             else:
-                adapted_request, _ = self._openai_serving_chat._convert_to_internal_request(
-                    request
+                adapted_request, _ = (
+                    self._openai_serving_chat._convert_to_internal_request(request)
                 )
 
             adapted_request.return_logprob = self._return_logprobs
