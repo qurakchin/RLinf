@@ -85,6 +85,99 @@ def sync_robot_after_pose_override(robot) -> None:
     robot.keep_still()
 
 
+def reset_robot_joint_state_to_reset_pose(
+    robot, preserve_base_pose: bool = True, base_joint_dim: int = 6
+) -> None:
+    """Reset robot articulation to the configured reset pose.
+
+    For BEHAVIOR cached ``tro_state`` instances we preserve the sampled base
+    pose while restoring the manipulation joints (arms / trunk / grippers) to
+    the robot reset posture.
+    """
+    if robot is None:
+        return
+
+    get_joint_positions = getattr(robot, "get_joint_positions", None)
+    set_joint_positions = getattr(robot, "set_joint_positions", None)
+    set_joint_velocities = getattr(robot, "set_joint_velocities", None)
+    reset_joint_pos = getattr(robot, "reset_joint_pos", None)
+    if (
+        not callable(get_joint_positions)
+        or not callable(set_joint_positions)
+        or reset_joint_pos is None
+    ):
+        return
+
+    current_joint_positions = get_joint_positions()
+    if current_joint_positions is None:
+        return
+
+    current_joint_positions = torch.as_tensor(current_joint_positions)
+    target_joint_positions = torch.as_tensor(
+        reset_joint_pos,
+        dtype=current_joint_positions.dtype,
+        device=current_joint_positions.device,
+    ).clone()
+    if target_joint_positions.shape != current_joint_positions.shape:
+        return
+
+    if preserve_base_pose and target_joint_positions.numel() > base_joint_dim:
+        target_joint_positions[:base_joint_dim] = current_joint_positions[:base_joint_dim]
+
+    keep_still = getattr(robot, "keep_still", None)
+    if callable(keep_still):
+        keep_still()
+
+    set_joint_positions(positions=target_joint_positions, drive=False)
+    if callable(set_joint_velocities):
+        set_joint_velocities(
+            velocities=torch.zeros_like(target_joint_positions),
+            drive=False,
+        )
+
+    if callable(keep_still):
+        keep_still()
+
+
+def clear_robot_grasp_state(robot) -> None:
+    """Best-effort cleanup for stale robot grasp bookkeeping."""
+    if robot is None or not getattr(robot, "is_manipulation", False):
+        return
+
+    arm_names = list(getattr(robot, "arm_names", []) or [])
+    default_arm = getattr(robot, "default_arm", None)
+    if not arm_names and default_arm is not None:
+        arm_names = [default_arm]
+    if not arm_names:
+        return
+
+    release_grasp_immediately = getattr(robot, "release_grasp_immediately", None)
+    if callable(release_grasp_immediately):
+        for arm in arm_names:
+            try:
+                release_grasp_immediately(arm=arm)
+            except Exception:
+                pass
+
+    for attr_name, default_value in (
+        ("_ag_obj_in_hand", None),
+        ("_ag_obj_constraints", None),
+        ("_ag_obj_constraint_params", None),
+        ("_ag_release_counter", 0),
+        ("_ag_grasp_counter", 0),
+    ):
+        attr_value = getattr(robot, attr_name, None)
+        if not isinstance(attr_value, dict):
+            continue
+        for arm in arm_names:
+            if arm in attr_value:
+                attr_value[arm] = default_value
+
+    keep_still = getattr(robot, "keep_still", None)
+    if callable(keep_still):
+        keep_still()
+
+
 def set_camera_resolution(camera_cfg: dict | None) -> None:
     if camera_cfg is None:
         return
