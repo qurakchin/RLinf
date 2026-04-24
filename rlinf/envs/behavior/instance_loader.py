@@ -20,7 +20,11 @@ from pathlib import Path
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-from rlinf.envs.behavior.utils import sync_robot_after_pose_override
+from rlinf.envs.behavior.utils import (
+    clear_robot_grasp_state,
+    reset_robot_joint_state_to_reset_pose,
+    sync_robot_after_pose_override,
+)
 
 TASK_INSTANCE_FILE_SUFFIX = "_template-tro_state.json"
 TASK_INSTANCE_TEMPLATE_FILE_SUFFIX = "_template.json"
@@ -182,6 +186,8 @@ def load_activity_instance_tro_state(
     )
     robot_poses = tro_state.pop("robot_poses", None)
 
+    clear_robot_grasp_state(robot)
+
     for tro_key, state in tro_state.items():
         entity = env.task.object_scope.get(tro_key)
         assert entity is not None, (
@@ -219,10 +225,12 @@ def load_activity_instance_tro_state(
             robot_pose["orientation"],
             frame="scene",
         )
-        sync_robot_after_pose_override(robot)
         env.scene.write_task_metadata(key="robot_poses", data=robot_poses)
     else:
         env.scene.write_task_metadata(key="robot_poses", data=None)
+
+    reset_robot_joint_state_to_reset_pose(robot, preserve_base_pose=True)
+    sync_robot_after_pose_override(robot)
 
     for _ in range(25):
         og.sim.step_physics()
@@ -233,6 +241,10 @@ def load_activity_instance_tro_state(
     env.scene.update_initial_file()
     if reset_scene:
         env.scene.reset()
+        robot = env.task.get_agent(env)
+        clear_robot_grasp_state(robot)
+        reset_robot_joint_state_to_reset_pose(robot, preserve_base_pose=True)
+        sync_robot_after_pose_override(robot)
 
 
 class ActivityInstanceLoader:
@@ -506,7 +518,7 @@ class ActivityInstanceLoader:
                 env,
                 instance_id=instance_file.instance_id,
                 tro_file_path=instance_file.path,
-                reset_scene=False,
+                reset_scene=True,
             )
 
     def _build_reload_config(self, instance_file: ActivityInstanceFile) -> dict:
