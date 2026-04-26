@@ -175,6 +175,7 @@ class BehaviorEnv(gym.Env):
 
         self.num_envs = num_envs
         self.ignore_terminations = cfg.ignore_terminations
+        self.use_rel_reward = cfg.use_rel_reward
         self.seed_offset = seed_offset
         self.seed = self.cfg.seed + seed_offset
         self.total_num_processes = total_num_processes
@@ -470,7 +471,7 @@ class BehaviorEnv(gym.Env):
             "step", actions
         )
         obs = self._wrap_obs(raw_obs)
-        rewards = self._calc_step_reward(rewards)
+        rewards = self._calc_step_reward(rewards, infos)
         infos = self._record_metrics(rewards, infos)
         if self.ignore_terminations:
             terminations[:] = False
@@ -503,7 +504,9 @@ class BehaviorEnv(gym.Env):
         infos_list = []
         scaled_rewards_list = []
         for i in range(chunk_size):
-            step_rewards = self._calc_step_reward(raw_rewards_list[i])
+            step_rewards = self._calc_step_reward(
+                raw_rewards_list[i], raw_infos_list[i]
+            )
             scaled_rewards_list.append(step_rewards)
             infos = self._record_metrics(step_rewards, raw_infos_list[i])
             if self.ignore_terminations:
@@ -689,6 +692,23 @@ class BehaviorEnv(gym.Env):
             self.parent_conn_list.clear()
             self.env_process_list.clear()
 
-    def _calc_step_reward(self, terminations):
-        reward = self.reward_coef * terminations
-        return reward
+    def _completion_bonus_tensor(self, infos, reward):
+        bonuses = []
+        for info in infos or [{} for _ in range(self.num_envs)]:
+            reward_info = info.get("reward", {}) if isinstance(info, dict) else {}
+            task_reward = reward_info.get("task_specific", {})
+            bonuses.append(float(task_reward.get("completion_bonus", 0.0) or 0.0))
+        return self.reward_coef * torch.as_tensor(
+            bonuses, dtype=reward.dtype, device=reward.device
+        )
+
+    def _calc_step_reward(self, rewards, infos=None):
+        reward = self.reward_coef * rewards
+        if not self.use_rel_reward:
+            return reward
+
+        completion_bonus = self._completion_bonus_tensor(infos, reward)
+        dense_reward = reward - completion_bonus
+        reward_diff = dense_reward - self.prev_step_reward.to(dense_reward.device)
+        self.prev_step_reward = dense_reward.to(self.prev_step_reward.device)
+        return reward_diff + completion_bonus

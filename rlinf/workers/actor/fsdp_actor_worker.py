@@ -1227,6 +1227,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             "reward_type": self.cfg.algorithm.reward_type,
             "loss_mask": self.rollout_batch.get("loss_mask", None),
             "loss_mask_sum": self.rollout_batch.get("loss_mask_sum", None),
+            "normalize_returns": self.cfg.algorithm.get("normalize_returns", False),
         }
 
         advantages_and_returns = calculate_adv_and_returns(**kwargs)
