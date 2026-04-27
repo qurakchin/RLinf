@@ -264,6 +264,7 @@ Using behavior as an example:
 - OpenPI (Pi0) + PPO:
   ``examples/embodiment/config/behavior_ppo_openpi.yaml``
 - OpenPI (Pi0.5) + PPO:
+  ``examples/embodiment/config/behavior_ppo_openpi_pi05_eval.yaml``
   ``examples/embodiment/config/behavior_ppo_openpi_pi05.yaml``
 
 .. warning::
@@ -440,7 +441,7 @@ the Behavior environment, run:
 
 --------------
 
-**4. Evaluate with behavior_ppo_openpi_pi05.yaml**
+**4. Evaluate with behavior_ppo_openpi_pi05_eval.yaml**
 
 In principle, any ``pi05`` checkpoint that has non-zero success rate on
 Behavior and has been converted to PyTorch format can be used for evaluation
@@ -456,7 +457,7 @@ PyTorch format:
 Thanks to the OpenPI-Comet authors for open-sourcing the model and tools, which
 helps reproducibility and evaluation in RLinf.
 
-After conversion, update ``behavior_ppo_openpi_pi05.yaml`` as follows:
+After conversion, update ``behavior_ppo_openpi_pi05_eval.yaml`` as follows:
 
 1. Set ``actor.model.model_path`` and ``rollout.model.model_path`` to the converted model directory.
 2. Increase ``max_episode_steps`` and ``max_steps_per_rollout_epoch`` in both
@@ -478,7 +479,7 @@ Run evaluation with:
 
    export ISAAC_PATH=/path/to/isaac-sim
    export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
-   bash examples/embodiment/eval_embodiment.sh behavior_ppo_openpi_pi05
+   bash examples/embodiment/eval_embodiment.sh behavior_ppo_openpi_pi05_eval
 
 
 Visualization and Results

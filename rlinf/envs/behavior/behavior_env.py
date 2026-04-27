@@ -71,9 +71,9 @@ class BehaviorProcess:
             throw_on_missing=True,
         )
         self.env = VectorEnvironment(num_envs, omni_cfg_dict)
+        apply_runtime_renderer_settings()
         wrapper_name = OmegaConf.select(omni_cfg, "env.env_wrapper")
         self.env = apply_env_wrapper(self.env, wrapper_name)
-        apply_runtime_renderer_settings()
 
         # Isaac Sim's `omni.kit.app` calls ``gc.disable()`` at startup.
         # OmniGibson has self-referential cycles and leaks memory when
@@ -100,14 +100,24 @@ class BehaviorProcess:
 
     def step_env(self, actions, need_obs: bool):
         if self.step_supports_get_obs and self.step_supports_render:
-            raw_obs, step_rewards, terminations, truncations, infos = self.env.step(actions, get_obs=need_obs, render=need_obs)
+            raw_obs, step_rewards, terminations, truncations, infos = self.env.step(
+                actions, get_obs=need_obs, render=need_obs
+            )
         else:
-            raw_obs, step_rewards, terminations, truncations, infos = self.env.step(actions)
+            raw_obs, step_rewards, terminations, truncations, infos = self.env.step(
+                actions
+            )
         if not need_obs:
             # Normalize intermediate-step observations to None so downstream
             # code can skip parsing cleanly.
             raw_obs = None
-        return raw_obs, to_tensor(step_rewards), to_tensor(terminations), to_tensor(truncations), infos
+        return (
+            raw_obs,
+            to_tensor(step_rewards),
+            to_tensor(terminations),
+            to_tensor(truncations),
+            infos,
+        )
 
     def reset(self, payload):
         self.instance_loader.prepare_reset(self.env)
@@ -146,7 +156,9 @@ class BehaviorProcess:
 
 
 class ThreadWithResult(Thread):
-    def __init__(self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None):
+    def __init__(
+        self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None
+    ):
         super().__init__(group, target, name, args, kwargs, daemon=daemon)
         self.result = None
         self.start()
@@ -175,14 +187,16 @@ class BehaviorProcessProxy:
         )
         self.env_process.start()
         child_conn.close()
-        self.last_cmd = 'initialize'
+        self.last_cmd = "initialize"
 
     def wait_ready_msg(self):
         msg = self.wait_for_subproc("initialize")
         return BehaviorProcessProxy.msg_postprocess(msg, "initialize")
 
     def call_subproc(self, cmd: str, payload=None, wait=False):
-        assert self.last_cmd is None, f"last cmd({self.last_cmd}) not finished before calling new cmd({cmd})"
+        assert self.last_cmd is None, (
+            f"last cmd({self.last_cmd}) not finished before calling new cmd({cmd})"
+        )
         self.parent_conn.send((cmd, payload))
         self.last_cmd = cmd
         if wait:
@@ -191,7 +205,9 @@ class BehaviorProcessProxy:
             return result
 
     def wait_for_subproc(self, cmd: str):
-        assert self.last_cmd == cmd, f"last cmd({self.last_cmd}) called not equal to the cmd to wait for({cmd})"
+        assert self.last_cmd == cmd, (
+            f"last cmd({self.last_cmd}) called not equal to the cmd to wait for({cmd})"
+        )
         self.last_cmd = None
         return self.parent_conn.recv()
 
@@ -204,7 +220,9 @@ class BehaviorProcessProxy:
         return msg["result"]
 
     def wait_for_close(self):
-        assert self.last_cmd == "close", f"last cmd({self.last_cmd}) called but wait for close"
+        assert self.last_cmd == "close", (
+            f"last cmd({self.last_cmd}) called but wait for close"
+        )
         if self.env_process.is_alive():
             self.env_process.join(timeout=2)
             if self.env_process.is_alive():
@@ -215,6 +233,7 @@ class BehaviorProcessProxy:
             self.parent_conn = None
         except Exception:
             pass
+
 
 class BehaviorEnv(gym.Env):
     def __init__(
@@ -285,10 +304,7 @@ class BehaviorEnv(gym.Env):
             )
             for _ in range(self.num_env_subprocess)
         ]
-        activity_names = [
-            env_proxy.wait_ready_msg()
-            for env_proxy in self.env_proxys
-        ]
+        activity_names = [env_proxy.wait_ready_msg() for env_proxy in self.env_proxys]
 
         if len(set(activity_names)) != 1:
             raise RuntimeError(
@@ -307,20 +323,25 @@ class BehaviorEnv(gym.Env):
             )
             s = self.num_env_shard
             payload_shards = [
-                payloads[i * s : (i + 1) * s]
-                for i in range(self.num_env_subprocess)
+                payloads[i * s : (i + 1) * s] for i in range(self.num_env_subprocess)
             ]
 
         if self.num_env_subprocess > 1:
             recv_threads = [
-                ThreadWithResult(target=env_proxy.call_subproc, args=(cmd, payload_shard, True), daemon=True)
+                ThreadWithResult(
+                    target=env_proxy.call_subproc,
+                    args=(cmd, payload_shard, True),
+                    daemon=True,
+                )
                 for env_proxy, payload_shard in zip(self.env_proxys, payload_shards)
             ]
             all_msgs = [thread.join() for thread in recv_threads]
         else:
             for env_proxy, payload_shard in zip(self.env_proxys, payload_shards):
                 env_proxy.call_subproc(cmd, payload_shard)
-            all_msgs = [env_proxy.wait_for_subproc(cmd) for env_proxy in self.env_proxys]
+            all_msgs = [
+                env_proxy.wait_for_subproc(cmd) for env_proxy in self.env_proxys
+            ]
         return [BehaviorProcessProxy.msg_postprocess(msg, cmd) for msg in all_msgs]
 
     def env_reset(self):
@@ -360,10 +381,14 @@ class BehaviorEnv(gym.Env):
                 raw_infos_list,
             ) in shard_results:
                 if need_obs:
-                    assert raw_obs_list[step_idx] is not None, f"obs is None at step {step_idx}"
+                    assert raw_obs_list[step_idx] is not None, (
+                        f"obs is None at step {step_idx}"
+                    )
                     merged_obs_step.extend(raw_obs_list[step_idx])
                 else:
-                    assert raw_obs_list[step_idx] is None, f"obs is not None at step {step_idx}"
+                    assert raw_obs_list[step_idx] is None, (
+                        f"obs is not None at step {step_idx}"
+                    )
                 reward_parts.append(raw_rewards_list[step_idx])
                 termination_parts.append(raw_terminations_list[step_idx])
                 truncation_parts.append(raw_truncations_list[step_idx])
@@ -472,12 +497,6 @@ class BehaviorEnv(gym.Env):
             raw_infos_list,
         ):
             if raw_obs is None:
-                obs_list.append(None)
-            elif (
-                isinstance(raw_obs, (list, tuple))
-                and any(obs is None for obs in raw_obs)
-            ):
-                assert False, f"obs is None at step {step_idx}"
                 obs_list.append(None)
             else:
                 obs_list.append(self._wrap_obs(raw_obs))
