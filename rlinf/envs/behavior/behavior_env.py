@@ -181,15 +181,14 @@ class BehaviorProcessProxy:
         msg = self.wait_for_subproc("initialize")
         return BehaviorProcessProxy.msg_postprocess(msg, "initialize")
 
-    def call_subproc(self, cmd: str, payload=None):
+    def call_subproc(self, cmd: str, payload=None, wait=False):
         assert self.last_cmd is None, f"last cmd({self.last_cmd}) not finished before calling new cmd({cmd})"
         self.parent_conn.send((cmd, payload))
         self.last_cmd = cmd
-
-    def wait_for_subproc_threaded(self, cmd: str):
-        assert self.last_cmd == cmd, f"last cmd({self.last_cmd}) called not equal to the cmd to wait for({cmd})"
-        self.last_cmd = None
-        return ThreadWithResult(target=self.parent_conn.recv, daemon=True)
+        if wait:
+            result = self.parent_conn.recv()
+            self.last_cmd = None
+            return result
 
     def wait_for_subproc(self, cmd: str):
         assert self.last_cmd == cmd, f"last cmd({self.last_cmd}) called not equal to the cmd to wait for({cmd})"
@@ -248,6 +247,9 @@ class BehaviorEnv(gym.Env):
         self.auto_reset = cfg.auto_reset
         self.max_episode_steps = torch.tensor(cfg.max_episode_steps)
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
+        self.skip_intermediate_obs_in_chunk = bool(
+            OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
+        )
         if self.record_metrics:
             self._init_metrics()
         self._init_env()
@@ -308,16 +310,16 @@ class BehaviorEnv(gym.Env):
                 payloads[i * s : (i + 1) * s]
                 for i in range(self.num_env_subprocess)
             ]
-        for env_proxy, payload_shard in zip(self.env_proxys, payload_shards):
-            env_proxy.call_subproc(cmd, payload_shard)
 
         if self.num_env_subprocess > 1:
             recv_threads = [
-                env_proxy.wait_for_subproc_threaded(cmd)
-                for env_proxy in self.env_proxys
+                ThreadWithResult(target=env_proxy.call_subproc, args=(cmd, payload_shard, True), daemon=True)
+                for env_proxy, payload_shard in zip(self.env_proxys, payload_shards)
             ]
             all_msgs = [thread.join() for thread in recv_threads]
         else:
+            for env_proxy, payload_shard in zip(self.env_proxys, payload_shards):
+                env_proxy.call_subproc(cmd, payload_shard)
             all_msgs = [env_proxy.wait_for_subproc(cmd) for env_proxy in self.env_proxys]
         return [BehaviorProcessProxy.msg_postprocess(msg, cmd) for msg in all_msgs]
 
@@ -330,15 +332,7 @@ class BehaviorEnv(gym.Env):
         return all_raw_obs, all_infos
 
     def merge_chunk_results(self, shard_results: list, chunk_size: int):
-        def extend_per_env(dst: list, batch):
-            if isinstance(batch, (list, tuple)):
-                dst.extend(batch)
-            else:
-                dst.append(batch)
-
-        def cat_batch_dim(parts: list):
-            if not parts:
-                return parts
+        def cat_parts(parts):
             tensors = [p if torch.is_tensor(p) else torch.as_tensor(p) for p in parts]
             return torch.cat(tensors, dim=0)
 
@@ -347,12 +341,17 @@ class BehaviorEnv(gym.Env):
         merged_terms = []
         merged_trunc = []
         merged_infos = []
-        for t in range(chunk_size):
-            obs_t = []
-            r_t = []
-            term_t = []
-            trunc_t = []
-            info_t = []
+        for step_idx in range(chunk_size):
+            is_last = step_idx == chunk_size - 1
+            need_obs = not self.skip_intermediate_obs_in_chunk or is_last
+            if need_obs:
+                merged_obs_step = []
+            else:
+                merged_obs_step = None
+            reward_parts = []
+            termination_parts = []
+            truncation_parts = []
+            merged_infos_step = []
             for (
                 raw_obs_list,
                 raw_rewards_list,
@@ -360,16 +359,20 @@ class BehaviorEnv(gym.Env):
                 raw_truncations_list,
                 raw_infos_list,
             ) in shard_results:
-                extend_per_env(obs_t, raw_obs_list[t])
-                r_t.append(raw_rewards_list[t])
-                term_t.append(raw_terminations_list[t])
-                trunc_t.append(raw_truncations_list[t])
-                extend_per_env(info_t, raw_infos_list[t])
-            merged_obs_lists.append(obs_t)
-            merged_rewards.append(cat_batch_dim(r_t))
-            merged_terms.append(cat_batch_dim(term_t))
-            merged_trunc.append(cat_batch_dim(trunc_t))
-            merged_infos.append(info_t)
+                if need_obs:
+                    assert raw_obs_list[step_idx] is not None, f"obs is None at step {step_idx}"
+                    merged_obs_step.extend(raw_obs_list[step_idx])
+                else:
+                    assert raw_obs_list[step_idx] is None, f"obs is not None at step {step_idx}"
+                reward_parts.append(raw_rewards_list[step_idx])
+                termination_parts.append(raw_terminations_list[step_idx])
+                truncation_parts.append(raw_truncations_list[step_idx])
+                merged_infos_step.extend(raw_infos_list[step_idx])
+            merged_obs_lists.append(merged_obs_step)
+            merged_rewards.append(cat_parts(reward_parts))
+            merged_terms.append(cat_parts(termination_parts))
+            merged_trunc.append(cat_parts(truncation_parts))
+            merged_infos.append(merged_infos_step)
         return (
             merged_obs_lists,
             merged_rewards,
@@ -457,29 +460,45 @@ class BehaviorEnv(gym.Env):
             raw_infos_list,
         ) = self.env_chunk_step(chunk_actions)
 
-        chunk_size = chunk_actions.shape[1]
         obs_list = []
         infos_list = []
-        scaled_rewards_list = [self._calc_step_reward(i) for i in raw_rewards_list]
-        for i in range(chunk_size):
-            infos = self._record_metrics(scaled_rewards_list[i], raw_infos_list[i])
-            if self.ignore_terminations:
-                raw_terminations_list[i] = torch.zeros_like(raw_terminations_list[i])
-            raw_obs = raw_obs_list[i]
-            if raw_obs is None or (
+        scaled_rewards_list = []
+        merged_terminations_list = []
+        info_done_flags = []
+        for raw_obs, raw_rewards, raw_terminations, step_infos in zip(
+            raw_obs_list,
+            raw_rewards_list,
+            raw_terminations_list,
+            raw_infos_list,
+        ):
+            if raw_obs is None:
+                obs_list.append(None)
+            elif (
                 isinstance(raw_obs, (list, tuple))
-                and all(obs is None for obs in raw_obs)
+                and any(obs is None for obs in raw_obs)
             ):
+                assert False, f"obs is None at step {step_idx}"
                 obs_list.append(None)
             else:
                 obs_list.append(self._wrap_obs(raw_obs))
-            infos_list.append(infos)
+            step_rewards = self._calc_step_reward(raw_rewards)
+            infos_list.append(self._record_metrics(step_rewards, step_infos))
+            if self.ignore_terminations:
+                raw_terminations = torch.zeros_like(raw_terminations)
+            merged_terminations_list.append(raw_terminations)
+            scaled_rewards_list.append(step_rewards)
+            # `raw_infos_list[i]` is a list of per-env info dicts for chunk step i.
+            step_done = [
+                self._extract_info_done(info) if isinstance(info, dict) else False
+                for info in step_infos
+            ]
+            info_done_flags.append(torch.tensor(step_done, dtype=torch.bool))
 
         chunk_rewards = torch.stack(
             scaled_rewards_list, dim=1
         )  # [num_envs, chunk_steps]
         raw_terminations = torch.stack(
-            raw_terminations_list, dim=1
+            merged_terminations_list, dim=1
         )  # [num_envs, chunk_steps]
         raw_truncations = torch.stack(
             raw_truncations_list, dim=1
@@ -492,16 +511,6 @@ class BehaviorEnv(gym.Env):
         # `info["done"]` while leaving `terminations`/`truncations` booleans
         # as all-False for the whole chunk. RLinf's evaluation metrics gate on
         # `terminations|truncations`, so we fall back to info-done here.
-        #
-        # `raw_infos_list[i]` is a list of per-env info dicts for chunk step i.
-        info_done_flags = []
-        for i in range(chunk_size):
-            step_infos = raw_infos_list[i]
-            step_done = [
-                self._extract_info_done(info) if isinstance(info, dict) else False
-                for info in step_infos
-            ]
-            info_done_flags.append(torch.tensor(step_done, dtype=torch.bool))
         past_info_dones = torch.stack(info_done_flags, dim=1).any(dim=1)
 
         # If the config asks to ignore terminations, map info-done into
