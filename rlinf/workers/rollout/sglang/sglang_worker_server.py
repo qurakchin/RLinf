@@ -20,6 +20,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from omegaconf import DictConfig
+from starlette.responses import Response
 
 from rlinf.utils.placement import ModelParallelComponentPlacement
 from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
@@ -183,6 +184,37 @@ class SGLangWorkerWithHTTPServer(SGLangWorker):
                     request, result, created
                 )
 
+            # Align SGLang 0.4.x behavior with 0.5.2: tool-call parse failure should not
+            # fail the entire request. Legacy adapter returns ORJSONResponse(400) for this
+            # specific case; we downgrade it to a normal chat completion response.
+            if isinstance(response, Response):
+                body = getattr(response, "body", b"") or b""
+                status_code = int(getattr(response, "status_code", 0) or 0)
+                if (
+                    status_code == 400
+                    and b"Failed to parse fc related info to json format!" in body
+                ):
+                    # Reuse SGLang 0.4.x formatter to avoid subtle field mismatches:
+                    # rerun response building with tool calls disabled.
+                    tool_call_parser = self._cfg_rollout.sglang.get(
+                        "tool_call_parser", None
+                    )
+                    try:
+                        req_no_tools = request.model_copy(
+                            update={"tool_choice": "none", "tools": None}
+                        )
+                    except Exception:
+                        req_no_tools = request
+                        setattr(req_no_tools, "tool_choice", "none")
+                        setattr(req_no_tools, "tools", None)
+
+                    response_chat_completion = v1_chat_generate_response(
+                        req_no_tools,
+                        result,
+                        created,
+                        tool_call_parser=tool_call_parser,
+                    )
+                    response = response_chat_completion
             response_dict = response.model_dump(exclude_none=True)
 
             if result and len(result) > 0 and "output_ids" in result[0]:
