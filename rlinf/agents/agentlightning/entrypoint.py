@@ -62,7 +62,10 @@ def run_rlinf_training(
 
     rollout_worker_cls = get_rollout_backend_worker(cfg)
     rollout_placement_strategy = component_placement.get_strategy("rollout")
-    rollout_group = rollout_worker_cls.create_group(cfg, component_placement).launch(
+    rollout_create_kwargs = {"weight_reload": None} if eval else {}
+    rollout_group = rollout_worker_cls.create_group(
+        cfg, component_placement, **rollout_create_kwargs
+    ).launch(
         cluster,
         name=cfg.rollout.group_name,
         placement_strategy=rollout_placement_strategy,
