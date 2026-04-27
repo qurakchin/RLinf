@@ -236,6 +236,7 @@ def compute_ppo_actor_loss(
         "advantages must be float32 to keep numerical stability"
     )
 
+    loss_mask_count = loss_mask.count_nonzero() or 1
     # For numerical stability.
     log_ratio = logprobs - old_logprobs
     if clip_log_ratio_min is not None:
@@ -270,26 +271,26 @@ def compute_ppo_actor_loss(
     clip_mask = policy_loss1.detach() < policy_loss2.detach()
     dual_clip_mask = (dual_clip_mask * loss_mask).bool()
 
+    clip_fraction = (clip_mask * loss_mask).sum() / float(loss_mask_count)
+    approx_kl = -torch.sum(approx_kl) / float(loss_mask_count)
+
+    dual_cliped_ratio = torch.where(dual_clip_mask, ratio, 0)
+
+    if critic_warmup:
+        policy_loss = torch.tensor(0.0, device=policy_loss.device)
+
+    # Compile metrics for logging
     loss_mask_for_metrics = loss_mask
     ratio_for_metrics = ratio.detach()
     ratio_abs_for_metrics = (ratio - 1).abs().detach()
     clipped_ratio_for_metrics = clipped_ratio.detach()
+    dual_cliped_ratio_for_metrics = dual_cliped_ratio.detach()
 
     # Only broadcast when ratio has action_dim dimension and loss_mask's last dim is 1
     # This handles token_level mode: ratio [bsz, num_chunks, action_dim], loss_mask [bsz, num_chunks, 1]
     if len(ratio.shape) > 2 and loss_mask.shape[-1] == 1 and ratio.shape[-1] > 1:
         # Broadcast loss_mask to match ratio's shape for metrics computation
         loss_mask_for_metrics = loss_mask.expand_as(ratio)
-
-    loss_mask_count = loss_mask_for_metrics.count_nonzero() or 1
-    clip_fraction = (clip_mask * loss_mask_for_metrics).sum() / float(loss_mask_count)
-    approx_kl = -torch.sum(approx_kl) / float(loss_mask_count)
-
-    dual_cliped_ratio = torch.where(dual_clip_mask, ratio, 0)
-    dual_cliped_ratio_for_metrics = dual_cliped_ratio.detach()
-
-    if critic_warmup:
-        policy_loss = torch.tensor(0.0, device=policy_loss.device)
 
     metrics_data = {
         "actor/policy_loss": policy_loss.detach(),
@@ -359,10 +360,29 @@ def compute_ppo_critic_loss(
     value_clip_indicator = (value_pred_clipped - prev_values).abs() > value_clip
     value_clip_ratio = value_clip_indicator.float().mean()
 
+    # explained variance
+    if loss_mask is not None:
+        masked_returns = returns[loss_mask]
+        masked_values = values[loss_mask]
+    else:
+        masked_returns = returns
+        masked_values = values
+
+    var_returns = torch.var(masked_returns)
+    if torch.isnan(var_returns) or var_returns == 0:
+        explained_variance = torch.tensor(float("nan"), device=returns.device)
+    else:
+        var_diff = torch.var(masked_returns - masked_values)
+        if torch.isnan(var_diff):
+            explained_variance = torch.tensor(float("nan"), device=returns.device)
+        else:
+            explained_variance = 1 - var_diff / var_returns
+
     # Compile metrics for logging
     metrics_data = {
         "critic/value_loss": value_loss.detach(),
         "critic/value_clip_ratio": value_clip_ratio.detach(),
+        "critic/explained_variance": explained_variance.detach(),
     }
     return value_loss, metrics_data
 
