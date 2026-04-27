@@ -8,8 +8,10 @@ group_size: 1
 use_fixed_reset_state_ids: False
 max_steps_per_rollout_epoch: 2000
 max_episode_steps: 2000 # max episode steps for truncation
+# pass the render process except the last frame in cache chunk in behavior env. set to False to save full video, but slower
 skip_intermediate_obs_in_chunk: True
-num_env_subprocess: 1 # parallel env running in env workers to speed up env.step
+# parallel env running in env workers to speed up env.step
+num_env_subprocess: 1
 
 video_cfg:
   save_video: False

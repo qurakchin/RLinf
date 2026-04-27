@@ -278,7 +278,8 @@ Using behavior as an example:
    ``examples/embodiment/config/env/behavior_r1pro.yaml`` via ``defaults``
    (for both ``env.train`` and ``env.eval``). This file defines the base R1 Pro
    environment settings, including ``task_idx``, ``max_episode_steps``,
-   ``max_steps_per_rollout_epoch``, camera resolution, and ``omni_config``.
+   ``max_steps_per_rollout_epoch``, ``num_env_subprocess``, camera resolution,
+   and ``omni_config``.
    You can override these defaults in each concrete config under
    ``env.train`` / ``env.eval``.
 
@@ -404,6 +405,16 @@ Using behavior as an example:
   wrapped, transferred, and recorded. One visible consequence is that saved
   videos no longer include every low-level robot action frame; instead they only
   show the frames the robot actually observes at chunk boundaries.
+- ``num_env_subprocess``:
+  Within one env-worker process, splits parallel env count ``num_envs`` across multiple
+  **child processes**, each hosting its own Isaac/OmniGibson simulation (see
+  ``BehaviorProcessProxy`` in ``behavior_env.py``). Default ``1`` keeps the legacy
+  single-subprocess behavior. When greater than ``1``, each subprocess runs
+  ``num_envs / num_env_subprocess`` parallel envs; IPC uses parallel receives to reduce
+  pipe backpressure.
+  **Constraint**: ``num_envs`` must be divisible by ``num_env_subprocess`` (asserted).
+  Increasing this value can reduce env-step bottlenecks on multi-core/GPU hosts but also
+  multiplies simulator processes and memory pressure—tune for your hardware.
 
 --------------
 

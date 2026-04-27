@@ -75,12 +75,9 @@ class RecordVideo(gym.Wrapper):
         self.video_cfg = video_cfg
         self.render_images: list[np.ndarray] = []
         self.video_cnt = 0
-        self._segment_cnt = 0
         self._num_envs = getattr(env, "num_envs", 1)
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._save_futures: list[Future] = []
-        self._max_buffered_frames = int(getattr(video_cfg, "max_buffered_frames", 256))
-        self._max_pending_saves = int(getattr(video_cfg, "max_pending_saves", 2))
 
         if fps is not None:
             self._fps = fps
@@ -333,7 +330,6 @@ class RecordVideo(gym.Wrapper):
             self.render_images.append(full_image)
         else:
             self.render_images.append(images[0])
-        self._flush_if_needed()
 
     def add_new_frames(
         self,
@@ -441,16 +437,7 @@ class RecordVideo(gym.Wrapper):
 
     def flush_video(self, video_sub_dir: Optional[str] = None):
         """Write buffered frames to an MP4 file (async)."""
-        self._flush_segment(video_sub_dir=video_sub_dir, finalize=True)
-
-    def _flush_segment(
-        self, video_sub_dir: Optional[str] = None, finalize: bool = False
-    ) -> None:
-        """Write the current buffered segment and optionally finalize the rollout video."""
         if not self.render_images:
-            if finalize:
-                self.video_cnt += 1
-                self._segment_cnt = 0
             return
 
         output_dir = os.path.join(
@@ -460,26 +447,15 @@ class RecordVideo(gym.Wrapper):
             output_dir = os.path.join(output_dir, f"{video_sub_dir}")
 
         os.makedirs(output_dir, exist_ok=True)
-        mp4_path = os.path.join(output_dir, f"{self.video_cnt}_{self._segment_cnt}.mp4")
+        mp4_path = os.path.join(output_dir, f"{self.video_cnt}.mp4")
         frames = list(self.render_images)
         self.render_images = []
-        self._segment_cnt += 1
+        self.video_cnt += 1
         self._submit_save(frames, mp4_path)
-        if finalize:
-            self.video_cnt += 1
-            self._segment_cnt = 0
-
-    def _flush_if_needed(self) -> None:
-        """Bound in-memory frame buffering during long rollouts."""
-        if len(self.render_images) >= self._max_buffered_frames:
-            self._flush_segment()
 
     def _submit_save(self, frames: list[np.ndarray], mp4_path: str) -> None:
         """Submit a background job to save the video."""
         self._prune_futures()
-        if len(self._save_futures) >= self._max_pending_saves:
-            self._save_futures[0].result()
-            self._prune_futures()
         future = self._executor.submit(self._save_video, frames, mp4_path)
         self._save_futures.append(future)
 
@@ -502,8 +478,6 @@ class RecordVideo(gym.Wrapper):
 
     def close(self):
         """Wait for pending video writes before closing."""
-        if self.render_images:
-            self._flush_segment(finalize=True)
         self._executor.shutdown(wait=True)
         self._save_futures = []
         return super().close()

@@ -9,9 +9,20 @@ defaults:
 hydra:
   run:
     dir: .
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
   output_subdir: null
-  # searchpath:
-  #   - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    # rollout,env,actor: all # speedup in evaluation
+    rollout:
+      placement: 0-1
+    actor:
+      placement: 0-1
+    env:
+      placement: 2-3
 
 runner:
   task_type: embodied
@@ -24,7 +35,7 @@ runner:
   max_epochs: 1000
   max_steps: -1
 
-  only_eval: False
+  only_eval: False # set to True in evaluation
   val_check_interval: -1
   save_interval: 40
   seq_length: 4096
@@ -38,7 +49,7 @@ algorithm:
   kl_penalty: kl
   group_size: 1
   rollout_epoch: 8
-  eval_rollout_epoch: 1
+  eval_rollout_epoch: 2
 
   reward_type: chunk_level
   logprob_type: token_level
@@ -71,20 +82,28 @@ algorithm:
     max_length: 1024
     min_length: 1
 
+  reward_coef: 2048
+  filter_rewards: True
+  rewards_lower_bound: 1
+  rewards_upper_bound: 9
+
 env:
   group_name: "EnvGroup"
 
   train:
-    total_num_envs: 1
-    max_episode_steps: 32
-    max_steps_per_rollout_epoch: 32
+    total_num_envs: 4
+    max_episode_steps: 2048
+    max_steps_per_rollout_epoch: 2048
+    reward_coef: ${algorithm.reward_coef}
+    num_env_subprocess: 2
   eval:
-    total_num_envs: 1
-    max_episode_steps: 32
-    max_steps_per_rollout_epoch: 32
+    total_num_envs: 4
+    max_episode_steps: 2048
+    max_steps_per_rollout_epoch: 2048
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
+      fps: 15
 
 rollout:
   group_name: "RolloutGroup"
@@ -93,14 +112,14 @@ rollout:
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/model/pi05"
+    model_path: /mnt/public/zhuchunyang_rl/hf_models/openpi_comet_pytorch/pi05-b1kpt50-cs32
     precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  micro_batch_size: 2
-  global_batch_size: 16
+  micro_batch_size: 4
+  global_batch_size: 64
   seed: 1234
   num_steps: 10
   enable_offload: True
@@ -116,7 +135,7 @@ actor:
       config_name: "pi05_behavior"
       detach_critic_input: True
       joint_logprob: False
-      noise_level: 0.5
+      noise_level: 0.0 # set to a higher value (0.5) for more exploration in training
       action_env_dim: ${actor.model.action_dim}
       noise_method: "flow_sde"
 

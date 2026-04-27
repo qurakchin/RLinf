@@ -159,6 +159,7 @@ class ThreadWithResult(Thread):
         super().join()
         return self.result
 
+
 class BehaviorProcessProxy:
     def __init__(self, cfg: DictConfig, num_env_shard: int):
         spawn_ctx = get_context("spawn")
