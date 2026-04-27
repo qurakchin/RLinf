@@ -9,9 +9,9 @@ defaults:
 hydra:
   run:
     dir: .
+  output_subdir: null
   searchpath:
     - file://${oc.env:EMBODIED_PATH}/config/
-  output_subdir: null
 
 cluster:
   num_nodes: 1
@@ -106,11 +106,10 @@ rollout:
   group_name: "RolloutGroup"
   backend: "huggingface"
   enable_offload: True
-  sync_weight_load_instant: False # reduce gpumem in sync weight process
   pipeline_stage_num: 1
 
   model:
-    model_path: /mnt/public/zhuchunyang_rl/hf_models/openpi_comet_pytorch/pi05-b1kpt50-cs32
+    model_path: "/path/to/model/pi05"
     precision: ${actor.model.precision}
 
 actor:
