@@ -377,7 +377,7 @@ class EnvWorker(Worker):
                 self.env_list[i].offload()
 
     @Worker.timer("env_interact_step")
-    async def env_interact_step(
+    def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any]]:
         """
@@ -449,7 +449,7 @@ class EnvWorker(Worker):
         )
         return env_output, env_info
 
-    async def env_evaluate_step(
+    def env_evaluate_step(
         self, raw_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any]]:
         """
@@ -994,7 +994,7 @@ class EnvWorker(Worker):
                             rollout_result.save_flags
                         )
 
-                    env_output, env_info = await self.env_interact_step(
+                    env_output, env_info = self.env_interact_step(
                         rollout_result.actions, stage_id
                     )
                     env_batch = env_output.to_dict()
@@ -1090,7 +1090,7 @@ class EnvWorker(Worker):
 
         return env_metrics
 
-    async def evaluate(self, input_channel: Channel, rollout_channel: Channel):
+    def evaluate(self, input_channel: Channel, rollout_channel: Channel):
         eval_metrics = defaultdict(list)
 
         for eval_rollout_epoch in range(self.cfg.algorithm.eval_rollout_epoch):
@@ -1124,7 +1124,7 @@ class EnvWorker(Worker):
                     raw_chunk_actions = self.recv_chunk_actions(
                         input_channel, mode="eval"
                     )
-                    env_output, env_info = await self.env_evaluate_step(
+                    env_output, env_info = self.env_evaluate_step(
                         raw_chunk_actions, stage_id
                     )
 
