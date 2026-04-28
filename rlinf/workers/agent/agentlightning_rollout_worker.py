@@ -39,11 +39,6 @@ from rlinf.data.io_struct import DynamicRolloutResult
 from rlinf.scheduler import Channel, Worker
 from rlinf.utils.placement import ModelParallelComponentPlacement
 
-# Passed to LightningStore.wait_for_rollouts: non-zero timeout lets the store await
-# inside wait_for_rollout instead of using timeout=0 (immediate return) plus a
-# separate asyncio.sleep poll loop.
-_ROLLOUT_WAIT_POLL_TIMEOUT_S = 0.1
-
 
 class AgentLightningRolloutWorker(Worker):
     """Worker for agentlightning task rollout."""
@@ -197,7 +192,7 @@ class AgentLightningRolloutWorker(Worker):
         spans = await self.store.query_spans(rollout.rollout_id, attempt_id="latest")
 
         triplets = self.adapter.adapt(spans)
-
+        print(triplets)
         final_reward: Optional[float] = None
         for triplet in reversed(triplets):
             if triplet.reward is not None:
@@ -220,7 +215,7 @@ class AgentLightningRolloutWorker(Worker):
             triplets=triplets,
             metadata=rollout.metadata or {},
         )
-
+        print(result_rollout)
         return result_rollout
 
     def _count_tool_calls_in_triplet(self, triplet: "Triplet") -> int:
@@ -364,15 +359,43 @@ class AgentLightningRolloutWorker(Worker):
         rewards_list: list[float] = []
         rollout_logprobs_list: list[list[float]] = []
 
+        # Debug counters (useful for CI-only issues)
+        n_triplets_total = 0
+        n_skipped_empty_response = 0
+        n_missing_token_ids_prompt = 0
+        n_missing_token_ids_response = 0
+
         for traj_idx, rollout_legacy in enumerate(rollouts):
+            # Hard fail early: a completed rollout with no triplets is not usable for training.
+            # This is usually an adapter issue (spans exist but couldn't be converted),
+            # or a rollout failure that still produced a terminal record.
+            if not getattr(rollout_legacy, "triplets", None):
+                rid = getattr(rollout_legacy, "rollout_id", "<unknown>")
+                raise RuntimeError(
+                    f"Empty triplets in rollout result: data_id={data_id!r}, rollout_id={rid!r}. "
+                    "Rollout completed but produced no triplets; check adapter.adapt(spans) and "
+                    "whether spans contain the expected LLM response events."
+                )
             for triplet in rollout_legacy.triplets:
+                n_triplets_total += 1
                 prompt_ids = triplet.prompt.get("token_ids", [])
                 response_ids = triplet.response.get("token_ids", [])
+                if "token_ids" not in triplet.prompt:
+                    n_missing_token_ids_prompt += 1
+                if "token_ids" not in triplet.response:
+                    n_missing_token_ids_response += 1
 
                 if len(prompt_ids) > max_prompt_len:
                     prompt_ids = prompt_ids[:max_prompt_len]
                 if len(response_ids) > max_response_length:
                     response_ids = response_ids[:max_response_length]
+
+                # Actor training requires at least one response token.
+                # If token_ids are missing (adapter didn't tokenize) or response is empty,
+                # skip this triplet to avoid producing invalid training samples.
+                if not response_ids:
+                    n_skipped_empty_response += 1
+                    continue
 
                 input_ids = prompt_ids + response_ids
 
@@ -392,7 +415,60 @@ class AgentLightningRolloutWorker(Worker):
                 rewards_list.append(rollout_legacy.final_reward)
                 rollout_logprobs_list.append(turn_logprobs)
 
-            rewards_tensor = torch.tensor(rewards_list, dtype=torch.float32)
+        if not input_ids_list:
+            rollout_summaries = []
+            for r in rollouts:
+                rid = getattr(r, "rollout_id", "<unknown>")
+                triplets = getattr(r, "triplets", None)
+                n_triplets = len(triplets) if triplets is not None else -1
+                sample_keys = None
+                if triplets:
+                    t0 = triplets[0]
+                    p0 = getattr(t0, "prompt", None)
+                    r0 = getattr(t0, "response", None)
+                    sample_keys = {
+                        "prompt_keys": list(p0.keys()) if isinstance(p0, dict) else None,
+                        "response_keys": list(r0.keys()) if isinstance(r0, dict) else None,
+                    }
+                rollout_summaries.append(
+                    {"rollout_id": rid, "n_triplets": n_triplets, "sample_keys": sample_keys}
+                )
+            raise RuntimeError(
+                "No valid tokenized triplets produced for DynamicRolloutResult. "
+                "This usually means the adapter didn't populate triplet.prompt/response['token_ids'] "
+                f"or all responses were empty after truncation/filters. data_id={data_id!r}, "
+                f"n_rollouts={len(rollouts)}, rollouts={rollout_summaries}"
+            )
+
+        def _min_max_avg(xs: list[int]) -> dict[str, float | int]:
+            if not xs:
+                return {"min": -1, "max": -1, "avg": -1.0}
+            return {"min": int(min(xs)), "max": int(max(xs)), "avg": float(sum(xs)) / float(len(xs))}
+
+        rollout_ids_dbg = [getattr(r, "rollout_id", "<unknown>") for r in rollouts]
+        debug_line = (
+            "DynamicRolloutResult built for data_id=%s | rollouts=%s | num_sequence=%d group_size=%d | "
+            "prompt_len=%s response_len=%s | triplets_total=%d skipped_empty_response=%d "
+            "missing_token_ids(prompt=%d,response=%d)"
+            % (
+                data_id,
+                rollout_ids_dbg,
+                len(input_ids_list),
+                len(rollouts),
+                _min_max_avg(prompt_lengths_list),
+                _min_max_avg(response_lengths_list),
+                n_triplets_total,
+                n_skipped_empty_response,
+                n_missing_token_ids_prompt,
+                n_missing_token_ids_response,
+            )
+        )
+        # Ray / multi-process runs can drop INFO logs depending on config.
+        # Emit at WARNING and optionally print to stdout for CI visibility.
+        logging.warning(debug_line)
+        print(debug_line, flush=True)
+
+        rewards_tensor = torch.tensor(rewards_list, dtype=torch.float32)
 
         dynamic_rollout_result = DynamicRolloutResult(
             num_sequence=len(input_ids_list),
@@ -407,6 +483,7 @@ class AgentLightningRolloutWorker(Worker):
             if self.cfg.rollout.return_logprobs
             else None,
         )
+        print(dynamic_rollout_result)
         return dynamic_rollout_result
 
     async def process_rollout_batch(
