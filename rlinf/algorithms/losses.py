@@ -318,6 +318,7 @@ def compute_ppo_critic_loss(
     loss_mask: Optional[torch.Tensor] = None,
     max_episode_steps: Optional[int] = None,
     loss_mask_sum: Optional[torch.Tensor] = None,
+    compute_explained_variance: bool = True,
     **kwargs,
 ) -> tuple[torch.Tensor, dict]:
     """
@@ -360,23 +361,25 @@ def compute_ppo_critic_loss(
     value_clip_indicator = (value_pred_clipped - prev_values).abs() > value_clip
     value_clip_ratio = value_clip_indicator.float().mean()
 
-    # explained variance
-    if loss_mask is not None:
+    if compute_explained_variance and loss_mask is not None:
         masked_returns = returns[loss_mask]
         masked_values = values[loss_mask]
     else:
         masked_returns = returns
         masked_values = values
 
-    var_returns = torch.var(masked_returns)
-    if torch.isnan(var_returns) or var_returns == 0:
+    if not compute_explained_variance:
         explained_variance = torch.tensor(float("nan"), device=returns.device)
     else:
-        var_diff = torch.var(masked_returns - masked_values)
-        if torch.isnan(var_diff):
+        var_returns = torch.var(masked_returns)
+        if torch.isnan(var_returns) or var_returns == 0:
             explained_variance = torch.tensor(float("nan"), device=returns.device)
         else:
-            explained_variance = 1 - var_diff / var_returns
+            var_diff = torch.var(masked_returns - masked_values)
+            if torch.isnan(var_diff):
+                explained_variance = torch.tensor(float("nan"), device=returns.device)
+            else:
+                explained_variance = 1 - var_diff / var_returns
 
     # Compile metrics for logging
     metrics_data = {

@@ -30,6 +30,7 @@ import rlinf.algorithms  # noqa: F401
 from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
 from rlinf.algorithms.utils import (
     kl_penalty,
+    preprocess_loss_inputs,
 )
 from rlinf.config import SupportedModel, torch_dtype_from_precision
 from rlinf.data.embodied_io_struct import Trajectory, convert_trajectories_to_batch
@@ -109,6 +110,80 @@ def process_nested_dict_for_adv(nested_dict, rollout_epoch):
         elif isinstance(value, dict):
             ret_dict[key] = process_nested_dict_for_adv(value, rollout_epoch)
     return ret_dict
+
+
+def _explained_variance_stats_from_loss_kwargs(
+    loss_kwargs: dict,
+) -> torch.Tensor | None:
+    """Build sufficient statistics for global-batch critic explained variance."""
+    if (
+        loss_kwargs.get("values", None) is None
+        or loss_kwargs.get("returns", None) is None
+    ):
+        return None
+
+    if loss_kwargs.get("task_type", None) == "embodied":
+        loss_kwargs = preprocess_loss_inputs(**loss_kwargs.copy())
+
+    values = loss_kwargs.get("values", None)
+    returns = loss_kwargs.get("returns", None)
+    if values is None or returns is None:
+        return None
+
+    loss_mask = loss_kwargs.get("loss_mask", None)
+    if loss_mask is not None:
+        loss_mask = loss_mask.to(device=returns.device, dtype=torch.bool)
+        returns = returns[loss_mask]
+        values = values[loss_mask]
+    else:
+        returns = returns.reshape(-1)
+        values = values.reshape(-1)
+
+    if returns.numel() == 0:
+        return torch.zeros(
+            5,
+            device=Worker.torch_platform.current_device(),
+            dtype=torch.float64,
+        )
+
+    returns = returns.detach().to(dtype=torch.float64)
+    values = values.detach().to(dtype=torch.float64)
+    residuals = returns - values
+    return torch.stack(
+        [
+            torch.as_tensor(float(returns.numel()), device=returns.device),
+            returns.sum(),
+            returns.square().sum(),
+            residuals.sum(),
+            residuals.square().sum(),
+        ]
+    ).to(device=Worker.torch_platform.current_device(), dtype=torch.float64)
+
+
+def _finalize_global_batch_explained_variance(
+    stats: torch.Tensor | None,
+) -> float | None:
+    if stats is None:
+        return None
+
+    stats = stats.clone()
+    torch.distributed.all_reduce(stats, op=torch.distributed.ReduceOp.SUM)
+
+    count = stats[0].clamp_min(0.0)
+    if count <= 1:
+        return float("nan")
+
+    returns_mean = stats[1] / count
+    returns_var = stats[2] / count - returns_mean.square()
+    if returns_var <= 0 or torch.isnan(returns_var):
+        return float("nan")
+
+    residual_mean = stats[3] / count
+    residual_var = stats[4] / count - residual_mean.square()
+    if torch.isnan(residual_var):
+        return float("nan")
+
+    return (1.0 - residual_var / returns_var).detach().item()
 
 
 def process_nested_dict_for_train(nested_dict, shuffle_id):
@@ -1396,6 +1471,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 )
 
                 self.optimizer.zero_grad()
+                explained_variance_stats = None
                 for idx, batch in enumerate(train_micro_batch):
                     batch = put_tensor_device(
                         batch,
@@ -1474,8 +1550,17 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         "task_type": self.cfg.runner.task_type,
                         "critic_warmup": self.optimizer_steps
                         < self.critic_warmup_steps,
+                        "compute_explained_variance": False,
                     }
                     loss, metrics_data = policy_loss(**kwargs)
+                    metrics_data.pop("critic/explained_variance", None)
+                    micro_ev_stats = _explained_variance_stats_from_loss_kwargs(kwargs)
+                    if micro_ev_stats is not None:
+                        explained_variance_stats = (
+                            micro_ev_stats
+                            if explained_variance_stats is None
+                            else explained_variance_stats + micro_ev_stats
+                        )
 
                     entropy_loss = torch.tensor(
                         0.0, device=Worker.torch_platform.current_device()
@@ -1512,6 +1597,11 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     "actor/grad_norm": grad_norm,
                     "actor/lr": lr_list[0],
                 }
+                explained_variance = _finalize_global_batch_explained_variance(
+                    explained_variance_stats
+                )
+                if explained_variance is not None:
+                    data["critic/explained_variance"] = explained_variance
                 if len(lr_list) > 1:
                     data["critic/lr"] = lr_list[1]
                 append_to_dict(metrics, data)

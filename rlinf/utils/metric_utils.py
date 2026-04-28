@@ -125,6 +125,29 @@ def compute_rollout_metrics(data_buffer: dict) -> dict:
         rewards_metrics = {
             "rewards": mean_rewards.item(),
         }
+        loss_mask = data_buffer.get("loss_mask", None)
+        if loss_mask is not None:
+            loss_mask = loss_mask.to(device=rewards.device, dtype=torch.bool)
+            while loss_mask.dim() < rewards.dim():
+                loss_mask = loss_mask.unsqueeze(-1)
+            loss_mask = torch.broadcast_to(loss_mask, rewards.shape)
+
+            masked_reward_sum = torch.where(loss_mask, rewards, 0.0).sum()
+            masked_reward_count = loss_mask.count_nonzero()
+            masked_reward_stats = torch.stack(
+                [
+                    masked_reward_sum.to(dtype=torch.float32),
+                    masked_reward_count.to(dtype=torch.float32),
+                ]
+            ).to(Worker.torch_platform.current_device())
+            torch.distributed.all_reduce(
+                masked_reward_stats, op=torch.distributed.ReduceOp.SUM
+            )
+
+            masked_reward_count = masked_reward_stats[1].clamp_min(1.0)
+            rewards_metrics["masked_rewards"] = (
+                masked_reward_stats[0] / masked_reward_count
+            ).item()
         rollout_metrics.update(rewards_metrics)
 
     if "advantages" in data_buffer:

@@ -24,7 +24,11 @@ from rlinf.utils.distributed import all_reduce_dict, masked_normalization
 from rlinf.utils.metric_utils import append_to_dict, compute_rollout_metrics
 from rlinf.utils.nested_dict_process import put_tensor_device, split_dict_to_chunk
 from rlinf.utils.utils import clear_memory, masked_mean, reshape_entropy
-from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+from rlinf.workers.actor.fsdp_actor_worker import (
+    EmbodiedFSDPActor,
+    _explained_variance_stats_from_loss_kwargs,
+    _finalize_global_batch_explained_variance,
+)
 
 
 def flatten_rollout_batch_for_train(
@@ -222,6 +226,7 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                 )
 
                 self.optimizer.zero_grad()
+                explained_variance_stats = None
 
                 for mb_idx, data in enumerate(micro_batch_iter):
                     data = put_tensor_device(
@@ -319,9 +324,20 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                         "task_type": self.cfg.runner.task_type,
                         "critic_warmup": self.optimizer_steps
                         < self.critic_warmup_steps,
+                        "compute_explained_variance": False,
                     }
 
                     loss, metrics_data = policy_loss(**loss_kwargs)
+                    metrics_data.pop("critic/explained_variance", None)
+                    micro_ev_stats = _explained_variance_stats_from_loss_kwargs(
+                        loss_kwargs
+                    )
+                    if micro_ev_stats is not None:
+                        explained_variance_stats = (
+                            micro_ev_stats
+                            if explained_variance_stats is None
+                            else explained_variance_stats + micro_ev_stats
+                        )
 
                     entropy_loss = torch.tensor(0.0, device=torch.cuda.current_device())
                     if (
@@ -355,6 +371,11 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                     "actor/grad_norm": grad_norm,
                     "actor/lr": lr_list[0],
                 }
+                explained_variance = _finalize_global_batch_explained_variance(
+                    explained_variance_stats
+                )
+                if explained_variance is not None:
+                    extra_metrics["critic/explained_variance"] = explained_variance
                 if len(lr_list) > 1:
                     extra_metrics["critic/lr"] = lr_list[1]
                 append_to_dict(metrics, extra_metrics)
