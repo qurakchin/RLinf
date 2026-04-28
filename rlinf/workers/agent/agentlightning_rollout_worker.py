@@ -190,9 +190,11 @@ class AgentLightningRolloutWorker(Worker):
         from agentlightning.types.core import Task
 
         spans = await self.store.query_spans(rollout.rollout_id, attempt_id="latest")
-
+        for span in spans:
+            print(span)
         triplets = self.adapter.adapt(spans)
-        print(triplets)
+        for triplet in triplets:
+            print(triplet)
         final_reward: Optional[float] = None
         for triplet in reversed(triplets):
             if triplet.reward is not None:
