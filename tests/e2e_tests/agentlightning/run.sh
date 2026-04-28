@@ -1,6 +1,8 @@
 #! /bin/bash
 set -x
 
+unset https_proxy HTTPS_PROXY http_proxy HTTP_PROXY
+
 tabs 4
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export TOKENIZERS_PARALLELISM=false
