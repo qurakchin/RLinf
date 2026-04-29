@@ -499,3 +499,19 @@ def set_rng_state(rng_state: dict) -> None:
     random.setstate(rng_state["random"])
     if Worker.torch_platform.is_available() and Worker.torch_device_type in rng_state:
         Worker.torch_platform.set_rng_state(rng_state[Worker.torch_device_type])
+
+
+def _tree_map(fn, *trees):
+    """
+    Substitute the jax.tree.map function.
+    """
+    first = trees[0]
+    if isinstance(first, dict):
+        return {k: _tree_map(fn, *(tree[k] for tree in trees)) for k in first}
+    if isinstance(first, list):
+        return [_tree_map(fn, *(tree[i] for tree in trees)) for i in range(len(first))]
+    if isinstance(first, tuple):
+        return tuple(
+            _tree_map(fn, *(tree[i] for tree in trees)) for i in range(len(first))
+        )
+    return fn(*trees)

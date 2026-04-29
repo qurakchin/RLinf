@@ -24,7 +24,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-import jax
 import numpy as np
 import torch
 from omegaconf import DictConfig
@@ -43,6 +42,7 @@ from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.utils.utils import tree_map
 from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
 
 # Suppress libdav1d/ffmpeg verbose logging
@@ -374,7 +374,7 @@ class FSDPCfgWorker(FSDPSftWorker):
                     observation, actions, advantage = next(self.data_iter)
                 self._data_iter_offset += 1
 
-                observation = jax.tree.map(
+                observation = tree_map(
                     lambda x: torch.as_tensor(x)
                     .contiguous()
                     .to(self.device, non_blocking=True),
