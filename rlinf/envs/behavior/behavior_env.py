@@ -21,10 +21,15 @@ from multiprocessing import get_context
 from threading import Thread
 
 import gymnasium as gym
+import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 
 from rlinf.envs.behavior.instance_loader import ActivityInstanceLoader
+from rlinf.envs.behavior.replay_initializer import (
+    maybe_make_replay_initializer,
+    replay_plans_to_infos,
+)
 from rlinf.envs.behavior.utils import (
     apply_env_wrapper,
     apply_runtime_renderer_settings,
@@ -37,13 +42,18 @@ from rlinf.utils.logging import get_logger
 __all__ = ["BehaviorEnv"]
 
 
-def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
+def _behavior_env_worker(
+    cfg: DictConfig, conn, num_envs: int, replay_seed_offset: int = 0
+):
     env = None
     try:
         from omnigibson.envs import VectorEnvironment
 
         omni_cfg = setup_omni_cfg(cfg)
         instance_loader = ActivityInstanceLoader.from_omni_cfg(omni_cfg)
+        replay_initializer = maybe_make_replay_initializer(
+            cfg, seed_offset=replay_seed_offset
+        )
 
         # create env and apply env wrapper if enabled
         omni_cfg_dict = OmegaConf.to_container(
@@ -78,6 +88,44 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
                 return env.step(actions, get_obs=need_obs, render=need_obs)
             return env.step(actions)
 
+        def _reset_replay_episode_counters():
+            for child_env in getattr(env, "envs", []):
+                if hasattr(child_env, "_current_step"):
+                    child_env._current_step = 0
+
+        def _annotate_replay_infos(infos, replay_infos):
+            for info, replay_info in zip(infos, replay_infos, strict=True):
+                if isinstance(info, dict):
+                    info["replay_init"] = replay_info
+            return infos
+
+        def _replay_after_reset(raw_obs, infos, replay_plans):
+            if not replay_plans:
+                return raw_obs, infos
+            max_steps = max(plan.replay_steps for plan in replay_plans)
+            replay_infos = replay_plans_to_infos(replay_plans)
+            if max_steps <= 0:
+                return raw_obs, _annotate_replay_infos(infos, replay_infos)
+
+            action_dim = replay_plans[0].actions.shape[-1]
+            action_batch = np.zeros((len(replay_plans), action_dim), dtype=np.float32)
+
+            for step_idx in range(max_steps):
+                for env_idx, plan in enumerate(replay_plans):
+                    if plan.replay_steps <= 0:
+                        action_batch[env_idx] = 0.0
+                    elif step_idx < plan.replay_steps:
+                        action_batch[env_idx] = plan.actions[step_idx]
+                    else:
+                        action_batch[env_idx] = plan.actions[-1]
+                need_obs = step_idx == max_steps - 1
+                raw_obs, _rewards, _terminations, _truncations, infos = _step_env(
+                    action_batch, need_obs=need_obs
+                )
+
+            _reset_replay_episode_counters()
+            return raw_obs, _annotate_replay_infos(infos, replay_infos)
+
         conn.send(
             {
                 "type": "ready",
@@ -89,8 +137,20 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
             cmd, payload = conn.recv()
 
             if cmd == "reset":
-                instance_loader.prepare_reset(env)
+                replay_plans = (
+                    replay_initializer.sample_plans(len(env.envs))
+                    if replay_initializer is not None
+                    else None
+                )
+                replay_instance_ids = (
+                    [plan.instance_id for plan in replay_plans]
+                    if replay_plans is not None
+                    else None
+                )
+                instance_loader.prepare_reset(env, instance_ids=replay_instance_ids)
                 raw_obs, infos = env.reset()
+                if replay_plans is not None:
+                    raw_obs, infos = _replay_after_reset(raw_obs, infos, replay_plans)
                 conn.send({"type": "ok", "result": (raw_obs, infos)})
 
             elif cmd == "step":
@@ -143,6 +203,7 @@ def _behavior_env_worker(cfg: DictConfig, conn, num_envs: int):
 
             elif cmd == "close":
                 env.close()
+                env = None
                 conn.send({"type": "ok", "result": None})
                 break
             else:
@@ -243,6 +304,7 @@ class BehaviorEnv(gym.Env):
                     self.cfg,
                     child_conn,
                     self.env_shard_size,
+                    self.seed_offset + len(self.env_process_list),
                 ),
                 daemon=True,
             )
@@ -614,6 +676,7 @@ class BehaviorEnv(gym.Env):
 
     def _record_metrics(self, rewards, infos):
         info_lists = []
+        replay_info_lists = []
         for env_idx, (reward, info) in enumerate(zip(rewards, infos)):
             done_dict = info.get("done", {})
             step_success = done_dict.get("success", False)
@@ -635,8 +698,14 @@ class BehaviorEnv(gym.Env):
             )
 
             info_lists.append(episode_info)
+            if "replay_init" in info:
+                replay_info_lists.append(info["replay_init"])
 
         infos = {"episode": to_tensor(list_of_dict_to_dict_of_list(info_lists))}
+        if replay_info_lists:
+            infos["replay_init"] = to_tensor(
+                list_of_dict_to_dict_of_list(replay_info_lists)
+            )
         return infos
 
     @staticmethod

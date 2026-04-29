@@ -12,6 +12,30 @@ skip_intermediate_obs_in_chunk: True
 use_thread_worker: False
 num_env_subprocess: 1
 
+replay_init:
+  enabled: False
+  # Root of the BEHAVIOR 2025 challenge demonstrations directory containing
+  # data/, annotations/, meta/, and videos/.
+  dataset_root: null
+  task_id: 0
+  episode_ids: null
+  # Choose the demonstration prefix endpoint. For staged curricula, set
+  # stage_index to the stage where the policy should take over; negative indices
+  # count from the end, so -1 means the final stage.
+  stage_index: null
+  stage_boundary: start
+  target_step: null
+  # replay_steps = resolved_target_step * replay_ratio, with optional jitter.
+  replay_ratio: 1.0
+  min_replay_steps: 0
+  max_replay_steps: null
+  jitter_steps: 0
+  noise_std: 0.0
+  noise_clip: null
+  action_clip: null
+  action_column: action
+  seed: null
+
 video_cfg:
   save_video: False
   info_on_video: True

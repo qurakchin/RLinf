@@ -433,23 +433,44 @@ class ActivityInstanceLoader:
             activity_instances=activity_instances,
         )
 
-    def prepare_reset(self, vec_env) -> None:
+    def prepare_reset(self, vec_env, instance_ids: list[int] | None = None) -> None:
         """Apply any reset-time task-instance mutation required by the config.
 
         Args:
             vec_env: Vectorized OmniGibson environment whose child envs should be
                 updated before ``vec_env.reset()``.
+            instance_ids: Optional per-env cached instance ids to load for this
+                reset. This is used by demonstration replay initialization so the
+                simulator reset matches the replayed episode.
         """
+        if instance_ids is not None and len(instance_ids) != len(vec_env.envs):
+            raise ValueError(
+                "Number of requested instance ids must match the number of "
+                f"vectorized environments, got {len(instance_ids)} and {len(vec_env.envs)}."
+            )
+
         if self.instance_resample_mode == "online":
+            if instance_ids is not None:
+                raise ValueError(
+                    "Per-episode replay instance ids are not supported with "
+                    "task.instance_resample_mode='online'."
+                )
             task_cfg = OmegaConf.select(self.omni_cfg, "task")
             for env in vec_env.envs:
                 env.update_task(task_config=task_cfg)
             return
 
         if not self.activity_instances:
+            if instance_ids is not None:
+                raise ValueError(
+                    "Per-episode replay instance ids require cached activity instances; "
+                    "set task.activity_instance_dir and use offline cached instances."
+                )
             return
 
-        if self.instance_resample_mode == "offline":
+        if instance_ids is not None:
+            instance_files = [self._get_activity_instance(i) for i in instance_ids]
+        elif self.instance_resample_mode == "offline":
             instance_files = [
                 random.choice(self.activity_instances) for _ in range(len(vec_env.envs))
             ]
