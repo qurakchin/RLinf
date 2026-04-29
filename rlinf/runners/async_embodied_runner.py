@@ -42,9 +42,18 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         rollout: "AsyncMultiStepRolloutWorker",
         env: "AsyncEnvWorker",
         reward: "EmbodiedRewardWorker",
+        component_placement=None,
         critic=None,
     ):
-        super().__init__(cfg, actor, rollout, env, reward, critic)
+        super().__init__(
+            cfg=cfg,
+            actor=actor,
+            rollout=rollout,
+            env=env,
+            component_placement=component_placement,
+            reward=reward,
+            critic=critic,
+        )
 
         # Data channels
         self.env_metric_channel = Channel.create("EnvMetric")

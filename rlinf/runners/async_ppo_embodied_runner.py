@@ -42,10 +42,19 @@ class AsyncPPOEmbodiedRunner(EmbodiedRunner):
         actor: "AsyncPPOEmbodiedFSDPActor",
         rollout: "AsyncMultiStepRolloutWorker",
         env: "AsyncEnvWorker",
+        component_placement=None,
         critic=None,
         reward=None,
     ):
-        super().__init__(cfg, actor, rollout, env, critic, reward)
+        super().__init__(
+            cfg=cfg,
+            actor=actor,
+            rollout=rollout,
+            env=env,
+            component_placement=component_placement,
+            reward=reward,
+            critic=critic,
+        )
         self.env_metric_channel = Channel.create("EnvMetric")
         self.rollout_metric_channel = Channel.create("RolloutMetric")
         self.recompute_logprobs = bool(self.cfg.rollout.get("recompute_logprobs", True))
