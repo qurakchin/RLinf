@@ -1363,3 +1363,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         if states.dtype != torch.bfloat16:
             states = states.to(torch.bfloat16)
         return states
+
+    def gradient_checkpointing_enable(self):
+        raise NotImplementedError(
+            "gradient_checkpointing_enable must be False for OpenPi0ForRLActionPrediction"
+        )

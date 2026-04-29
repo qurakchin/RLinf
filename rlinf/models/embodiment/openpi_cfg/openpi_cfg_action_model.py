@@ -907,3 +907,8 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             part_observation.tokenized_negative_guidance_prompt_mask,
             part_observation.state,
         )
+
+    def gradient_checkpointing_enable(self):
+        raise NotImplementedError(
+            "gradient_checkpointing_enable must be False for OpenPi0ForCFGActionPrediction"
+        )
