@@ -293,4 +293,4 @@ critic:
 
 agentlightning:
   # E2E: fewer runners than example base
-  n_runners: 5
+  n_runners: 1

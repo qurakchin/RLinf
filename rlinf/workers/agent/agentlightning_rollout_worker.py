@@ -189,7 +189,9 @@ class AgentLightningRolloutWorker(Worker):
         from agentlightning import RolloutLegacy
         from agentlightning.types.core import Task
 
-        spans = list(await self.store.query_spans(rollout.rollout_id, attempt_id="latest"))
+        spans = list(
+            await self.store.query_spans(rollout.rollout_id, attempt_id="latest")
+        )
         logging.warning(
             "AgentLightning rollout spans | rollout_id=%s | span_count=%d | spans=%r",
             rollout.rollout_id,
@@ -424,7 +426,11 @@ class AgentLightningRolloutWorker(Worker):
         def _min_max_avg(xs: list[int]) -> dict[str, float | int]:
             if not xs:
                 return {"min": -1, "max": -1, "avg": -1.0}
-            return {"min": int(min(xs)), "max": int(max(xs)), "avg": float(sum(xs)) / float(len(xs))}
+            return {
+                "min": int(min(xs)),
+                "max": int(max(xs)),
+                "avg": float(sum(xs)) / float(len(xs)),
+            }
 
         rollout_ids_dbg = [getattr(r, "rollout_id", "<unknown>") for r in rollouts]
         debug_line = (
