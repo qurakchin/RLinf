@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 import torch
 from omegaconf import DictConfig
+from torch.utils._pytree import tree_map
 
 from rlinf.data.datasets.recap.cfg_model import (
     AdvantagePreservingDataset,
@@ -42,7 +43,6 @@ from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.utils.utils import tree_map
 from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
 
 # Suppress libdav1d/ffmpeg verbose logging

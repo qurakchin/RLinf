@@ -27,9 +27,9 @@ from openpi.models import model as _model
 from openpi.models.model import Observation as Obs
 from openpi.models.pi0_config import Pi0Config
 from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
+from torch.utils._pytree import tree_map
 
 from rlinf.models.embodiment.base_policy import BasePolicy
-from rlinf.utils.utils import tree_map
 
 ArrayT = TypeVar("ArrayT", bound=torch.Tensor | np.ndarray)
 
