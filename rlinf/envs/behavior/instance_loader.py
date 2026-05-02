@@ -433,7 +433,12 @@ class ActivityInstanceLoader:
             activity_instances=activity_instances,
         )
 
-    def prepare_reset(self, vec_env, instance_ids: list[int] | None = None) -> None:
+    def prepare_reset(
+        self,
+        vec_env,
+        instance_ids: list[int] | None = None,
+        group_size: int = 1,
+    ) -> None:
         """Apply any reset-time task-instance mutation required by the config.
 
         Args:
@@ -442,11 +447,21 @@ class ActivityInstanceLoader:
             instance_ids: Optional per-env cached instance ids to load for this
                 reset. This is used by demonstration replay initialization so the
                 simulator reset matches the replayed episode.
+            group_size: Number of trajectories sharing one sampled reset instance.
+                GRPO uses this to keep each group on the same initial condition.
         """
+        group_size = int(group_size)
+        if group_size <= 0:
+            raise ValueError(f"group_size must be positive, got {group_size}.")
         if instance_ids is not None and len(instance_ids) != len(vec_env.envs):
             raise ValueError(
                 "Number of requested instance ids must match the number of "
                 f"vectorized environments, got {len(instance_ids)} and {len(vec_env.envs)}."
+            )
+        if instance_ids is None and len(vec_env.envs) % group_size != 0:
+            raise ValueError(
+                "Number of vectorized environments must be divisible by group_size "
+                f"for grouped BEHAVIOR reset, got {len(vec_env.envs)} and {group_size}."
             )
 
         if self.instance_resample_mode == "online":
@@ -471,8 +486,14 @@ class ActivityInstanceLoader:
         if instance_ids is not None:
             instance_files = [self._get_activity_instance(i) for i in instance_ids]
         elif self.instance_resample_mode == "offline":
+            group_count = len(vec_env.envs) // group_size
+            group_files = [
+                random.choice(self.activity_instances) for _ in range(group_count)
+            ]
             instance_files = [
-                random.choice(self.activity_instances) for _ in range(len(vec_env.envs))
+                instance_file
+                for instance_file in group_files
+                for _ in range(group_size)
             ]
         else:
             instance_file = self._get_activity_instance(self.activity_instance_id)

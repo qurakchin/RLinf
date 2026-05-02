@@ -54,6 +54,15 @@ def _behavior_env_worker(
         replay_initializer = maybe_make_replay_initializer(
             cfg, seed_offset=replay_seed_offset
         )
+        group_size = int(OmegaConf.select(cfg, "group_size", default=1))
+        if group_size <= 0:
+            raise ValueError(f"env.group_size must be positive, got {group_size}.")
+        if num_envs % group_size != 0:
+            raise ValueError(
+                f"Behavior env shard num_envs={num_envs} must be divisible by "
+                f"group_size={group_size}. If using num_env_subprocess, make each "
+                "subprocess shard contain a whole number of GRPO groups."
+            )
 
         # create env and apply env wrapper if enabled
         omni_cfg_dict = OmegaConf.to_container(
@@ -138,7 +147,7 @@ def _behavior_env_worker(
 
             if cmd == "reset":
                 replay_plans = (
-                    replay_initializer.sample_plans(len(env.envs))
+                    replay_initializer.sample_grouped_plans(len(env.envs), group_size)
                     if replay_initializer is not None
                     else None
                 )
@@ -147,7 +156,11 @@ def _behavior_env_worker(
                     if replay_plans is not None
                     else None
                 )
-                instance_loader.prepare_reset(env, instance_ids=replay_instance_ids)
+                instance_loader.prepare_reset(
+                    env,
+                    instance_ids=replay_instance_ids,
+                    group_size=group_size,
+                )
                 raw_obs, infos = env.reset()
                 if replay_plans is not None:
                     raw_obs, infos = _replay_after_reset(raw_obs, infos, replay_plans)
@@ -160,9 +173,6 @@ def _behavior_env_worker(
             elif cmd == "chunk_step":
                 chunk_actions = payload["chunk_actions"]
                 chunk_size = chunk_actions.shape[1]
-                skip_intermediate = bool(
-                    payload.get("skip_intermediate_obs_in_chunk", False)
-                )
 
                 raw_obs_list = []
                 chunk_rewards = []
@@ -249,6 +259,7 @@ class BehaviorEnv(gym.Env):
         self.env_process_list = []
         self.parent_conn_list = []
         self.child_conn_list = []
+        self._stage_prompt_lists: list[list[str] | None] = [None] * self.num_envs
 
         self.logger = get_logger()
 
@@ -496,7 +507,64 @@ class BehaviorEnv(gym.Env):
             "state": state,
         }
 
-    def _wrap_obs(self, obs_list):
+    def _update_stage_prompts_from_info(self, env_idx: int, info: dict | None) -> str | None:
+        if not isinstance(info, dict):
+            return None
+
+        stage_info = info
+        reward_info = info.get("reward")
+        if isinstance(reward_info, dict):
+            task_specific_info = reward_info.get("task_specific")
+            if isinstance(task_specific_info, dict):
+                stage_info = task_specific_info
+
+        replay_info = info.get("replay_init")
+        if isinstance(replay_info, dict):
+            replay_prompts = replay_info.get("replay_stage_prompts")
+            if isinstance(replay_prompts, (list, tuple)):
+                self._stage_prompt_lists[env_idx] = [
+                    str(prompt).strip()
+                    for prompt in replay_prompts
+                    if str(prompt).strip()
+                ]
+
+        explicit_prompt = (
+            stage_info.get("current_stage_prompt")
+            or stage_info.get("stage_prompt")
+            or stage_info.get("subtask_prompt")
+        )
+        if explicit_prompt:
+            return str(explicit_prompt).strip()
+
+        stage_idx = stage_info.get("current_stage_idx")
+        if stage_idx is None:
+            return None
+        try:
+            stage_idx = int(stage_idx)
+        except (TypeError, ValueError):
+            return None
+
+        stage_prompts = self._stage_prompt_lists[env_idx]
+        if not stage_prompts or stage_idx < 0 or stage_idx >= len(stage_prompts):
+            return None
+        return stage_prompts[stage_idx]
+
+    def _compose_task_description(self, stage_prompt: str | None) -> str:
+        if not stage_prompt:
+            return self.task_description
+        return f"{self.task_description}\nCurrent stage: {stage_prompt}"
+
+    def _task_descriptions_from_infos(self, infos=None) -> list[str]:
+        if infos is None:
+            return [self.task_description for _ in range(self.num_envs)]
+        return [
+            self._compose_task_description(
+                self._update_stage_prompts_from_info(env_idx, info)
+            )
+            for env_idx, info in enumerate(infos)
+        ]
+
+    def _wrap_obs(self, obs_list, infos=None):
         extracted_obs_list = []
         for obs in obs_list:
             extracted_obs = self._extract_obs_image(obs)
@@ -509,7 +577,7 @@ class BehaviorEnv(gym.Env):
             "wrist_images": torch.stack(
                 [obs["wrist_images"] for obs in extracted_obs_list], axis=0
             ),  # [N_ENV, N_IMG, H, W, C]
-            "task_descriptions": [self.task_description for i in range(self.num_envs)],
+            "task_descriptions": self._task_descriptions_from_infos(infos),
             "states": torch.stack(
                 [obs["state"] for obs in extracted_obs_list], axis=0
             ),  # [N_ENV, 32]
@@ -518,7 +586,7 @@ class BehaviorEnv(gym.Env):
 
     def reset(self):
         raw_obs, infos = self._call_subproc("reset")
-        obs = self._wrap_obs(raw_obs)
+        obs = self._wrap_obs(raw_obs, infos)
         rewards = torch.zeros(self.num_envs, dtype=bool)
         infos = self._record_metrics(rewards, infos)
         self._reset_metrics()
@@ -532,7 +600,7 @@ class BehaviorEnv(gym.Env):
         raw_obs, rewards, terminations, truncations, infos = self._call_subproc(
             "step", actions
         )
-        obs = self._wrap_obs(raw_obs)
+        obs = self._wrap_obs(raw_obs, infos)
         rewards = self._calc_step_reward(rewards, infos)
         infos = self._record_metrics(rewards, infos)
         if self.ignore_terminations:
@@ -580,7 +648,7 @@ class BehaviorEnv(gym.Env):
             ):
                 obs_list.append(None)
             else:
-                obs_list.append(self._wrap_obs(raw_obs))
+                obs_list.append(self._wrap_obs(raw_obs, raw_infos_list[i]))
             infos_list.append(infos)
 
         chunk_rewards = torch.stack(scaled_rewards_list, dim=1)  # [num_envs, chunk_steps]
@@ -699,7 +767,13 @@ class BehaviorEnv(gym.Env):
 
             info_lists.append(episode_info)
             if "replay_init" in info:
-                replay_info_lists.append(info["replay_init"])
+                replay_info_lists.append(
+                    {
+                        key: value
+                        for key, value in info["replay_init"].items()
+                        if isinstance(value, (bool, int, float))
+                    }
+                )
 
         infos = {"episode": to_tensor(list_of_dict_to_dict_of_list(info_lists))}
         if replay_info_lists:

@@ -30,6 +30,7 @@ class ReplayEpisode:
     instance_id: int
     parquet_path: Path
     annotation_path: Path | None
+    orchestrator_path: Path | None
     length: int | None = None
 
 
@@ -40,6 +41,7 @@ class ReplayPlan:
     actions: np.ndarray
     replay_steps: int
     target_step: int
+    stage_prompts: tuple[str, ...] = ()
 
 
 class BehaviorReplayInitializer:
@@ -135,11 +137,26 @@ class BehaviorReplayInitializer:
         episodes = [self._py_rng.choice(self.episodes) for _ in range(num_envs)]
         return [self._build_plan(episode) for episode in episodes]
 
+    def sample_grouped_plans(self, num_envs: int, group_size: int) -> list[ReplayPlan]:
+        if group_size <= 1:
+            return self.sample_plans(num_envs)
+        if num_envs % group_size != 0:
+            raise ValueError(
+                f"num_envs={num_envs} must be divisible by group_size={group_size} "
+                "for grouped BEHAVIOR replay initialization."
+            )
+        group_plans = self.sample_plans(num_envs // group_size)
+        plans: list[ReplayPlan] = []
+        for plan in group_plans:
+            plans.extend([plan] * group_size)
+        return plans
+
     def _discover_episodes(
         self, requested_episode_ids: list[int] | None
     ) -> list[ReplayEpisode]:
         data_dir = self.dataset_root / "data" / self.task_dir
         annotation_dir = self.dataset_root / "annotations" / self.task_dir
+        orchestrator_dir = self.dataset_root / "orchestrators" / self.task_dir
         meta_by_episode = self._load_episode_lengths()
 
         episodes = []
@@ -155,12 +172,20 @@ class BehaviorReplayInitializer:
             ):
                 continue
             annotation_path = annotation_dir / f"episode_{episode_index:08d}.json"
+            orchestrator_path = (
+                orchestrator_dir
+                / f"episode_{episode_index:08d}"
+                / "task_annotated.json"
+            )
             episodes.append(
                 ReplayEpisode(
                     episode_index=episode_index,
                     instance_id=instance_id,
                     parquet_path=parquet_path,
                     annotation_path=annotation_path if annotation_path.is_file() else None,
+                    orchestrator_path=orchestrator_path
+                    if orchestrator_path.is_file()
+                    else None,
                     length=meta_by_episode.get(episode_index),
                 )
             )
@@ -228,6 +253,7 @@ class BehaviorReplayInitializer:
             actions=replay_actions,
             replay_steps=replay_steps,
             target_step=target_step,
+            stage_prompts=self._load_stage_prompts(episode),
         )
 
     def _load_actions(self, episode: ReplayEpisode) -> np.ndarray:
@@ -287,6 +313,17 @@ class BehaviorReplayInitializer:
             )
         return int(duration[0] if self.stage_boundary == "start" else duration[1])
 
+    @staticmethod
+    def _load_stage_prompts(episode: ReplayEpisode) -> tuple[str, ...]:
+        if episode.orchestrator_path is None:
+            return ()
+        with episode.orchestrator_path.open("r", encoding="utf-8") as f:
+            orchestrator = json.load(f)
+        prompts = orchestrator.get("cot_subtask_description_list", [])
+        if not isinstance(prompts, list):
+            return ()
+        return tuple(str(prompt).strip() for prompt in prompts if str(prompt).strip())
+
     def _episode_index_to_instance_id(self, episode_index: int) -> int:
         task_offset = self.task_id * 10000
         within_task_index = episode_index - task_offset
@@ -320,6 +357,7 @@ def replay_plans_to_infos(plans: list[ReplayPlan]) -> list[dict[str, Any]]:
             "replay_instance_id": plan.instance_id,
             "replay_steps": plan.replay_steps,
             "replay_target_step": plan.target_step,
+            "replay_stage_prompts": list(plan.stage_prompts),
         }
         for plan in plans
     ]
