@@ -55,6 +55,9 @@ class BehaviorReplayInitializer:
         if not self.enabled:
             return
 
+        self.use_subtask_prompt = bool(
+            OmegaConf.select(cfg, "use_subtask_prompt", default=False)
+        )
         self.dataset_root = Path(
             OmegaConf.select(replay_cfg, "dataset_root", default="")
         ).expanduser()
@@ -253,7 +256,9 @@ class BehaviorReplayInitializer:
             actions=replay_actions,
             replay_steps=replay_steps,
             target_step=target_step,
-            stage_prompts=self._load_stage_prompts(episode),
+            stage_prompts=(
+                self._load_stage_prompts(episode) if self.use_subtask_prompt else ()
+            ),
         )
 
     def _load_actions(self, episode: ReplayEpisode) -> np.ndarray:

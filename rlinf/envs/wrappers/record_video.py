@@ -22,6 +22,8 @@ import gymnasium as gym
 import imageio
 import numpy as np
 
+RADIO_BUTTON_UP_ALIGNMENT_THRESHOLD = 0.5
+
 try:
     import torch
 except ImportError:
@@ -203,7 +205,7 @@ class RecordVideo(gym.Wrapper):
 
     def _value_for_env(self, value: Any, env_id: int):
         """Select a scalar/value for a specific env from batched inputs."""
-        if isinstance(value, torch.Tensor):
+        if torch is not None and isinstance(value, torch.Tensor):
             value = value.detach().cpu().numpy()
         if isinstance(value, np.ndarray):
             if value.shape == ():
@@ -234,6 +236,27 @@ class RecordVideo(gym.Wrapper):
             return task_desc[0] if isinstance(task_desc, (list, tuple)) else task_desc
         return None
 
+    def _get_subtask_prompt(self, obs: Any, env_id: int) -> Optional[str]:
+        """Extract the current subtask prompt from task descriptions when present."""
+        if not bool(getattr(self.env, "use_subtask_prompt", False)):
+            return None
+
+        task_desc = self._get_task_description(obs, env_id)
+        if task_desc is None:
+            return None
+        if isinstance(task_desc, bytes):
+            task_desc = task_desc.decode("utf-8", errors="replace")
+        task_desc = str(task_desc).strip()
+        if not task_desc:
+            return None
+
+        marker = "Current stage:"
+        for line in task_desc.splitlines():
+            if marker in line:
+                prompt = line.split(marker, 1)[1].strip()
+                return prompt or None
+        return task_desc
+
     def _get_video_info_keys(self) -> list[str]:
         """Get configured info keys to overlay on video frames."""
         if hasattr(self.video_cfg, "extra_info_on_video"):
@@ -261,8 +284,72 @@ class RecordVideo(gym.Wrapper):
             value = value[part]
         return value
 
+    def _coerce_overlay_value(self, value: Any) -> Any:
+        """Convert common tensor/array scalars to overlay-friendly values."""
+        if torch is not None and isinstance(value, torch.Tensor):
+            value = value.detach().cpu().numpy()
+        if isinstance(value, np.ndarray):
+            if value.shape == ():
+                return value.item()
+            if value.size == 1:
+                return value.reshape(-1)[0].item()
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, (numbers.Number, str, bool)):
+            return value
+        return None
+
+    def _lookup_first_info_value(self, info: Any, keys: list[str], env_id: int) -> Any:
+        """Return the first available per-env value from a list of info keys."""
+        for key in keys:
+            value = self._lookup_info_value(info, key)
+            if value is None:
+                continue
+            value = self._value_for_env(value, env_id)
+            value = self._coerce_overlay_value(value)
+            if value is not None:
+                return value
+        return None
+
+    def _get_radio_button_up_info(self, infos: Optional[Any], env_id: int) -> Optional[dict[str, Any]]:
+        """Collect radio-up status from per-env info, mirroring completion_bonus."""
+        if infos is None:
+            return None
+
+        button_normal_up = self._lookup_first_info_value(infos, ["episode.radio_button_up"], env_id)
+        button_up_alignment = self._lookup_first_info_value(infos, ["episode.radio_button_align"], env_id)
+        if button_normal_up is None and button_up_alignment is None:
+            return None
+
+        if button_normal_up is None:
+            button_normal_up = float(button_up_alignment) >= RADIO_BUTTON_UP_ALIGNMENT_THRESHOLD
+
+        radio_info = {"radio_button_up": bool(button_normal_up)}
+        if button_up_alignment is not None:
+            radio_info["radio_button_align"] = float(button_up_alignment)
+        return radio_info
+
+    def _get_current_stage_info(self, infos: Optional[Any], env_id: int) -> Optional[dict[str, Any]]:
+        """Collect the current sequential stage from per-env info."""
+        if infos is None:
+            return None
+
+        current_stage_idx = self._lookup_first_info_value(infos, ["episode.current_stage_idx"], env_id)
+        if current_stage_idx is None:
+            return None
+
+        total_stage_count = self._lookup_first_info_value(infos, ["episode.total_stage_count"], env_id)
+        current_stage_idx = int(current_stage_idx)
+        if current_stage_idx < 0:
+            return None
+        if total_stage_count is not None and int(total_stage_count) > 0:
+            return {"current_stage": f"{current_stage_idx}/{int(total_stage_count)}"}
+        return {"current_stage": current_stage_idx}
+
     def _build_info_item(
         self,
+        obs: Any,
         infos: Optional[Any],
         rewards: Optional[Any],
         terminations: Optional[Any],
@@ -271,6 +358,18 @@ class RecordVideo(gym.Wrapper):
     ) -> dict:
         """Build a per-env info dict for overlay."""
         info_item: dict[str, Any] = {}
+
+        subtask_prompt = self._get_subtask_prompt(obs, env_id)
+        if subtask_prompt:
+            info_item["subtask_prompt"] = subtask_prompt
+
+        radio_button_up_info = self._get_radio_button_up_info(infos, env_id)
+        if radio_button_up_info:
+            info_item.update(radio_button_up_info)
+
+        current_stage_info = self._get_current_stage_info(infos, env_id)
+        if current_stage_info:
+            info_item.update(current_stage_info)
 
         if rewards is not None:
             value = self._value_for_env(rewards, env_id)
@@ -287,19 +386,34 @@ class RecordVideo(gym.Wrapper):
             info_item["termination"] = bool(value) if value is not None else value
 
         if infos is not None:
+            completion_bonus = self._lookup_first_info_value(
+                infos,
+                [
+                    "completion_bonus",
+                    "stage_completion_bonus",
+                    "episode.completion_bonus",
+                    "reward.task_specific.completion_bonus",
+                ],
+                env_id,
+            )
+            if completion_bonus is not None:
+                info_item["completion_bonus"] = completion_bonus
+
+            success_once = self._lookup_first_info_value(
+                infos,
+                ["success_once", "episode.success_once"],
+                env_id,
+            )
+            if success_once is not None:
+                info_item["success_once"] = success_once
+
             for key in self._get_video_info_keys():
                 value = self._lookup_info_value(infos, key)
                 if value is None:
                     continue
                 value = self._value_for_env(value, env_id)
-                if isinstance(value, np.ndarray):
-                    if value.shape == ():
-                        value = value.item()
-                    elif value.size == 1:
-                        value = value.reshape(-1)[0].item()
-                elif isinstance(value, numbers.Number):
-                    pass
-                else:
+                value = self._coerce_overlay_value(value)
+                if value is None:
                     warnings.warn(f"Unsupported value type {type(value)} for key {key}")
                     continue
                 info_item[key] = value
@@ -309,6 +423,7 @@ class RecordVideo(gym.Wrapper):
     def _append_frame(
         self,
         images: list[np.ndarray],
+        obs: Any,
         infos: Optional[Any],
         rewards: Optional[Any],
         terminations: Optional[Any],
@@ -322,7 +437,7 @@ class RecordVideo(gym.Wrapper):
                 put_info_on_image(
                     img,
                     self._build_info_item(
-                        infos, rewards, terminations, env_id, time_idx
+                        obs, infos, rewards, terminations, env_id, time_idx
                     ),
                 )
                 for env_id, img in enumerate(images)
@@ -354,11 +469,18 @@ class RecordVideo(gym.Wrapper):
         if isinstance(infos, (list, tuple)):
             for time_idx, images in enumerate(frames):
                 step_info = infos[time_idx] if len(infos) > time_idx else None
-                self._append_frame(images, step_info, rewards, terminations, time_idx)
+                step_obs = (
+                    obs[time_idx]
+                    if isinstance(obs, (list, tuple)) and len(obs) > time_idx
+                    else obs
+                )
+                self._append_frame(
+                    images, step_obs, step_info, rewards, terminations, time_idx
+                )
             return
 
         for time_idx, images in enumerate(frames):
-            self._append_frame(images, infos, rewards, terminations, time_idx)
+            self._append_frame(images, obs, infos, rewards, terminations, time_idx)
 
     def reset(self, *args, **kwargs):
         """Reset env and record the initial frame."""

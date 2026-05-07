@@ -12,6 +12,10 @@ skip_intermediate_obs_in_chunk: True
 use_thread_worker: False
 num_env_subprocess: 1
 
+# Append the current BEHAVIOR orchestrator subtask to the base task prompt.
+# This requires replay_init data with matching orchestrators.
+use_subtask_prompt: False
+
 replay_init:
   enabled: False
   # Root of the BEHAVIOR 2025 challenge demonstrations directory containing

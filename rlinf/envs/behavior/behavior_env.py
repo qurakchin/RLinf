@@ -259,6 +259,7 @@ class BehaviorEnv(gym.Env):
         self.env_process_list = []
         self.parent_conn_list = []
         self.child_conn_list = []
+        self.use_subtask_prompt = bool(self.cfg.get("use_subtask_prompt", False))
         self._stage_prompt_lists: list[list[str] | None] = [None] * self.num_envs
 
         self.logger = get_logger()
@@ -555,7 +556,7 @@ class BehaviorEnv(gym.Env):
         return f"{self.task_description}\nCurrent stage: {stage_prompt}"
 
     def _task_descriptions_from_infos(self, infos=None) -> list[str]:
-        if infos is None:
+        if not self.use_subtask_prompt or infos is None:
             return [self.task_description for _ in range(self.num_envs)]
         return [
             self._compose_task_description(
@@ -746,13 +747,45 @@ class BehaviorEnv(gym.Env):
         info_lists = []
         replay_info_lists = []
         for env_idx, (reward, info) in enumerate(zip(rewards, infos)):
+            task_reward = self._get_task_specific_reward_info(info)
+            completion_bonus = float(task_reward.get("completion_bonus", 0.0) or 0.0)
             done_dict = info.get("done", {})
             step_success = done_dict.get("success", False)
             end_success = info.get("success", step_success)
             episode_length = info.get("episode_length", 0)
+            current_stage_idx = task_reward.get("current_stage_idx", -1)
+            total_stage_count = task_reward.get("total_stage_count", 0)
             episode_info = {
                 "episode_length": episode_length,
+                "completion_bonus": completion_bonus,
+                "current_stage_idx": int(current_stage_idx if current_stage_idx is not None else -1),
+                "total_stage_count": int(total_stage_count if total_stage_count is not None else 0),
+                "radio_button_up": False,
+                "radio_button_align": -1.0,
             }
+            stage_infos = task_reward.get("stage_infos", {})
+            if not isinstance(stage_infos, dict):
+                stage_infos = {}
+            current_stage_name = task_reward.get("current_stage_name")
+            stage_info = stage_infos.get(current_stage_name, {}) if current_stage_name else {}
+            if not isinstance(stage_info, dict) or (
+                "button_normal_up" not in stage_info and "button_up_alignment" not in stage_info
+            ):
+                for stage_name in ("pickup_from_support", "press_radio"):
+                    candidate = stage_infos.get(stage_name, {})
+                    if isinstance(candidate, dict) and (
+                        "button_normal_up" in candidate or "button_up_alignment" in candidate
+                    ):
+                        stage_info = candidate
+                        break
+
+            if isinstance(stage_info, dict):
+                button_normal_up = stage_info.get("button_normal_up")
+                button_up_alignment = stage_info.get("button_up_alignment")
+                if button_normal_up is not None:
+                    episode_info["radio_button_up"] = bool(button_normal_up)
+                if button_up_alignment is not None:
+                    episode_info["radio_button_align"] = float(button_up_alignment)
             self.returns[env_idx] += reward
             self.success_once[env_idx] = self.success_once[env_idx] | step_success
             episode_info["success_once"] = self.success_once[env_idx].clone()
@@ -781,6 +814,16 @@ class BehaviorEnv(gym.Env):
                 list_of_dict_to_dict_of_list(replay_info_lists)
             )
         return infos
+
+    @staticmethod
+    def _get_task_specific_reward_info(info: dict | None) -> dict:
+        if not isinstance(info, dict):
+            return {}
+        reward_info = info.get("reward", {})
+        if not isinstance(reward_info, dict):
+            return {}
+        task_reward = reward_info.get("task_specific", {})
+        return task_reward if isinstance(task_reward, dict) else {}
 
     @staticmethod
     def _extract_info_done(info: dict) -> bool:
