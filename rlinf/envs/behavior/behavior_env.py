@@ -459,6 +459,7 @@ class BehaviorEnv(gym.Env):
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
         if self.record_metrics:
             self._init_metrics()
+        self.enable_offload = cfg.get("enable_offload", False)
         self._init_env()
 
     def _load_tasks_cfg(self, activity_name: str):
@@ -536,6 +537,8 @@ class BehaviorEnv(gym.Env):
         return self.reward_coef * reward
 
     def reset(self):
+        if self.enable_offload and len(self.env_proxys) == 0:
+            self._init_env()
         raw_obs, infos = self.env_reset()
         obs = self._wrap_obs(raw_obs)
         rewards = torch.zeros(self.num_envs, dtype=bool)
@@ -713,6 +716,9 @@ class BehaviorEnv(gym.Env):
     def update_reset_state_ids(self):
         # use for multi task training
         pass
+
+    def offload(self):
+        self.env_close()
 
     def close(self):
         if self.pool:
