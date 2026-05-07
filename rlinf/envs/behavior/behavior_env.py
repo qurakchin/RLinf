@@ -267,6 +267,7 @@ class BehaviorEnv(gym.Env):
         )
         if self.record_metrics:
             self._init_metrics()
+        self.enable_offload = cfg.get("enable_offload", False)
         self._init_env()
 
     def _split_num_envs(self, num_envs: int, num_processes: int) -> int:
@@ -293,15 +294,27 @@ class BehaviorEnv(gym.Env):
         self.task_description = task_description_map[activity_name]
 
     def _init_env(self):
-        self.env_proxys = [
-            BehaviorProcessProxy(
-                self.cfg,
-                self.num_env_shard,
-            )
-            for _ in range(self.num_env_subprocess)
-        ]
-        activity_names = [env_proxy.wait_ready_msg() for env_proxy in self.env_proxys]
-
+        for retry_idx in range(self.retry_times):
+            env_proxys: list[BehaviorProcessProxy] = []
+            try:
+                for _ in range(self.num_env_subprocess):
+                    env_proxys.append(
+                        BehaviorProcessProxy(
+                            self.cfg,
+                            self.num_env_shard,
+                        )
+                    )
+                activity_names = [env_proxy.wait_ready_msg() for env_proxy in env_proxys]
+                self.env_proxys = env_proxys
+                break
+            except Exception as e:
+                self.logger.error(f"Failed to initialize env subprocesses: {e}. Retry {retry_idx} of {self.retry_times}.")
+                for env_proxy in env_proxys:
+                    env_proxy.call_subproc("close")
+                for env_proxy in env_proxys:
+                    env_proxy.wait_for_close()
+        else:
+            raise RuntimeError(f"Failed to initialize env subprocesses after {self.retry_times} retries.")
         if len(set(activity_names)) != 1:
             raise RuntimeError(
                 f"Behavior env subprocesses reported different activity_name: {activity_names}"
@@ -411,6 +424,7 @@ class BehaviorEnv(gym.Env):
             env_proxy.call_subproc("close")
         for env_proxy in self.env_proxys:
             env_proxy.wait_for_close()
+        self.env_proxys = []
 
     def _extract_obs_image(self, raw_obs):
         state = None
@@ -462,6 +476,8 @@ class BehaviorEnv(gym.Env):
         return reward
 
     def reset(self):
+        if self.enable_offload and len(self.env_proxys) == 0:
+            self._init_env()
         raw_obs, infos = self.env_reset()
         obs = self._wrap_obs(raw_obs)
         rewards = torch.zeros(self.num_envs, dtype=bool)
@@ -643,6 +659,9 @@ class BehaviorEnv(gym.Env):
     def update_reset_state_ids(self):
         # use for multi task training
         pass
+
+    def offload(self):
+        self.env_close()
 
     def close(self):
         self.env_close()
