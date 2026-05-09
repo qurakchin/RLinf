@@ -111,7 +111,7 @@ class AgentLightningRLinfRunner(ReasoningRunner):
 
     def init_rollout_workers(self):
         rollout_handle = self.rollout.init_worker()
-        
+
         if self.cfg.runner.resume_dir is None:
             logging.info("[AgentLightningRLinfRunner] Training from scratch")
             if (
