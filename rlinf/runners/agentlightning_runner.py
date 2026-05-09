@@ -110,10 +110,8 @@ class AgentLightningRLinfRunner(ReasoningRunner):
         )
 
     def init_rollout_workers(self):
-
         rollout_handle = self.rollout.init_worker()
-        rollout_handle.wait()
-
+        
         if self.cfg.runner.resume_dir is None:
             logging.info("[AgentLightningRLinfRunner] Training from scratch")
             if (
@@ -128,6 +126,8 @@ class AgentLightningRLinfRunner(ReasoningRunner):
                     self.cfg.actor.megatron.ckpt_convertor.hf_model_path,
                     self.cfg.actor.megatron.ckpt_convertor,
                 )
+
+        rollout_handle.wait()
 
         if self.use_pre_process_policy:
             self.rollout.offload_engine().wait()
