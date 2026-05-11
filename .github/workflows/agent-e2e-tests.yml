@@ -100,8 +100,10 @@ jobs:
           
       - name: Install dependencies
         run: |
+          export UV_LINK_MODE=copy
           source .venv/bin/activate
           uv pip install "agentlightning==0.3.0" "autogen-agentchat" "autogen-ext[openai]" "mcp>=1.10.0" "mcp-server-calculator" "openai==2.32.0"
+          python -c "import openai, os; print('openai file:', openai.__file__); print('openai realpath:', os.path.realpath(openai.__file__)); print('openai islink:', os.path.islink(openai.__file__))"
 
       - name: AgentLightning calc_x multiturn 
         timeout-minutes: 20
