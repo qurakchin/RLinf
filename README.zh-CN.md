@@ -160,7 +160,7 @@ RLinf具有高度灵活性，可支持多种强化学习训练工作流（PPO、
           <li><b>世界动作模型</b></li>
           <ul>
             <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/sft_dreamzero.html">DreamZero</a> ✅</li>
-          </ul>
+          </ul>              
         </ul>
       </td>
       <td>

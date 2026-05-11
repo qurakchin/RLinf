@@ -164,7 +164,7 @@ Multiple Backend Integrations
           <li><b>World Action Model</b></li>
           <ul>
             <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/sft_dreamzero.html">DreamZero</a> ✅</li>
-          </ul>
+          </ul>       
         </ul>
       </td>
       <td>
