@@ -32,6 +32,7 @@ from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.utils.logging import get_logger
 from rlinf.utils.nested_dict_process import copy_dict_tensor
+from rlinf.utils.pytree import register_pytree_dataclasses
 
 
 def _to_numpy(x):
@@ -368,6 +369,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             actions = processed_obs["actions"].clone()
             processed_obs.pop("actions")
 
+        register_pytree_dataclasses(observation)
         observation = tree_map(
             lambda x: torch.as_tensor(x, device=device).contiguous().clone(),
             observation,
