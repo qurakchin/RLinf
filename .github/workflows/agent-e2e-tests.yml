@@ -108,7 +108,6 @@ jobs:
           python -c "import sys, openai, os; print('python:', sys.executable); print('openai version:', openai.__version__); print('openai file:', openai.__file__); print('openai realpath:', os.path.realpath(openai.__file__)); print('openai islink:', os.path.islink(openai.__file__))"
           uv pip show openai
 
-
       - name: AgentLightning calc_x multiturn 
         timeout-minutes: 20
         run: |
