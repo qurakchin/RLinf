@@ -460,7 +460,10 @@ class BehaviorEnv(gym.Env):
         if self.record_metrics:
             self._init_metrics()
         self.enable_offload = cfg.get("enable_offload", False)
-        self._init_env()
+        self.enable_init_offload = cfg.get("enable_init_offload", True)
+        self.env_proxys = []
+        if not (self.enable_offload and not self.enable_init_offload):
+            self._init_env()
 
     def _load_tasks_cfg(self, activity_name: str):
         # Read task description
@@ -718,7 +721,9 @@ class BehaviorEnv(gym.Env):
         pass
 
     def offload(self):
+        assert len(self.env_proxys) != 0, "env_proxys should be empty before offloading"
         self.env_close()
+        time.sleep(5) # wait for the process to release gpu memory
 
     def close(self):
         if self.pool:
