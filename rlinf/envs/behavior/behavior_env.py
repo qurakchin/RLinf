@@ -33,6 +33,7 @@ from rlinf.envs.behavior.utils import (
 )
 from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 from rlinf.utils.logging import get_logger
+from rlinf.utils.utils import ThreadWithResult
 
 __all__ = ["BehaviorEnv"]
 
@@ -723,7 +724,7 @@ class BehaviorEnv(gym.Env):
     def offload(self):
         assert len(self.env_proxys) != 0, "env_proxys should be empty before offloading"
         self.env_close()
-        time.sleep(5) # wait for the process to release gpu memory
+        time.sleep(5)  # wait for the process to release gpu memory
 
     def close(self):
         if self.pool:
