@@ -16,6 +16,7 @@ import gc
 import inspect
 import json
 import os
+import time
 import traceback
 from multiprocessing import get_context
 from threading import Thread
@@ -219,6 +220,9 @@ class BehaviorProcessProxy:
         assert self.last_cmd == "close", (
             f"last cmd({self.last_cmd}) called but wait for close"
         )
+        self.force_close()
+
+    def force_close(self):
         if self.env_process.is_alive():
             self.env_process.join(timeout=2)
             if self.env_process.is_alive():
@@ -262,13 +266,17 @@ class BehaviorEnv(gym.Env):
         self.auto_reset = cfg.auto_reset
         self.max_episode_steps = torch.tensor(cfg.max_episode_steps)
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
+        self.retry_times = cfg.get("retry_times", 3)
         self.skip_intermediate_obs_in_chunk = bool(
             OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
         if self.record_metrics:
             self._init_metrics()
         self.enable_offload = cfg.get("enable_offload", False)
-        self._init_env()
+        self.enable_init_offload = cfg.get("enable_init_offload", True)
+        self.env_proxys = []
+        if not (self.enable_offload and not self.enable_init_offload):
+            self._init_env()
 
     def _split_num_envs(self, num_envs: int, num_processes: int) -> int:
         """Split ``num_envs`` across ``num_processes`` shards as evenly as possible."""
@@ -304,17 +312,24 @@ class BehaviorEnv(gym.Env):
                             self.num_env_shard,
                         )
                     )
-                activity_names = [env_proxy.wait_ready_msg() for env_proxy in env_proxys]
+                activity_names = [
+                    env_proxy.wait_ready_msg() for env_proxy in env_proxys
+                ]
                 self.env_proxys = env_proxys
                 break
             except Exception as e:
-                self.logger.error(f"Failed to initialize env subprocesses: {e}. Retry {retry_idx} of {self.retry_times}.")
+                self.logger.error(
+                    f"Failed to initialize env subprocesses: {e}. Retry {retry_idx} of {self.retry_times}."
+                )
                 for env_proxy in env_proxys:
-                    env_proxy.call_subproc("close")
-                for env_proxy in env_proxys:
-                    env_proxy.wait_for_close()
+                    try:
+                        env_proxy.force_close()
+                    except:
+                        pass
+                time.sleep(5) # wait for the process to terminate
         else:
             raise RuntimeError(f"Failed to initialize env subprocesses after {self.retry_times} retries.")
+
         if len(set(activity_names)) != 1:
             raise RuntimeError(
                 f"Behavior env subprocesses reported different activity_name: {activity_names}"
@@ -661,7 +676,9 @@ class BehaviorEnv(gym.Env):
         pass
 
     def offload(self):
+        assert len(self.env_proxys) != 0, "env_proxys should be empty before offloading"
         self.env_close()
+        time.sleep(5) # wait for the process to release gpu memory
 
     def close(self):
         self.env_close()
