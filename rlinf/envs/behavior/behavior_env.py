@@ -19,7 +19,6 @@ import os
 import time
 import traceback
 from multiprocessing import get_context
-from threading import Thread
 
 import gymnasium as gym
 import torch
@@ -34,6 +33,7 @@ from rlinf.envs.behavior.utils import (
 )
 from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 from rlinf.utils.logging import get_logger
+from rlinf.utils.utils import ThreadWithResult
 
 __all__ = ["BehaviorEnv"]
 
@@ -150,23 +150,6 @@ class BehaviorProcess:
                 break
             else:
                 raise NotImplementedError(f"Unknown command: {cmd}")
-
-
-class ThreadWithResult(Thread):
-    def __init__(
-        self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None
-    ):
-        super().__init__(group, target, name, args, kwargs, daemon=daemon)
-        self.result = None
-        self.start()
-
-    def run(self):
-        if self._target:
-            self.result = self._target(*self._args, **self._kwargs)
-
-    def join(self):
-        super().join()
-        return self.result
 
 
 class BehaviorProcessProxy:
@@ -324,11 +307,13 @@ class BehaviorEnv(gym.Env):
                 for env_proxy in env_proxys:
                     try:
                         env_proxy.force_close()
-                    except:
+                    finally:
                         pass
-                time.sleep(5) # wait for the process to terminate
+                time.sleep(5)  # wait for the process to terminate
         else:
-            raise RuntimeError(f"Failed to initialize env subprocesses after {self.retry_times} retries.")
+            raise RuntimeError(
+                f"Failed to initialize env subprocesses after {self.retry_times} retries."
+            )
 
         if len(set(activity_names)) != 1:
             raise RuntimeError(
@@ -678,7 +663,7 @@ class BehaviorEnv(gym.Env):
     def offload(self):
         assert len(self.env_proxys) != 0, "env_proxys should be empty before offloading"
         self.env_close()
-        time.sleep(5) # wait for the process to release gpu memory
+        time.sleep(5)  # wait for the process to release gpu memory
 
     def close(self):
         self.env_close()
