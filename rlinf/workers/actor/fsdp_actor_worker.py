@@ -1387,7 +1387,8 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 )
 
                 self.optimizer.zero_grad()
-                for idx, batch in enumerate(train_micro_batch):
+                for idx in range(len(train_micro_batch)):
+                    batch = train_micro_batch[idx]
                     batch = put_tensor_device(
                         batch,
                         f"{Worker.torch_device_type}:{int(os.environ['LOCAL_RANK'])}",
@@ -1491,6 +1492,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
                     metrics_data["actor/total_loss"] = loss.detach().item()
                     append_to_dict(metrics, metrics_data)
+                    # avoid gpu memory leak
+                    train_micro_batch[idx] = None
+                    del batch, output_dict, forward_inputs, loss, metrics_data
 
                 self.torch_platform.empty_cache()
 
