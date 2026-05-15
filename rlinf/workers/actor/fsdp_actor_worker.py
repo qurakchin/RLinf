@@ -1387,8 +1387,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 )
 
                 self.optimizer.zero_grad()
-                for idx in range(len(train_micro_batch)):
-                    batch = train_micro_batch[idx]
+                for idx, batch in enumerate(train_micro_batch):
                     batch = put_tensor_device(
                         batch,
                         f"{Worker.torch_device_type}:{int(os.environ['LOCAL_RANK'])}",
