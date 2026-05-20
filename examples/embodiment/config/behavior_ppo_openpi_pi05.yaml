@@ -83,7 +83,6 @@ algorithm:
 
 env:
   group_name: "EnvGroup"
-  num_env_subprocess: 2
 
   train:
     total_num_envs: 8
@@ -94,6 +93,7 @@ env:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/train
       fps: 15
+    num_env_subprocess: 2
     enable_offload: True
     enable_init_offload: False
   eval:
@@ -104,6 +104,7 @@ env:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
       fps: 15
+    num_env_subprocess: 2
 
 rollout:
   group_name: "RolloutGroup"
