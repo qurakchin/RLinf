@@ -15,6 +15,7 @@
 import math
 import random
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -33,7 +34,6 @@ from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.utils.logging import get_logger
 from rlinf.utils.nested_dict_process import copy_dict_tensor
 from rlinf.utils.pytree import register_pytree_dataclasses
-from rlinf.utils.utils import ThreadWithResult
 
 
 def _to_numpy(x):
@@ -286,11 +286,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                 sample["prompt"] = "xxxx"
             batch_samples.append(sample)
         # transform
-        threads = [
-            ThreadWithResult(target=self._input_transform, args=(sample,))
-            for sample in batch_samples
-        ]
-        transformed_samples = [t.join() for t in threads]
+        with ThreadPoolExecutor(max_workers=min(len(batch_samples), 8)) as ex:
+            transformed_samples = list(ex.map(self._input_transform, batch_samples))
         # recombine
         inputs = tree_map(
             lambda *torch_arr: torch.from_numpy(np.asarray(torch_arr).copy()),
