@@ -16,11 +16,10 @@ import gc
 import inspect
 import json
 import os
-import threading
 from typing import ClassVar
 
-import ray
 import gymnasium as gym
+import ray
 import torch
 from omegaconf import DictConfig, OmegaConf
 
@@ -33,7 +32,6 @@ from rlinf.envs.behavior.utils import (
 )
 from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 from rlinf.utils.logging import get_logger
-from rlinf.utils.utils import ThreadWithResult
 
 __all__ = ["BehaviorEnv"]
 
@@ -87,9 +85,7 @@ class BehaviorProcess:
         self._step_supports_render = (
             step_supports_kwargs or "render" in step_signature.parameters
         )
-        self._step_supports_env_indices = (
-            "env_indices" in step_signature.parameters
-        )
+        self._step_supports_env_indices = "env_indices" in step_signature.parameters
         self._skip_intermediate_obs_in_chunk = bool(
             OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
@@ -207,6 +203,7 @@ class BehaviorProcess:
             self.env.close()
             self.env = None
 
+
 class BehaviorProcessPool:
     """Singleton OmniGibson subprocess pool manager.
 
@@ -226,10 +223,12 @@ class BehaviorProcessPool:
         num_envs: int,
     ) -> tuple["BehaviorProcessPool", int]:
         """Attach to the shared pool and return ``(pool, pool_offset)``."""
-        if cls._shared_pool is None: # pool init
+        if cls._shared_pool is None:  # pool init
             total_envs = int(OmegaConf.select(cfg, "total_num_envs", default=None))
             total_envs_per_worker = total_envs // worker_info.group_world_size
-            num_env_subprocess = int(OmegaConf.select(cfg, "num_env_subprocess", default=1))
+            num_env_subprocess = int(
+                OmegaConf.select(cfg, "num_env_subprocess", default=1)
+            )
             cls._shared_pool = cls(
                 cfg,
                 total_envs_per_worker,
@@ -289,9 +288,11 @@ class BehaviorProcessPool:
             )
             for _ in range(self.num_env_subprocess)
         ]
-        
+
         # Wait for all instances to initialize and fetch their activity name
-        activity_names_refs = [proc.get_activity_name.remote() for proc in self.env_processes]
+        activity_names_refs = [
+            proc.get_activity_name.remote() for proc in self.env_processes
+        ]
         activity_names = ray.get(activity_names_refs)
 
         if len(set(activity_names)) != 1:
@@ -359,7 +360,9 @@ class BehaviorProcessPool:
         refs = []
         for sp, positions, local_rows in plan:
             actions_j = torch.zeros(
-                self.num_env_shard, chunk_size, action_dim,
+                self.num_env_shard,
+                chunk_size,
+                action_dim,
                 dtype=chunk_actions.dtype,
             )
             actions_j[local_rows] = chunk_actions[positions]
@@ -389,9 +392,11 @@ class BehaviorProcessPool:
             term_t = torch.zeros(slice_num_envs, dtype=torch.bool)
             trunc_t = torch.zeros(slice_num_envs, dtype=torch.bool)
             info_t: list = [{} for _ in range(slice_num_envs)]
-            for (
-                obs_per_t, rewards_per_t, terms_per_t, truncs_per_t, infos_per_t
-            ), (_sp, positions, _local_rows) in zip(shard_results, plan):
+            for (obs_per_t, rewards_per_t, terms_per_t, truncs_per_t, infos_per_t), (
+                _sp,
+                positions,
+                _local_rows,
+            ) in zip(shard_results, plan):
                 obs_at_t = obs_per_t[t]
                 rewards_at_t = rewards_per_t[t]
                 terms_at_t = terms_per_t[t]
@@ -489,7 +494,9 @@ class BehaviorEnv(gym.Env):
 
     def env_chunk_step(self, chunk_actions: torch.Tensor):
         return self.pool.env_chunk_step_slice(
-            self.pool_offset, self.num_envs, chunk_actions,
+            self.pool_offset,
+            self.num_envs,
+            chunk_actions,
         )
 
     def _extract_obs_image(self, raw_obs):

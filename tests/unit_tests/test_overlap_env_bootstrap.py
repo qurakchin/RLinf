@@ -189,12 +189,20 @@ class TestOverlapEnvBootstrap(unittest.TestCase):
         """record_env_metrics should append env info tensors as-is."""
         env_metrics = {}
 
-        self.worker.record_env_metrics(env_metrics, {"episode_len": torch.tensor([5, 6])})
-        self.worker.record_env_metrics(env_metrics, {"episode_len": torch.tensor([7, 8])})
+        self.worker.record_env_metrics(
+            env_metrics, {"episode_len": torch.tensor([5, 6])}
+        )
+        self.worker.record_env_metrics(
+            env_metrics, {"episode_len": torch.tensor([7, 8])}
+        )
 
         self.assertEqual(len(env_metrics["episode_len"]), 2)
-        self.assertTrue(torch.equal(env_metrics["episode_len"][0], torch.tensor([5, 6])))
-        self.assertTrue(torch.equal(env_metrics["episode_len"][1], torch.tensor([7, 8])))
+        self.assertTrue(
+            torch.equal(env_metrics["episode_len"][0], torch.tensor([5, 6]))
+        )
+        self.assertTrue(
+            torch.equal(env_metrics["episode_len"][1], torch.tensor([7, 8]))
+        )
 
     def test_interact_records_metrics_only_on_final_chunk_when_not_auto_reset(self):
         """Non-auto-reset training should record episode metrics only once per rollout epoch."""

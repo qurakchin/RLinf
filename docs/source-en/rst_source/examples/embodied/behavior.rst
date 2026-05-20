@@ -398,8 +398,8 @@ Using behavior as an example:
 - ``camera.head_resolution`` / ``camera.wrist_resolution``:
   Head / wrist camera resolutions. RLinf overrides default values in
   ``omnigibson.learning.utils.eval_utils`` (default 720x720 and 480x480), then
-   applies them through the environment wrapper to R1Pro sensors (if
-   ``env_wrapper`` is not ``None``).
+  applies them through the environment wrapper to R1Pro sensors (if
+  ``env_wrapper`` is not ``None``).
 - ``omni_config.env.action_frequency / rendering_frequency / physics_frequency``:
   Controls action stepping, rendering, and physics frequency respectively
   (common default: 30 / 30 / 120). Higher frequencies are usually slower.
@@ -433,7 +433,7 @@ Using behavior as an example:
 - ``num_env_subprocess``:
   Within one env-worker process, splits parallel env count ``num_envs`` across multiple
   **child processes**, each hosting its own Isaac/OmniGibson simulation (see
-   ``BehaviorProcess`` in ``behavior_env.py``). Default ``1`` keeps the legacy
+  ``BehaviorProcess`` in ``behavior_env.py``). Default ``1`` keeps the legacy
   single-subprocess behavior. When greater than ``1``, each subprocess runs
   ``num_envs / num_env_subprocess`` parallel envs; IPC uses parallel receives to reduce
   pipe backpressure.
