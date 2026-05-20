@@ -260,6 +260,7 @@ class BehaviorProcessPool:
         if cls._shared_refcount <= 0:
             cls._shared_pool.close()
             cls._shared_pool = None
+            cls._pipeline_next_idx = 0
 
     def __init__(
         self,
@@ -449,15 +450,17 @@ class BehaviorEnv(gym.Env):
         self.worker_info = worker_info
         self.record_metrics = record_metrics
         self._is_start = True
+        self.enable_offload = cfg.get("enable_offload", False)
+        self.enable_init_offload = cfg.get("enable_init_offload", True)
+        self.pool = None
+        self.pool_offset = None
+        self.task_description = None
         if total_num_processes % worker_info.group_world_size != 0:
             raise ValueError(
                 f"total_num_processes ({total_num_processes}) must be divisible by "
                 f"worker_info.group_world_size ({worker_info.group_world_size}) to infer pipeline_stage_num."
             )
-        pipeline_stage_num = total_num_processes // worker_info.group_world_size
-        self.pool, self.pool_offset = BehaviorProcessPool.acquire_shared(
-            cfg, worker_info, pipeline_stage_num, num_envs
-        )
+        self.pipeline_stage_num = total_num_processes // worker_info.group_world_size
 
         self.logger = get_logger()
 
@@ -466,11 +469,18 @@ class BehaviorEnv(gym.Env):
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
         if self.record_metrics:
             self._init_metrics()
-        self.enable_offload = cfg.get("enable_offload", False)
-        self.enable_init_offload = cfg.get("enable_init_offload", True)
-        self.env_proxys = []
         if not (self.enable_offload and not self.enable_init_offload):
+            self._ensure_pool()
             self._init_env()
+
+    def _ensure_pool(self):
+        if self.pool is None:
+            self.pool, self.pool_offset = BehaviorProcessPool.acquire_shared(
+                self.cfg,
+                self.worker_info,
+                self.pipeline_stage_num,
+                self.num_envs,
+            )
 
     def _load_tasks_cfg(self, activity_name: str):
         # Read task description
@@ -488,12 +498,15 @@ class BehaviorEnv(gym.Env):
         self.task_description = task_description_map[activity_name]
 
     def _init_env(self):
+        self._ensure_pool()
         self._load_tasks_cfg(self.pool.activity_name)
 
     def env_reset(self):
+        self._ensure_pool()
         return self.pool.env_reset_slice(self.pool_offset, self.num_envs)
 
     def env_chunk_step(self, chunk_actions: torch.Tensor):
+        self._ensure_pool()
         return self.pool.env_chunk_step_slice(
             self.pool_offset,
             self.num_envs,
@@ -549,7 +562,7 @@ class BehaviorEnv(gym.Env):
         return self.reward_coef * reward
 
     def reset(self):
-        if self.enable_offload and len(self.env_proxys) == 0:
+        if self.enable_offload and self.pool is None:
             self._init_env()
         raw_obs, infos = self.env_reset()
         obs = self._wrap_obs(raw_obs)
@@ -730,9 +743,7 @@ class BehaviorEnv(gym.Env):
         pass
 
     def offload(self):
-        assert len(self.env_proxys) != 0, "env_proxys should be empty before offloading"
-        self.env_close()
-        time.sleep(5)  # wait for the process to release gpu memory
+        self.close()
 
     def close(self):
         if self.pool:
