@@ -16,6 +16,7 @@ import gc
 import inspect
 import json
 import os
+import time
 from typing import ClassVar
 
 import gymnasium as gym
@@ -281,20 +282,64 @@ class BehaviorProcessPool:
             OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
 
-        self.env_processes = [
-            BehaviorProcess.remote(
-                self.cfg,
-                self.num_env_shard,
-                pipeline_stage_num,
-            )
-            for _ in range(self.num_env_subprocess)
-        ]
+        # Create subprocess actors with a retry/backoff loop. Actor startup
+        # can fail (e.g. simulator plugin errors); retry a few times to handle
+        # transient failures. Configurable via `behavior.init_retry_*` keys.
+        max_attempts = int(
+            OmegaConf.select(cfg, "behavior.init_retry_count", default=3)
+        )
+        retry_delay = float(
+            OmegaConf.select(cfg, "behavior.init_retry_delay", default=5.0)
+        )
+        backoff = float(
+            OmegaConf.select(cfg, "behavior.init_retry_backoff", default=2.0)
+        )
 
-        # Wait for all instances to initialize and fetch their activity name
-        activity_names_refs = [
-            proc.get_activity_name.remote() for proc in self.env_processes
-        ]
-        activity_names = ray.get(activity_names_refs)
+        last_exc = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self.env_processes = [
+                    BehaviorProcess.remote(
+                        self.cfg,
+                        self.num_env_shard,
+                        pipeline_stage_num,
+                    )
+                    for _ in range(self.num_env_subprocess)
+                ]
+
+                # Wait for all instances to initialize and fetch their activity name
+                activity_names_refs = [
+                    proc.get_activity_name.remote() for proc in self.env_processes
+                ]
+                activity_names = ray.get(activity_names_refs)
+                break
+            except Exception as e:  # noqa: BLE001 - we want to catch any Ray/OG init error
+                last_exc = e
+                # Best-effort cleanup of any partially-created actors
+                for proc in getattr(self, "env_processes", []):
+                    try:
+                        ray.kill(proc)
+                    except Exception:
+                        pass
+                self.env_processes = []
+
+                if attempt >= max_attempts:
+                    get_logger().error(
+                        "Failed to start BehaviorProcess actors after %d attempts: %s",
+                        attempt,
+                        e,
+                    )
+                    raise
+
+                get_logger().warning(
+                    "BehaviorProcess creation failed (attempt %d/%d): %s; retrying in %.1fs",
+                    attempt,
+                    max_attempts,
+                    e,
+                    retry_delay,
+                )
+                time.sleep(retry_delay)
+                retry_delay *= backoff
 
         if len(set(activity_names)) != 1:
             raise RuntimeError(
