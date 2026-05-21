@@ -295,7 +295,6 @@ class BehaviorProcessPool:
             OmegaConf.select(cfg, "behavior.init_retry_backoff", default=2.0)
         )
 
-        last_exc = None
         for attempt in range(1, max_attempts + 1):
             try:
                 self.env_processes = [
@@ -314,7 +313,6 @@ class BehaviorProcessPool:
                 activity_names = ray.get(activity_names_refs)
                 break
             except Exception as e:  # noqa: BLE001 - we want to catch any Ray/OG init error
-                last_exc = e
                 # Best-effort cleanup of any partially-created actors
                 for proc in getattr(self, "env_processes", []):
                     try:
