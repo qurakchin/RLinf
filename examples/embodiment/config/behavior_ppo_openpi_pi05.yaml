@@ -110,7 +110,7 @@ rollout:
   group_name: "RolloutGroup"
   backend: "huggingface"
   enable_offload: True
-  pipeline_stage_num: 2
+  pipeline_stage_num: 1
 
   model:
     model_path: "/path/to/model/pi05"
