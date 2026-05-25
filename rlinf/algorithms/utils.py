@@ -83,10 +83,48 @@ def preprocess_embodied_advantages_inputs(
         # rewards, dones, loss_mask, loss_mask_sum: [n_chunk_steps, bsz, num_action_chunks] -> [n_chunk_steps, bsz, 1]
         rewards = rewards.sum(dim=-1, keepdim=True)
         dones = dones.max(dim=-1, keepdim=True)[0]
+        if values is not None:
+            if values.ndim > 3:
+                values = values.reshape(values.shape[0], values.shape[1], -1)
+            if values.ndim == 3 and values.shape[-1] > 1:
+                values = values.mean(dim=-1, keepdim=True)
         if loss_mask is not None:
             loss_mask = loss_mask.max(dim=-1, keepdim=True)[0]
         if loss_mask_sum is not None:
             loss_mask_sum = loss_mask_sum.max(dim=-1, keepdim=True)[0]
+
+    if kwargs["reward_type"] == "action_level":
+        if rewards.ndim > 3:
+            rewards = rewards.reshape(rewards.shape[0], rewards.shape[1], -1)
+        if dones.ndim > 3:
+            dones = dones.reshape(dones.shape[0], dones.shape[1], -1)
+        if values is not None and values.ndim > 3:
+            values = values.reshape(values.shape[0], values.shape[1], -1)
+        if loss_mask is not None and loss_mask.ndim > 3:
+            loss_mask = loss_mask.reshape(loss_mask.shape[0], loss_mask.shape[1], -1)
+        if loss_mask_sum is not None and loss_mask_sum.ndim > 3:
+            loss_mask_sum = loss_mask_sum.reshape(
+                loss_mask_sum.shape[0], loss_mask_sum.shape[1], -1
+            )
+
+    if (
+        kwargs["reward_type"] == "action_level"
+        and kwargs["adv_type"] == "gae"
+        and values is not None
+        and values.ndim == 3
+        and rewards.ndim == 3
+        and rewards.shape[-1] == 1
+        and values.shape[-1] > 1
+    ):
+        value_chunk_size = values.shape[-1]
+        rewards = rewards.expand(*rewards.shape[:-1], value_chunk_size)
+        dones = dones.expand(*dones.shape[:-1], value_chunk_size)
+        if loss_mask is not None:
+            loss_mask = loss_mask.expand(*loss_mask.shape[:-1], value_chunk_size)
+        if loss_mask_sum is not None:
+            loss_mask_sum = loss_mask_sum.expand(
+                *loss_mask_sum.shape[:-1], value_chunk_size
+            )
 
     num_chunk, bsz, chunk_size = rewards.shape
     n_steps = num_chunk * chunk_size

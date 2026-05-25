@@ -220,6 +220,18 @@ class RecordVideo(gym.Wrapper):
                 return value[env_id]
             if len(value) > 0:
                 return value[0]
+        if (
+            not isinstance(value, (str, bytes, dict))
+            and hasattr(value, "__len__")
+            and hasattr(value, "__getitem__")
+        ):
+            try:
+                if len(value) > env_id:
+                    return value[env_id]
+                if len(value) > 0:
+                    return value[0]
+            except Exception:
+                pass
         return value
 
     def _get_task_description(self, obs: Any, env_id: int):
@@ -284,6 +296,31 @@ class RecordVideo(gym.Wrapper):
             value = value[part]
         return value
 
+    def _lookup_nested_value(self, root: Any, key: str) -> Any:
+        """Read dotted keys from dict-like config objects or plain attributes."""
+        value = root
+        sentinel = object()
+        for part in key.split("."):
+            if value is None:
+                return None
+            if isinstance(value, dict):
+                if part not in value:
+                    return None
+                value = value[part]
+                continue
+            if hasattr(value, "get"):
+                try:
+                    next_value = value.get(part, sentinel)
+                except Exception:
+                    next_value = sentinel
+                if next_value is not sentinel:
+                    value = next_value
+                    continue
+            if not hasattr(value, part):
+                return None
+            value = getattr(value, part)
+        return value
+
     def _coerce_overlay_value(self, value: Any) -> Any:
         """Convert common tensor/array scalars to overlay-friendly values."""
         if torch is not None and isinstance(value, torch.Tensor):
@@ -310,6 +347,48 @@ class RecordVideo(gym.Wrapper):
             value = self._coerce_overlay_value(value)
             if value is not None:
                 return value
+        return None
+
+    def _coerce_instance_id(self, value: Any, env_id: int) -> Any:
+        """Select and normalize an instance id for one tiled env frame."""
+        value = self._value_for_env(value, env_id)
+        value = self._coerce_overlay_value(value)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, numbers.Integral):
+            return int(value)
+        if isinstance(value, numbers.Real):
+            return int(value) if float(value).is_integer() else value
+        return value
+
+    def _get_instance_id_info(self, infos: Optional[Any], env_id: int) -> Optional[dict[str, Any]]:
+        """Collect the current BEHAVIOR activity instance id for video overlay."""
+        if infos is not None:
+            instance_id = self._lookup_first_info_value(
+                infos,
+                [
+                    "replay_init.replay_instance_id",
+                    "episode.replay_instance_id",
+                    "replay_instance_id",
+                    "episode.activity_instance_id",
+                    "activity_instance_id",
+                    "episode.instance_id",
+                    "instance_id",
+                ],
+                env_id,
+            )
+            if instance_id is not None:
+                return {"instance_id": instance_id}
+
+        for root, key in (
+            (getattr(self.env, "cfg", None), "omni_config.task.activity_instance_id"),
+            (getattr(self.env, "cfg", None), "task.activity_instance_id"),
+            (self.env, "activity_instance_id"),
+        ):
+            instance_id = self._lookup_nested_value(root, key)
+            instance_id = self._coerce_instance_id(instance_id, env_id)
+            if instance_id is not None:
+                return {"instance_id": instance_id}
         return None
 
     def _get_radio_button_up_info(self, infos: Optional[Any], env_id: int) -> Optional[dict[str, Any]]:
@@ -343,9 +422,13 @@ class RecordVideo(gym.Wrapper):
         current_stage_idx = int(current_stage_idx)
         if current_stage_idx < 0:
             return None
+        stage_info: dict[str, Any] = {"current_stage_idx": current_stage_idx}
         if total_stage_count is not None and int(total_stage_count) > 0:
-            return {"current_stage": f"{current_stage_idx}/{int(total_stage_count)}"}
-        return {"current_stage": current_stage_idx}
+            stage_info["total_stage_count"] = int(total_stage_count)
+            stage_info["current_stage"] = f"{current_stage_idx}/{int(total_stage_count)}"
+        else:
+            stage_info["current_stage"] = current_stage_idx
+        return stage_info
 
     def _build_info_item(
         self,
@@ -353,11 +436,16 @@ class RecordVideo(gym.Wrapper):
         infos: Optional[Any],
         rewards: Optional[Any],
         terminations: Optional[Any],
+        truncations: Optional[Any],
         env_id: int,
         time_idx: Optional[int] = None,
     ) -> dict:
         """Build a per-env info dict for overlay."""
         info_item: dict[str, Any] = {}
+
+        instance_id_info = self._get_instance_id_info(infos, env_id)
+        if instance_id_info:
+            info_item.update(instance_id_info)
 
         subtask_prompt = self._get_subtask_prompt(obs, env_id)
         if subtask_prompt:
@@ -378,12 +466,32 @@ class RecordVideo(gym.Wrapper):
                     value = value[time_idx]
             info_item["reward"] = float(value) if value is not None else value
 
+        termination_value = None
         if terminations is not None:
-            value = self._value_for_env(terminations, env_id)
-            if time_idx is not None and isinstance(value, (np.ndarray, list, tuple)):
-                if len(value) > time_idx:
-                    value = value[time_idx]
-            info_item["termination"] = bool(value) if value is not None else value
+            termination_value = self._value_for_env(terminations, env_id)
+            if time_idx is not None and isinstance(
+                termination_value, (np.ndarray, list, tuple)
+            ):
+                if len(termination_value) > time_idx:
+                    termination_value = termination_value[time_idx]
+            info_item["termination"] = (
+                bool(termination_value) if termination_value is not None else termination_value
+            )
+
+        truncation_value = None
+        if truncations is not None:
+            truncation_value = self._value_for_env(truncations, env_id)
+            if time_idx is not None and isinstance(
+                truncation_value, (np.ndarray, list, tuple)
+            ):
+                if len(truncation_value) > time_idx:
+                    truncation_value = truncation_value[time_idx]
+            info_item["truncation"] = (
+                bool(truncation_value) if truncation_value is not None else truncation_value
+            )
+
+        if termination_value is not None or truncation_value is not None:
+            info_item["done"] = bool(termination_value) or bool(truncation_value)
 
         if infos is not None:
             completion_bonus = self._lookup_first_info_value(
@@ -407,6 +515,26 @@ class RecordVideo(gym.Wrapper):
             if success_once is not None:
                 info_item["success_once"] = success_once
 
+            for overlay_key, info_keys in {
+                "success_at_end": ["success_at_end", "episode.success_at_end"],
+                "current_stage_success": [
+                    "current_stage_success",
+                    "episode.current_stage_success",
+                ],
+                "target_stage_success": [
+                    "target_stage_success",
+                    "episode.target_stage_success",
+                ],
+                "success_stage_idx": [
+                    "success_stage_idx",
+                    "episode.success_stage_idx",
+                ],
+                "episode_done": ["done", "episode.done"],
+            }.items():
+                value = self._lookup_first_info_value(infos, info_keys, env_id)
+                if value is not None:
+                    info_item[overlay_key] = value
+
             for key in self._get_video_info_keys():
                 value = self._lookup_info_value(infos, key)
                 if value is None:
@@ -427,6 +555,7 @@ class RecordVideo(gym.Wrapper):
         infos: Optional[Any],
         rewards: Optional[Any],
         terminations: Optional[Any],
+        truncations: Optional[Any] = None,
         time_idx: Optional[int] = None,
     ) -> None:
         """Overlay info (optional) and append a tiled frame."""
@@ -437,7 +566,7 @@ class RecordVideo(gym.Wrapper):
                 put_info_on_image(
                     img,
                     self._build_info_item(
-                        obs, infos, rewards, terminations, env_id, time_idx
+                        obs, infos, rewards, terminations, truncations, env_id, time_idx
                     ),
                 )
                 for env_id, img in enumerate(images)
@@ -456,6 +585,7 @@ class RecordVideo(gym.Wrapper):
         infos: Optional[Any] = None,
         rewards: Optional[Any] = None,
         terminations: Optional[Any] = None,
+        truncations: Optional[Any] = None,
     ):
         """Extract frames from obs and append to the buffer."""
         frames = self._extract_frame_batches(obs)
@@ -475,12 +605,12 @@ class RecordVideo(gym.Wrapper):
                     else obs
                 )
                 self._append_frame(
-                    images, step_obs, step_info, rewards, terminations, time_idx
+                    images, step_obs, step_info, rewards, terminations, truncations, time_idx
                 )
             return
 
         for time_idx, images in enumerate(frames):
-            self._append_frame(images, obs, infos, rewards, terminations, time_idx)
+            self._append_frame(images, obs, infos, rewards, terminations, truncations, time_idx)
 
     def reset(self, *args, **kwargs):
         """Reset env and record the initial frame."""
@@ -496,14 +626,14 @@ class RecordVideo(gym.Wrapper):
             if isinstance(info, dict)
             else terminated
         )
-        self.add_new_frames(obs, info, reward, terminations)
+        self.add_new_frames(obs, info, reward, terminations, truncated)
         return obs, reward, terminated, truncated, info
 
     def chunk_step(self, *args, **kwargs):
         """Step a chunk and record all frames from the chunk."""
         result = self.env.chunk_step(*args, **kwargs)
         if isinstance(result, tuple) and len(result) >= 5:
-            obs_list, rewards, terminations, _truncations, infos_list = result[:5]
+            obs_list, rewards, terminations, truncations, infos_list = result[:5]
 
             # Some envs may skip intermediate observations for performance and return
             # None entries. Filter them out for video collection.
@@ -519,6 +649,8 @@ class RecordVideo(gym.Wrapper):
                         rewards = rewards[:, valid_indices]
                     if torch is not None and isinstance(terminations, torch.Tensor) and terminations.ndim == 2:
                         terminations = terminations[:, valid_indices]
+                    if torch is not None and isinstance(truncations, torch.Tensor) and truncations.ndim == 2:
+                        truncations = truncations[:, valid_indices]
 
             final_obs = None
             last_info = None
@@ -543,10 +675,14 @@ class RecordVideo(gym.Wrapper):
                     if isinstance(infos_list, (list, tuple))
                     else infos_list
                 )
-                self.add_new_frames(obs_main, infos_main, rewards, terminations)
+                self.add_new_frames(
+                    obs_main, infos_main, rewards, terminations, truncations
+                )
                 self.add_new_frames(reset_obs, None)
             else:
-                self.add_new_frames(obs_list, infos_list, rewards, terminations)
+                self.add_new_frames(
+                    obs_list, infos_list, rewards, terminations, truncations
+                )
         return result
 
     def flush_video(self, video_sub_dir: Optional[str] = None):

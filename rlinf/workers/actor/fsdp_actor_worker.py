@@ -1448,7 +1448,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         )
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
-        for _ in range(update_epoch):
+        for update_epoch_idx in range(update_epoch):
             rollout_dataloader_iter = split_dict_to_chunk(
                 self.rollout_batch,
                 rollout_size // batch_size_per_rank,
@@ -1508,6 +1508,15 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     compute_values = (
                         True if self.cfg.algorithm.adv_type == "gae" else False
                     )
+                    action_smooth_coef = self.cfg.algorithm.get(
+                        "action_smooth_coef", 0.0
+                    )
+                    action_accel_smooth_coef = self.cfg.algorithm.get(
+                        "action_accel_smooth_coef", 0.0
+                    )
+                    compute_ode_actions = (
+                        action_smooth_coef > 0 or action_accel_smooth_coef > 0
+                    )
 
                     with self.amp_context:
                         output_dict = self.model(
@@ -1515,6 +1524,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                             compute_logprobs=True,
                             compute_entropy=self.cfg.algorithm.entropy_bonus > 0,
                             compute_values=compute_values,
+                            compute_ode_actions=compute_ode_actions,
                             use_cache=False,
                             **kwargs,
                         )
@@ -1553,7 +1563,113 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         "compute_explained_variance": False,
                     }
                     loss, metrics_data = policy_loss(**kwargs)
+                    if (
+                        compute_ode_actions
+                        and "ode_actions" in output_dict
+                        and not kwargs["critic_warmup"]
+                    ):
+                        ode_actions = output_dict["ode_actions"].float()
+                        action_delta = ode_actions[:, 1:] - ode_actions[:, :-1]
+                        action_smooth_loss = action_delta.square().mean()
+                        loss = loss + action_smooth_coef * action_smooth_loss
+                        metrics_data["actor/action_smooth_loss"] = (
+                            action_smooth_loss.detach().item()
+                        )
+                        metrics_data["actor/action_smooth_delta_abs_max"] = (
+                            action_delta.detach().abs().amax().item()
+                        )
+                        metrics_data["actor/action_smooth_delta_l2"] = (
+                            torch.linalg.vector_norm(
+                                action_delta.reshape(action_delta.shape[0], -1),
+                                dim=-1,
+                            )
+                            .mean()
+                            .detach()
+                            .item()
+                        )
+                        if action_accel_smooth_coef > 0 and ode_actions.shape[1] > 2:
+                            action_accel = (
+                                ode_actions[:, 2:]
+                                - 2 * ode_actions[:, 1:-1]
+                                + ode_actions[:, :-2]
+                            )
+                            action_accel_smooth_loss = action_accel.square().mean()
+                            loss = (
+                                loss
+                                + action_accel_smooth_coef
+                                * action_accel_smooth_loss
+                            )
+                            metrics_data["actor/action_accel_smooth_loss"] = (
+                                action_accel_smooth_loss.detach().item()
+                            )
                     metrics_data.pop("critic/explained_variance", None)
+                    if (
+                        isinstance(forward_inputs, dict)
+                        and "flow_sde_mu_old" in forward_inputs
+                        and "flow_sde_sigma_old" in forward_inputs
+                        and "flow_sde_mu" in output_dict
+                    ):
+                        with torch.no_grad():
+                            mu_old = forward_inputs["flow_sde_mu_old"].to(
+                                device=output_dict["flow_sde_mu"].device,
+                                dtype=output_dict["flow_sde_mu"].dtype,
+                            )
+                            sigma_old = forward_inputs["flow_sde_sigma_old"].to(
+                                device=output_dict["flow_sde_mu"].device,
+                                dtype=output_dict["flow_sde_mu"].dtype,
+                            )
+                            mu_delta = output_dict["flow_sde_mu"] - mu_old
+                            flat_delta = mu_delta.reshape(mu_delta.shape[0], -1)
+                            mu_delta_l2 = torch.linalg.vector_norm(
+                                flat_delta, dim=-1
+                            )
+
+                            valid_sigma = sigma_old.abs() > 1e-8
+                            sigma_safe = torch.where(
+                                valid_sigma,
+                                sigma_old,
+                                torch.ones_like(sigma_old),
+                            )
+                            normalized_delta = torch.where(
+                                valid_sigma,
+                                mu_delta / sigma_safe,
+                                torch.zeros_like(mu_delta),
+                            )
+                            flat_normalized_delta = normalized_delta.reshape(
+                                normalized_delta.shape[0], -1
+                            )
+                            mu_delta_over_sigma_l2 = torch.linalg.vector_norm(
+                                flat_normalized_delta, dim=-1
+                            )
+
+                            metrics_data.update(
+                                {
+                                    "actor/mu_delta_l2": (
+                                        mu_delta_l2.mean().detach().item()
+                                    ),
+                                    "actor/mu_delta_l2_max": (
+                                        mu_delta_l2.max().detach().item()
+                                    ),
+                                    "actor/mu_delta_over_sigma_l2": (
+                                        mu_delta_over_sigma_l2.mean().detach().item()
+                                    ),
+                                    "actor/mu_delta_over_sigma_l2_max": (
+                                        mu_delta_over_sigma_l2.max().detach().item()
+                                    ),
+                                }
+                            )
+                    for metric_key in (
+                        "actor/approx_kl",
+                        "actor/ratio",
+                        "actor/clipped_ratio",
+                        "actor/ratio_abs",
+                        "actor/clip_fraction",
+                    ):
+                        if metric_key in metrics_data:
+                            metric_name = metric_key.split("/", maxsplit=1)[-1]
+                            metrics_data[
+                                f"actor/update_epoch_{update_epoch_idx}/{metric_name}"
+                            ] = metrics_data[metric_key]
                     micro_ev_stats = _explained_variance_stats_from_loss_kwargs(kwargs)
                     if micro_ev_stats is not None:
                         explained_variance_stats = (

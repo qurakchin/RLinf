@@ -45,6 +45,11 @@ class OpenPi0Config(Pi0Config):
     noise_params: list = field(
         default_factory=lambda: [0.7, 0.3, 400]
     )  # noise_start, noise_end, noise_anneal_steps
+    noise_action_indices: list[int] | None = None
+    flow_sde_env_noise_scale: float = 1.0
+    noise_horizon_mode: str = "dense"  # dense, latent_interp, ramp_independent, ramp_correlated
+    noise_horizon_anchors: int = 8
+    log_flow_sde_diagnostics: bool = False
     # noise config for flow-noise
     noise_logvar_range: list = field(
         default_factory=lambda: [0.08, 0.16]
@@ -62,6 +67,7 @@ class OpenPi0Config(Pi0Config):
     # critic
     detach_critic_input: bool = False  # detach critic input with the action expert
     chunk_critic_input: bool = False  # use only the action chunk for critic estimation
+    action_level_value: bool = False  # expand scalar value to action-level shape
     add_value_head: bool = False  # add value head for ppo
     value_after_vlm: bool = False  # value after vlm, pi05 mode
     value_vlm_mode: str = "mean_token"  # last_token, mean_token, first_token
@@ -381,6 +387,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
     ) -> dict[str, Any]:
         # get kwargs
         compute_values = kwargs.get("compute_values", False)
+        compute_ode_actions = kwargs.get("compute_ode_actions", False)
         chains = forward_inputs["chains"]
         denoise_inds = forward_inputs["denoise_inds"]
         # input transform
@@ -395,7 +402,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         img_masks = [img_mask.to(device) for img_mask in img_masks]
         state = state.to(device)
         # get log prob
-        log_probs, value_t, entropy = self.get_log_prob_value(
+        log_probs, value_t, entropy, flow_sde_stats = self.get_log_prob_value(
             images,
             img_masks,
             lang_tokens,
@@ -417,11 +424,34 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             :, None
         ]  # [:,None] to align with loss-mask shape
         value_t = value_t.mean(dim=-1, keepdim=False)
-        return {
+        if self.config.action_level_value:
+            value_t = value_t[:, None].expand(-1, self.config.action_chunk)
+        result = {
             "logprobs": log_probs,
             "values": value_t,
             "entropy": entropy,
         }
+        if flow_sde_stats:
+            result["flow_sde_mu"] = flow_sde_stats["mu"][
+                :, :, : self.config.action_chunk, : self.config.action_env_dim
+            ].mean(dim=1)
+            result["flow_sde_sigma"] = flow_sde_stats["sigma"][
+                :, :, : self.config.action_chunk, : self.config.action_env_dim
+            ].mean(dim=1)
+        if compute_ode_actions:
+            _, ode_prefix_pad_masks, ode_past_key_values = self._build_prefix_cache(
+                images, img_masks, lang_tokens, lang_masks
+            )
+            ode_actions = self._compute_ode_actions(
+                chains[:, 0],
+                state,
+                ode_prefix_pad_masks,
+                ode_past_key_values,
+            )
+            result["ode_actions"] = ode_actions[
+                :, : self.config.action_chunk, : self.config.action_env_dim
+            ]
+        return result
 
     def forward_nft(
         self,
@@ -569,6 +599,38 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             actions = self.output_transform(
                 {"actions": outputs["actions"], "state": observation.state}
             )["actions"]
+            use_flow_sde_env_scale = (
+                mode == "train"
+                and self.config.noise_method == "flow_sde"
+                and self.config.flow_sde_env_noise_scale != 1.0
+            )
+            use_flow_sde_diagnostics = (
+                self.config.log_flow_sde_diagnostics
+                and mode == "train"
+                and self.config.noise_method == "flow_sde"
+            )
+            if use_flow_sde_env_scale or use_flow_sde_diagnostics:
+                ode_outputs = self.sample_actions(
+                    observation,
+                    noise=outputs["chains"][:, 0],
+                    mode="eval",
+                    compute_values=False,
+                )
+                ode_actions = self.output_transform(
+                    {"actions": ode_outputs["actions"], "state": observation.state}
+                )["actions"]
+                if use_flow_sde_env_scale:
+                    actions = ode_actions + (
+                        actions - ode_actions
+                    ) * self.config.flow_sde_env_noise_scale
+                if use_flow_sde_diagnostics:
+                    action_delta = (actions - ode_actions).to(dtype=torch.float32)
+                    outputs["flow_sde_action_delta_l2"] = torch.linalg.vector_norm(
+                        action_delta.reshape(action_delta.shape[0], -1), dim=-1
+                    )
+                    outputs["flow_sde_action_delta_abs_max_per_joint"] = (
+                        action_delta.abs().amax(dim=1)
+                    )
             prev_logprobs = outputs["prev_logprobs"]
             prev_values = outputs["prev_values"]
             forward_action = None
@@ -586,6 +648,14 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             .reshape(outputs["actions"].shape[0], -1)
             .contiguous(),
         }
+        for key in (
+            "flow_sde_mu_old",
+            "flow_sde_sigma_old",
+            "flow_sde_action_delta_l2",
+            "flow_sde_action_delta_abs_max_per_joint",
+        ):
+            if key in outputs:
+                forward_inputs[key] = outputs[key]
         if forward_action is not None:
             forward_inputs["action"] = forward_action
 
@@ -641,6 +711,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         chains = []
         log_probs = []
         values = []
+        flow_sde_mus = []
+        flow_sde_sigmas = []
         chains.append(x_t)
 
         # add value based on the vlm for pi05, expert for pi0
@@ -649,6 +721,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         if self.config.joint_logprob:
             initial_log_prob = self.get_logprob_norm(
                 x_t, torch.zeros_like(noise), torch.ones_like(noise)
+            )
+            initial_log_prob = self._mask_flow_sde_horizon_logprob(
+                initial_log_prob, sample_method=self.config.noise_method
             )
             log_probs.append(initial_log_prob)
 
@@ -699,7 +774,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                 compute_values,
             )
             # Euler step - use new tensor assignment instead of in-place operation
-            x_t = x_t_mean + self.sample_noise(x_t.shape, device) * x_t_std
+            horizon_noise = self._sample_flow_sde_horizon_noise(
+                x_t.shape, device=device, dtype=x_t.dtype, sample_method=sample_method
+            )
+            x_t = x_t_mean + horizon_noise * x_t_std
             if collect_nft_traces:
                 mask = flow_rand_idx == idx
                 mask_bc = mask[:, None, None]
@@ -716,21 +794,42 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                         mask, nl.expand(bsize), flow_noise_level
                     )
             log_prob = self.get_logprob_norm(x_t, x_t_mean, x_t_std)
+            log_prob = self._mask_flow_sde_horizon_logprob(
+                log_prob, sample_method=sample_method
+            )
             # store
             values.append(value_t)
             chains.append(x_t)
             log_probs.append(log_prob)
+            flow_sde_mus.append(x_t_mean)
+            flow_sde_sigmas.append(x_t_std)
         x_0 = x_t
         chains = torch.stack(chains, dim=1)
+        flow_sde_mus = torch.stack(flow_sde_mus, dim=1)[
+            :, :, : self.config.action_chunk, : self.config.action_env_dim
+        ]
+        flow_sde_sigmas = torch.stack(flow_sde_sigmas, dim=1)[
+            :, :, : self.config.action_chunk, : self.config.action_env_dim
+        ]
         # post process for logprob
         log_probs = torch.stack(log_probs, dim=1)[
             :, :, : self.config.action_chunk, : self.config.action_env_dim
         ]
         if self.config.joint_logprob:
             log_probs = log_probs.mean(dim=1)
+            flow_sde_mu_old = flow_sde_mus.mean(dim=1)
+            flow_sde_sigma_old = flow_sde_sigmas.mean(dim=1)
         else:
             log_probs = log_probs[
                 torch.arange(log_probs.shape[0]),
+                denoise_inds[:, 0],
+            ]
+            flow_sde_mu_old = flow_sde_mus[
+                torch.arange(flow_sde_mus.shape[0]),
+                denoise_inds[:, 0],
+            ]
+            flow_sde_sigma_old = flow_sde_sigmas[
+                torch.arange(flow_sde_sigmas.shape[0]),
                 denoise_inds[:, 0],
             ]
         # post process for value
@@ -738,6 +837,11 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             values = values_vlm[:, None]
         else:
             values = torch.stack(values, dim=1).mean(dim=-1, keepdim=True)
+        if self.config.action_level_value:
+            if values.ndim == 1:
+                values = values[:, None]
+            if values.shape[-1] == 1:
+                values = values.expand(-1, self.config.action_chunk)
         result = {
             "actions": x_0,
             "chains": chains,
@@ -745,6 +849,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             "prev_values": values,
             "denoise_inds": denoise_inds,
         }
+        if self.config.log_flow_sde_diagnostics and mode == "train":
+            result["flow_sde_mu_old"] = flow_sde_mu_old.detach()
+            result["flow_sde_sigma_old"] = flow_sde_sigma_old.detach()
         if collect_nft_traces:
             result.update(
                 {
@@ -814,6 +921,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             sigma_ratio = timesteps / (1 - denom_timesteps)
             sigmas = noise_level * torch.sqrt(sigma_ratio)[:-1]
             sigma_i = sigmas[idx][:, None, None].expand_as(x_t)
+            sigma_i = sigma_i * self._get_noise_action_mask(x_t)
             x0_weight = torch.ones_like(t_input) - (t_input - delta)
             x1_weight = t_input - delta - sigma_i**2 * delta / (2 * t_input)
             x_t_std = torch.sqrt(delta) * sigma_i
@@ -935,6 +1043,27 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             log_prob = torch.where(mask, torch.zeros_like(log_prob), log_prob)
         return log_prob
 
+    def _compute_ode_actions(
+        self,
+        noise: torch.Tensor,
+        state: torch.Tensor,
+        prefix_pad_masks: torch.Tensor,
+        past_key_values,
+    ) -> torch.Tensor:
+        x_t = noise
+        for idx in range(self.config.num_steps):
+            x_t, _, _, _ = self.sample_mean_var_val(
+                x_t,
+                idx,
+                state,
+                prefix_pad_masks,
+                past_key_values,
+                "flow_ode",
+                self.config.num_steps,
+                compute_values=False,
+            )
+        return x_t
+
     def preprocess_for_train(self, data):
         return data
 
@@ -956,6 +1085,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         chains_log_probs = []
         chains_values = []
         chains_entropy = []
+        chains_mu = []
+        chains_sigma = []
 
         # get log prob
         if self.config.joint_logprob:
@@ -966,6 +1097,12 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                 torch.ones_like(chains[:, 0]),
             )
             initial_entropy = self.gaussian_entropy(torch.ones_like(chains[:, 0]))
+            initial_log_prob = self._mask_flow_sde_horizon_logprob(
+                initial_log_prob, sample_method=self.config.noise_method
+            )
+            initial_entropy = self._mask_flow_sde_horizon_logprob(
+                initial_entropy, sample_method=self.config.noise_method
+            )
             chains_log_probs.append(initial_log_prob)
             chains_entropy.append(initial_entropy)
         else:
@@ -985,9 +1122,17 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                 compute_values,
             )
             log_probs = self.get_logprob_norm(chains_next, x_t_mean, x_t_std)
+            log_probs = self._mask_flow_sde_horizon_logprob(
+                log_probs, sample_method=self.config.noise_method
+            )
             entropy = self.gaussian_entropy(x_t_std)
+            entropy = self._mask_flow_sde_horizon_logprob(
+                entropy, sample_method=self.config.noise_method
+            )
             chains_log_probs.append(log_probs)
             chains_entropy.append(entropy)
+            chains_mu.append(x_t_mean)
+            chains_sigma.append(x_t_std)
             if not self.use_vlm_value:
                 chains_values.append(value_t)
         if self.use_vlm_value:
@@ -1000,7 +1145,13 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             chains_entropy = torch.stack(chains_entropy, dim=1)
         else:
             chains_entropy = torch.zeros_like(chains_log_probs)
-        return chains_log_probs, chains_values, chains_entropy
+        flow_sde_stats = {}
+        if chains_mu:
+            flow_sde_stats = {
+                "mu": torch.stack(chains_mu, dim=1),
+                "sigma": torch.stack(chains_sigma, dim=1),
+            }
+        return chains_log_probs, chains_values, chains_entropy, flow_sde_stats
 
     def get_value_from_vlm(self, prefix_output):
         # prefix_output:
@@ -1242,6 +1393,161 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         q_values = self.q_head(state_features, image_features, actions)
 
         return q_values
+
+    def _get_noise_action_mask(self, x_t: torch.Tensor) -> torch.Tensor:
+        noise_action_indices = self.config.noise_action_indices
+        if noise_action_indices is None:
+            return torch.ones_like(x_t)
+        if not noise_action_indices:
+            return torch.zeros_like(x_t)
+
+        action_dim = x_t.shape[-1]
+        indices = torch.as_tensor(
+            noise_action_indices, device=x_t.device, dtype=torch.long
+        )
+        if ((indices < 0) | (indices >= action_dim)).any().item():
+            raise ValueError(
+                "noise_action_indices must be within the model action dimension "
+                f"[0, {action_dim}), got {noise_action_indices}."
+            )
+
+        mask = torch.zeros(action_dim, device=x_t.device, dtype=x_t.dtype)
+        mask.scatter_(0, indices, 1)
+        view_shape = (1,) * (x_t.ndim - 1) + (action_dim,)
+        return mask.view(view_shape).expand_as(x_t)
+
+    def _use_horizon_noise(self, sample_method: str | None = None) -> bool:
+        method = sample_method or self.config.noise_method
+        if self.config.noise_horizon_mode not in (
+            "dense",
+            "latent_interp",
+            "ramp_independent",
+            "ramp_correlated",
+        ):
+            raise ValueError(
+                "noise_horizon_mode must be one of: dense, latent_interp, "
+                "ramp_independent, ramp_correlated. "
+                f"Got {self.config.noise_horizon_mode}."
+            )
+        return method == "flow_sde" and self.config.noise_horizon_mode != "dense"
+
+    def _get_horizon_ramp(
+        self,
+        horizon: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        if horizon <= 1:
+            return torch.ones(1, device=device, dtype=dtype)
+        return torch.linspace(0, 1, horizon, device=device, dtype=dtype)
+
+    def _get_horizon_anchor_indices(
+        self, horizon: int, device: torch.device
+    ) -> torch.Tensor:
+        anchor_count = min(max(int(self.config.noise_horizon_anchors), 1), horizon)
+        if anchor_count == 1:
+            return torch.tensor([horizon - 1], device=device, dtype=torch.long)
+        return torch.linspace(
+            0, horizon - 1, anchor_count, device=device, dtype=torch.float32
+        ).round().long().unique(sorted=True)
+
+    def _interpolate_horizon_anchors(
+        self,
+        anchor_values: torch.Tensor,
+        anchor_indices: torch.Tensor,
+        horizon: int,
+    ) -> torch.Tensor:
+        if anchor_indices.numel() == 1:
+            ramp = torch.linspace(
+                0,
+                1,
+                horizon,
+                device=anchor_values.device,
+                dtype=anchor_values.dtype,
+            ).view(1, horizon, 1)
+            return anchor_values[:, :1] * ramp
+
+        values = torch.empty(
+            anchor_values.shape[0],
+            horizon,
+            anchor_values.shape[-1],
+            device=anchor_values.device,
+            dtype=anchor_values.dtype,
+        )
+        first_idx = int(anchor_indices[0].item())
+        last_idx = int(anchor_indices[-1].item())
+        if first_idx > 0:
+            values[:, :first_idx] = anchor_values[:, :1]
+        if last_idx + 1 < horizon:
+            values[:, last_idx + 1 :] = anchor_values[:, -1:]
+
+        for segment_idx in range(anchor_indices.numel() - 1):
+            start = int(anchor_indices[segment_idx].item())
+            end = int(anchor_indices[segment_idx + 1].item())
+            weight = torch.linspace(
+                0,
+                1,
+                end - start + 1,
+                device=anchor_values.device,
+                dtype=anchor_values.dtype,
+            ).view(1, -1, 1)
+            values[:, start : end + 1] = (
+                anchor_values[:, segment_idx : segment_idx + 1] * (1 - weight)
+                + anchor_values[:, segment_idx + 1 : segment_idx + 2] * weight
+            )
+        return values
+
+    def _sample_flow_sde_horizon_noise(
+        self,
+        shape: torch.Size | tuple[int, ...],
+        device: torch.device,
+        dtype: torch.dtype,
+        sample_method: str | None = None,
+    ) -> torch.Tensor:
+        if not self._use_horizon_noise(sample_method):
+            return self.sample_noise(shape, device).to(dtype=dtype)
+
+        noise = self.sample_noise(shape, device).to(dtype=dtype)
+        horizon = min(int(self.config.action_chunk), shape[1])
+        if self.config.noise_horizon_mode == "ramp_independent":
+            ramp = self._get_horizon_ramp(horizon, device, dtype).view(1, horizon, 1)
+            noise[:, :horizon] = noise[:, :horizon] * ramp
+            return noise
+        if self.config.noise_horizon_mode == "ramp_correlated":
+            ramp = self._get_horizon_ramp(horizon, device, dtype).view(1, horizon, 1)
+            shared_noise = self.sample_noise((shape[0], 1, shape[2]), device).to(
+                dtype=dtype
+            )
+            noise[:, :horizon] = shared_noise * ramp
+            return noise
+
+        anchor_indices = self._get_horizon_anchor_indices(horizon, device)
+        anchor_noise = self.sample_noise(
+            (shape[0], anchor_indices.numel(), shape[2]), device
+        ).to(dtype=dtype)
+        noise[:, :horizon] = self._interpolate_horizon_anchors(
+            anchor_noise, anchor_indices, horizon
+        )
+        return noise
+
+    def _mask_flow_sde_horizon_logprob(
+        self, log_prob: torch.Tensor, sample_method: str | None = None
+    ) -> torch.Tensor:
+        if not self._use_horizon_noise(sample_method):
+            return log_prob
+        if self.config.noise_horizon_mode == "ramp_independent":
+            return log_prob
+        if self.config.noise_horizon_mode == "ramp_correlated":
+            return log_prob
+
+        horizon = min(int(self.config.action_chunk), log_prob.shape[-2])
+        anchor_indices = self._get_horizon_anchor_indices(horizon, log_prob.device)
+        mask = torch.zeros(
+            log_prob.shape[-2], device=log_prob.device, dtype=log_prob.dtype
+        )
+        mask[anchor_indices] = 1
+        view_shape = (1,) * (log_prob.ndim - 2) + (log_prob.shape[-2], 1)
+        return log_prob * mask.view(view_shape)
 
     def _get_noise_level(
         self, device: torch.device, dtype: torch.dtype, sample_method: str | None = None

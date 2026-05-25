@@ -117,6 +117,53 @@ def compute_evaluate_metrics(eval_metrics_list):
 def compute_rollout_metrics(data_buffer: dict) -> dict:
     rollout_metrics = {}
 
+    forward_inputs = data_buffer.get("forward_inputs", {})
+    if isinstance(forward_inputs, dict):
+        if "flow_sde_action_delta_l2" in forward_inputs:
+            l2_delta = forward_inputs["flow_sde_action_delta_l2"].float()
+            l2_sum = l2_delta.sum()
+            l2_count = torch.as_tensor(
+                l2_delta.numel(), device=l2_delta.device, dtype=torch.float32
+            )
+            if l2_delta.numel():
+                l2_max = l2_delta.max()
+            else:
+                l2_max = torch.zeros((), device=l2_delta.device)
+            reduce_l2 = torch.stack(
+                [
+                    l2_sum.to(Worker.torch_platform.current_device()),
+                    l2_count.to(Worker.torch_platform.current_device()),
+                ]
+            )
+            torch.distributed.all_reduce(
+                reduce_l2, op=torch.distributed.ReduceOp.SUM
+            )
+            reduce_l2_max = l2_max.to(Worker.torch_platform.current_device())
+            torch.distributed.all_reduce(
+                reduce_l2_max, op=torch.distributed.ReduceOp.MAX
+            )
+            rollout_metrics["flow_sde/action_delta_l2_mean"] = (
+                reduce_l2[0] / reduce_l2[1].clamp_min(1.0)
+            ).item()
+            rollout_metrics["flow_sde/action_delta_l2_max"] = reduce_l2_max.item()
+
+        if "flow_sde_action_delta_abs_max_per_joint" in forward_inputs:
+            joint_delta = forward_inputs[
+                "flow_sde_action_delta_abs_max_per_joint"
+            ].float()
+            if joint_delta.numel() > 0:
+                joint_delta = joint_delta.reshape(-1, joint_delta.shape[-1])
+                joint_max = joint_delta.max(dim=0).values.to(
+                    Worker.torch_platform.current_device()
+                )
+                torch.distributed.all_reduce(
+                    joint_max, op=torch.distributed.ReduceOp.MAX
+                )
+                for idx, value in enumerate(joint_max.detach().cpu().tolist()):
+                    rollout_metrics[
+                        f"flow_sde/action_delta_abs_max_joint_{idx:02d}"
+                    ] = value
+
     if "rewards" in data_buffer:
         rewards = data_buffer["rewards"].clone()
         mean_rewards = torch.mean(rewards).to(Worker.torch_platform.current_device())

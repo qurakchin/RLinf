@@ -2,6 +2,8 @@ env_type: behavior
 total_num_envs: null
 auto_reset: False
 ignore_terminations: False
+# If set, completion_bonus at this current_stage_idx defines episode success.
+success_stage_idx: null
 use_rel_reward: False
 seed: 0
 group_size: 1
@@ -12,8 +14,7 @@ skip_intermediate_obs_in_chunk: True
 use_thread_worker: False
 num_env_subprocess: 1
 
-# Append the current BEHAVIOR orchestrator subtask to the base task prompt.
-# This requires replay_init data with matching orchestrators.
+# If this is a non-empty string, use it as the prompt. Otherwise use the default task prompt.
 use_subtask_prompt: False
 
 replay_init:

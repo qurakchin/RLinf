@@ -91,7 +91,6 @@ def _behavior_env_worker(
         skip_intermediate_obs_in_chunk = bool(
             OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
-
         def _step_env(actions, need_obs: bool):
             if step_supports_get_obs and step_supports_render:
                 return env.step(actions, get_obs=need_obs, render=need_obs)
@@ -246,6 +245,9 @@ class BehaviorEnv(gym.Env):
 
         self.num_envs = num_envs
         self.ignore_terminations = cfg.ignore_terminations
+        self.success_stage_idx = cfg.get("success_stage_idx", None)
+        if self.success_stage_idx is not None:
+            self.success_stage_idx = int(self.success_stage_idx)
         self.use_rel_reward = cfg.use_rel_reward
         self.seed_offset = seed_offset
         self.seed = self.cfg.seed + seed_offset
@@ -259,7 +261,14 @@ class BehaviorEnv(gym.Env):
         self.env_process_list = []
         self.parent_conn_list = []
         self.child_conn_list = []
-        self.use_subtask_prompt = bool(self.cfg.get("use_subtask_prompt", False))
+        use_subtask_prompt_cfg = self.cfg.get("use_subtask_prompt", False)
+        self.prompt_override = (
+            use_subtask_prompt_cfg.strip()
+            if isinstance(use_subtask_prompt_cfg, str)
+            and use_subtask_prompt_cfg.strip()
+            else None
+        )
+        self.use_subtask_prompt = self.prompt_override is not None
         self._stage_prompt_lists: list[list[str] | None] = [None] * self.num_envs
 
         self.logger = get_logger()
@@ -556,14 +565,9 @@ class BehaviorEnv(gym.Env):
         return f"{self.task_description}\nCurrent stage: {stage_prompt}"
 
     def _task_descriptions_from_infos(self, infos=None) -> list[str]:
-        if not self.use_subtask_prompt or infos is None:
-            return [self.task_description for _ in range(self.num_envs)]
-        return [
-            self._compose_task_description(
-                self._update_stage_prompts_from_info(env_idx, info)
-            )
-            for env_idx, info in enumerate(infos)
-        ]
+        if self.prompt_override is not None:
+            return [self.prompt_override for _ in range(self.num_envs)]
+        return [self.task_description for _ in range(self.num_envs)]
 
     def _wrap_obs(self, obs_list, infos=None):
         extracted_obs_list = []
@@ -603,15 +607,22 @@ class BehaviorEnv(gym.Env):
         )
         obs = self._wrap_obs(raw_obs, infos)
         rewards = self._calc_step_reward(rewards, infos)
-        infos = self._record_metrics(rewards, infos)
+        terminations = to_tensor(terminations).bool()
+        truncations = to_tensor(truncations).bool()
+        info_dones = self._info_done_tensor(infos, device=terminations.device)
         if self.ignore_terminations:
-            terminations[:] = False
+            terminations = torch.zeros_like(terminations, dtype=torch.bool)
+            truncations = torch.logical_or(truncations, info_dones)
+        else:
+            terminations = torch.logical_or(terminations, info_dones)
+        dones = torch.logical_or(terminations, truncations)
+        infos = self._record_metrics(rewards, infos, dones=dones)
 
         return (
             obs,
             to_tensor(rewards),
-            to_tensor(terminations),
-            to_tensor(truncations),
+            terminations,
+            truncations,
             infos,
         )
 
@@ -639,9 +650,28 @@ class BehaviorEnv(gym.Env):
                 raw_rewards_list[i], raw_infos_list[i]
             )
             scaled_rewards_list.append(step_rewards)
-            infos = self._record_metrics(step_rewards, raw_infos_list[i])
+            raw_terminations_list[i] = raw_terminations_list[i].bool()
+            raw_truncations_list[i] = raw_truncations_list[i].bool()
+            info_dones = self._info_done_tensor(
+                raw_infos_list[i], device=raw_terminations_list[i].device
+            )
             if self.ignore_terminations:
-                raw_terminations_list[i] = torch.zeros_like(raw_terminations_list[i])
+                raw_terminations_list[i] = torch.zeros_like(
+                    raw_terminations_list[i], dtype=torch.bool
+                )
+                raw_truncations_list[i] = torch.logical_or(
+                    raw_truncations_list[i], info_dones
+                )
+            else:
+                raw_terminations_list[i] = torch.logical_or(
+                    raw_terminations_list[i], info_dones
+                )
+            step_dones = torch.logical_or(
+                raw_terminations_list[i], raw_truncations_list[i]
+            )
+            infos = self._record_metrics(
+                step_rewards, raw_infos_list[i], dones=step_dones
+            )
             raw_obs = raw_obs_list[i]
             if raw_obs is None or (
                 isinstance(raw_obs, (list, tuple))
@@ -662,29 +692,6 @@ class BehaviorEnv(gym.Env):
 
         past_terminations = raw_terminations.any(dim=1)
         past_truncations = raw_truncations.any(dim=1)
-
-        # Some OmniGibson builds may report episode completion primarily via
-        # `info["done"]` while leaving `terminations`/`truncations` booleans
-        # as all-False for the whole chunk. RLinf's evaluation metrics gate on
-        # `terminations|truncations`, so we fall back to info-done here.
-        #
-        # `raw_infos_list[i]` is a list of per-env info dicts for chunk step i.
-        info_done_flags = []
-        for i in range(chunk_size):
-            step_infos = raw_infos_list[i]
-            step_done = [
-                self._extract_info_done(info) if isinstance(info, dict) else False
-                for info in step_infos
-            ]
-            info_done_flags.append(torch.tensor(step_done, dtype=torch.bool))
-        past_info_dones = torch.stack(info_done_flags, dim=1).any(dim=1)
-
-        # If the config asks to ignore terminations, map info-done into
-        # truncations; otherwise map it into terminations.
-        if self.ignore_terminations:
-            past_truncations = torch.logical_or(past_truncations, past_info_dones)
-        else:
-            past_terminations = torch.logical_or(past_terminations, past_info_dones)
         past_dones = torch.logical_or(past_terminations, past_truncations)
 
         if past_dones.any() and self.auto_reset:
@@ -743,23 +750,73 @@ class BehaviorEnv(gym.Env):
             self.success_once[mask] = False
             self.returns[mask] = 0
 
-    def _record_metrics(self, rewards, infos):
+    def _is_target_stage_success(self, task_reward: dict) -> bool:
+        if self.success_stage_idx is None:
+            return False
+        current_stage_idx = task_reward.get("current_stage_idx", None)
+        if current_stage_idx is None:
+            return False
+        try:
+            current_stage_idx = int(current_stage_idx)
+        except (TypeError, ValueError):
+            return False
+        completion_bonus = float(task_reward.get("completion_bonus", 0.0) or 0.0)
+        return current_stage_idx == self.success_stage_idx and completion_bonus != 0.0
+
+    def _extract_episode_success(self, info: dict | None) -> bool:
+        if not isinstance(info, dict):
+            return False
+        task_reward = self._get_task_specific_reward_info(info)
+        if self.success_stage_idx is not None:
+            return self._is_target_stage_success(task_reward)
+        done_dict = info.get("done", {})
+        if isinstance(done_dict, dict):
+            return bool(done_dict.get("success", False))
+        return bool(info.get("success", False))
+
+    def _extract_episode_done(self, info: dict | None) -> bool:
+        if not isinstance(info, dict):
+            return False
+        if self.success_stage_idx is not None:
+            return self._extract_episode_success(info)
+        return self._extract_info_done(info)
+
+    def _info_done_tensor(self, infos, device=None) -> torch.Tensor:
+        done_flags = [self._extract_episode_done(info) for info in infos]
+        return torch.as_tensor(done_flags, dtype=torch.bool, device=device)
+
+    def _record_metrics(self, rewards, infos, dones=None):
         info_lists = []
         replay_info_lists = []
         for env_idx, (reward, info) in enumerate(zip(rewards, infos)):
             task_reward = self._get_task_specific_reward_info(info)
             completion_bonus = float(task_reward.get("completion_bonus", 0.0) or 0.0)
-            done_dict = info.get("done", {})
-            step_success = done_dict.get("success", False)
-            end_success = info.get("success", step_success)
+            step_success = self._extract_episode_success(info)
+            end_success = (
+                step_success
+                if self.success_stage_idx is not None
+                else info.get("success", step_success)
+            )
             episode_length = info.get("episode_length", 0)
             current_stage_idx = task_reward.get("current_stage_idx", -1)
             total_stage_count = task_reward.get("total_stage_count", 0)
+            current_stage_success = completion_bonus != 0.0
+            episode_done = (
+                bool(dones[env_idx].item())
+                if isinstance(dones, torch.Tensor)
+                else self._extract_episode_done(info)
+            )
             episode_info = {
                 "episode_length": episode_length,
                 "completion_bonus": completion_bonus,
                 "current_stage_idx": int(current_stage_idx if current_stage_idx is not None else -1),
                 "total_stage_count": int(total_stage_count if total_stage_count is not None else 0),
+                "current_stage_success": current_stage_success,
+                "success_stage_idx": (
+                    -1 if self.success_stage_idx is None else self.success_stage_idx
+                ),
+                "target_stage_success": step_success,
+                "done": episode_done,
                 "radio_button_up": False,
                 "radio_button_align": -1.0,
             }
@@ -827,8 +884,21 @@ class BehaviorEnv(gym.Env):
 
     @staticmethod
     def _extract_info_done(info: dict) -> bool:
-        tc = info["done"]["termination_conditions"]
-        return any(v["done"] for v in tc.values())
+        done_info = info.get("done", {}) if isinstance(info, dict) else {}
+        if isinstance(done_info, bool):
+            return done_info
+        if not isinstance(done_info, dict):
+            return False
+        if bool(done_info.get("success", False)):
+            return True
+        termination_conditions = done_info.get("termination_conditions", {})
+        if not isinstance(termination_conditions, dict):
+            return False
+        return any(
+            bool(value.get("done", False))
+            for value in termination_conditions.values()
+            if isinstance(value, dict)
+        )
 
     def _handle_auto_reset(self, dones, extracted_obs, infos):
         final_obs = extracted_obs.copy()
