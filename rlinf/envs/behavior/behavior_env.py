@@ -94,13 +94,13 @@ class BehaviorProcess:
 
         if self.skip_intermediate_obs_in_chunk and not self.step_supports_get_obs:
             self.logger.warning(
-                "skip_intermediate_obs_in_chunk is True but OG env step does not "
+                "skip_intermediate_obs_in_chunk is True but OmniGibson env step does not "
                 "support get_obs; this config will be ignored."
             )
 
         if self.pipeline_stage_num > 1 and not self.step_supports_env_indices:
             self.logger.warning(
-                "pipeline_stage_num > 1 but OG env step does not support env_indices; "
+                "pipeline_stage_num > 1 but OmniGibson env step does not support env_indices; "
                 "this may cause inefficiency since every pipeline step will still "
                 "advance every env with zeroed-out actions for inactive envs."
             )
@@ -314,7 +314,7 @@ class BehaviorProcessPool:
                 ]
                 activity_names = ray.get(activity_names_refs)
                 break
-            except Exception as e:  # noqa: BLE001 - we want to catch any Ray/OG init error
+            except Exception as e:  # noqa: BLE001 - we want to catch any Ray/OmniGibson init error
                 # Best-effort cleanup of any partially-created actors
                 for proc in getattr(self, "env_processes", []):
                     try:
