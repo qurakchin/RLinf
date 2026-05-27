@@ -88,16 +88,24 @@ class EnvWorker(Worker):
         self.only_eval = getattr(self.cfg.runner, "only_eval", False)
         train_env_cfg = self.cfg.env.get("train", None)
         eval_env_cfg = self.cfg.env.eval
-        self.train_enable_offload = train_env_cfg.get("enable_offload", False)
+        if not self.only_eval and train_env_cfg is None:
+            raise ValueError(
+                "env.train config is required when runner.only_eval=False."
+            )
+        self.train_enable_offload = (
+            train_env_cfg.get("enable_offload", False)
+            if train_env_cfg is not None
+            else False
+        )
         self.eval_enable_offload = eval_env_cfg.get("enable_offload", False)
-        self.train_enable_init_offload = train_env_cfg.get("enable_init_offload", True)
+        self.train_enable_init_offload = (
+            train_env_cfg.get("enable_init_offload", True)
+            if train_env_cfg is not None
+            else True
+        )
         self.eval_enable_init_offload = eval_env_cfg.get("enable_init_offload", True)
         self.enable_eval = self.cfg.runner.val_check_interval > 0 or self.only_eval
         if not self.only_eval:
-            if train_env_cfg is None:
-                raise ValueError(
-                    "env.train config is required when runner.only_eval=False."
-                )
             self.train_num_envs_per_stage = (
                 self.cfg.env.train.total_num_envs // self._world_size // self.stage_num
             )
