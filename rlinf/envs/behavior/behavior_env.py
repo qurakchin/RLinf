@@ -47,6 +47,7 @@ class BehaviorProcess:
     ):
         from omnigibson.envs import VectorEnvironment
 
+        self.logger = get_logger()
         self.pipeline_stage_num = pipeline_stage_num
         omni_cfg = setup_omni_cfg(cfg)
         self.instance_loader = ActivityInstanceLoader.from_omni_cfg(omni_cfg)
@@ -80,25 +81,25 @@ class BehaviorProcess:
         step_supports_kwargs = any(
             param.kind == inspect.Parameter.VAR_KEYWORD for param in step_params
         )
-        self._step_supports_get_obs = (
+        self.step_supports_get_obs = (
             step_supports_kwargs or "get_obs" in step_signature.parameters
         )
-        self._step_supports_render = (
+        self.step_supports_render = (
             step_supports_kwargs or "render" in step_signature.parameters
         )
-        self._step_supports_env_indices = "env_indices" in step_signature.parameters
-        self._skip_intermediate_obs_in_chunk = bool(
+        self.step_supports_env_indices = "env_indices" in step_signature.parameters
+        self.skip_intermediate_obs_in_chunk = bool(
             OmegaConf.select(cfg, "skip_intermediate_obs_in_chunk", default=False)
         )
 
-        if self._skip_intermediate_obs_in_chunk and not self._step_supports_get_obs:
-            get_logger().warning(
+        if self.skip_intermediate_obs_in_chunk and not self.step_supports_get_obs:
+            self.logger.warning(
                 "skip_intermediate_obs_in_chunk is True but OG env step does not "
                 "support get_obs; this config will be ignored."
             )
 
-        if self.pipeline_stage_num > 1 and not self._step_supports_env_indices:
-            get_logger().warning(
+        if self.pipeline_stage_num > 1 and not self.step_supports_env_indices:
+            self.logger.warning(
                 "pipeline_stage_num > 1 but OG env step does not support env_indices; "
                 "this may cause inefficiency since every pipeline step will still "
                 "advance every env with zeroed-out actions for inactive envs."
@@ -110,9 +111,9 @@ class BehaviorProcess:
     def _call_step(self, actions, env_indices=None, get_obs=True, render=True):
         """Call ``self.env.step`` forwarding only the kwargs it supports."""
         kwargs = {}
-        if self._step_supports_get_obs:
+        if self.step_supports_get_obs:
             kwargs["get_obs"] = get_obs
-        if self._step_supports_render:
+        if self.step_supports_render:
             kwargs["render"] = render
         if env_indices is not None:
             kwargs["env_indices"] = env_indices
@@ -139,7 +140,7 @@ class BehaviorProcess:
 
         Returns outputs only for ``env_indices``, in that same order.
         """
-        if self._step_supports_env_indices:
+        if self.step_supports_env_indices:
             raw_obs, rewards, terminates, truncates, infos = self._call_step(
                 [actions[i] for i in env_indices],
                 env_indices=env_indices,
@@ -181,7 +182,7 @@ class BehaviorProcess:
         results: list[tuple] = []
         for t in range(chunk_size):
             is_last = t == chunk_size - 1
-            need_obs = not self._skip_intermediate_obs_in_chunk or is_last
+            need_obs = not self.skip_intermediate_obs_in_chunk or is_last
             results.append(
                 self._step_shard(actions[:, t], env_indices, need_obs=need_obs)
             )
@@ -274,6 +275,7 @@ class BehaviorProcessPool:
                 f"total_num_envs({total_num_envs}) must be divisible by num_env_subprocess({num_env_subprocess})"
             )
 
+        self.logger = get_logger()
         self.cfg = cfg
         self.total_num_envs = total_num_envs
         self.num_env_subprocess = num_env_subprocess
@@ -322,14 +324,14 @@ class BehaviorProcessPool:
                 self.env_processes = []
 
                 if attempt >= max_attempts:
-                    get_logger().error(
+                    self.logger.error(
                         "Failed to start BehaviorProcess actors after %d attempts: %s",
                         attempt,
                         e,
                     )
                     raise
 
-                get_logger().warning(
+                self.logger.warning(
                     "BehaviorProcess creation failed (attempt %d/%d): %s; retrying in %.1fs",
                     attempt,
                     max_attempts,
@@ -503,8 +505,6 @@ class BehaviorEnv(gym.Env):
                 f"worker_info.group_world_size ({worker_info.group_world_size}) to infer pipeline_stage_num."
             )
         self.pipeline_stage_num = total_num_processes // worker_info.group_world_size
-
-        self.logger = get_logger()
 
         self.auto_reset = cfg.auto_reset
         self.max_episode_steps = torch.tensor(cfg.max_episode_steps)
