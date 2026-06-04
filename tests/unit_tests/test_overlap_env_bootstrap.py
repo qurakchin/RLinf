@@ -172,6 +172,7 @@ class TestOverlapEnvBootstrap(unittest.TestCase):
                 self.worker.interact(input_channel, rollout_channel, None, None)
             )
         finally:
+            asyncio.set_event_loop(None)
             loop.close()
 
         self.assertIsNone(self.worker._prefetched_train_bootstrap)
@@ -256,10 +257,15 @@ class TestOverlapEnvBootstrap(unittest.TestCase):
 
         import asyncio
 
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(
-            self.worker.interact(input_channel, rollout_channel, None, None)
-        )
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                self.worker.interact(input_channel, rollout_channel, None, None)
+            )
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
 
         self.assertEqual(self.worker.record_env_metrics.call_count, 1)
 
