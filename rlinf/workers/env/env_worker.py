@@ -139,6 +139,7 @@ class EnvWorker(Worker):
             ]
 
     def init_worker(self):
+        self.peer_component = self.cfg.env.get("peer_component", "rollout")
         self.dst_rank_map = self._setup_dst_rank_map()
         self.src_rank_map = self._setup_src_rank_map()
 
@@ -303,7 +304,7 @@ class EnvWorker(Worker):
                 "rollout_train": CommMapper.get_dst_ranks(
                     batch_size=self.cfg.env.train.total_num_envs // self.stage_num,
                     src_world_size=self._component_placement.get_world_size("env"),
-                    dst_world_size=self._component_placement.get_world_size("rollout"),
+                    dst_world_size=self._component_placement.get_world_size(self.peer_component),
                     src_rank=self._rank,
                 ),
             }
@@ -331,7 +332,7 @@ class EnvWorker(Worker):
                         batch_size=self.cfg.env.eval.total_num_envs // self.stage_num,
                         src_world_size=self._component_placement.get_world_size("env"),
                         dst_world_size=self._component_placement.get_world_size(
-                            "rollout"
+                            self.peer_component
                         ),
                         src_rank=self._rank,
                     ),
@@ -354,7 +355,7 @@ class EnvWorker(Worker):
             src_rank_map = {
                 "rollout_train": CommMapper.get_src_ranks(
                     batch_size=self.cfg.env.train.total_num_envs // self.stage_num,
-                    src_world_size=self._component_placement.get_world_size("rollout"),
+                    src_world_size=self._component_placement.get_world_size(self.peer_component),
                     dst_world_size=self._component_placement.get_world_size("env"),
                     dst_rank=self._rank,
                 ),
@@ -381,7 +382,7 @@ class EnvWorker(Worker):
                     "rollout_eval": CommMapper.get_src_ranks(
                         batch_size=self.cfg.env.eval.total_num_envs // self.stage_num,
                         src_world_size=self._component_placement.get_world_size(
-                            "rollout"
+                            self.peer_component
                         ),
                         dst_world_size=self._component_placement.get_world_size("env"),
                         dst_rank=self._rank,

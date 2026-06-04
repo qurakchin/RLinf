@@ -3,7 +3,6 @@ defaults:
   - env/libero_spatial@env.eval
   - model/pi0_5@actor.model
   - training_backend/fsdp@actor.fsdp_config
-  - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
 
 hydra:
@@ -16,14 +15,15 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor,env,rollout: all
+    actor,env,embodied_loop: all    # all 4 GPUs
+    rollout: 0-1                    # stateless rollout pool: only 2 GPUs
 
 runner:
   task_type: embodied
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "libero_spatial_ppo_openpi_pi05"
+    experiment_name: "libero_spatial_ppo_openpi_pi05_embloop_rollout2"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1000
@@ -86,6 +86,7 @@ algorithm:
 
 env:
   group_name: "EnvGroup"
+  peer_component: embodied_loop # must be embodied_loop here
 
   # Override the default values in env/libero_spatial
   train:
@@ -115,6 +116,10 @@ rollout:
   model:
     model_path: "/mnt/public/zhuchunyang_rl/hf_models/RLinf-Pi05-LIBERO-SFT"
     precision: ${actor.model.precision}
+
+embodied_loop:
+  group_name: "EmbodiedLoopGroup"
+  pipeline_stage_num: 1
 
 actor:
   group_name: "ActorGroup"
