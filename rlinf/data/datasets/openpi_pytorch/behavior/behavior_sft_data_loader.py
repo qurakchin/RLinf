@@ -14,19 +14,18 @@
 
 """Self-contained BEHAVIOR-1K SFT data loader for the PyTorch pi05 path.
 
-Ports ``rlinf/models/embodiment/openpi/dataconfig/behavior_data_loader.py`` onto
-the vendored ``openpi_pytorch`` primitives, with zero installed-``openpi``
-imports. The loader streams the BEHAVIOR dataset
-(:class:`~.behavior_sft_dataset.BehaviorSftDataset`), applies the per-sample
-:func:`~.behavior_sft_transform.BehaviorSftTransform`, collates samples into a
-batched :class:`Observation` plus an actions tensor of shape
+Streams the BEHAVIOR dataset (:class:`~.behavior_sft_dataset.BehaviorSftDataset`),
+applies the per-sample :class:`BehaviorSftTransform` (state extraction, image
+resize/pad, quantile normalization, pi05 discrete-state tokenization), collates
+samples into a batched :class:`Observation` plus an actions tensor of shape
 ``[batch, action_horizon, action_dim]``, and yields ``(Observation, actions)``.
 
 The streaming dataset partitions its keyframe chunks per ``(rank, worker)``
 internally (see :meth:`BehaviorSftDataset.__getitem__`), so a
 ``DistributedSampler`` is intentionally *not* used: a sampler only reorders the
 ignored ``idx`` values and would otherwise give every distributed rank identical
-data.
+data. Every loader parameter is read directly from YAML; only the fixed BEHAVIOR
+task-0000 skill-window recipe is hardcoded.
 """
 
 from __future__ import annotations
@@ -34,46 +33,171 @@ from __future__ import annotations
 import dataclasses
 import logging
 import multiprocessing
-import pathlib
 import typing
 
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
 
-from rlinf.data.datasets.behavior.behavior_sft_dataset import (
+from rlinf.data.datasets.openpi_pytorch.behavior.behavior_sft_dataset import (
     BehaviorSftDataset,
 )
-from rlinf.data.datasets.behavior.behavior_sft_transform import (
-    BehaviorSftTransform,
-    transform_behavior_sft_item,
-)
 from rlinf.data.lerobot_paths import (
-    resolve_lerobot_dataset_root,
     resolve_lerobot_repo_id,
 )
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.model import Observation
+from rlinf.models.embodiment.openpi_pytorch.policies.behavior_policy import (
+    BehaviorInputs,
+)
+from rlinf.models.embodiment.openpi_pytorch.utils.image_tools import resize_with_pad
 from rlinf.models.embodiment.openpi_pytorch.utils.normalize import (
     NormStats,
-    blank_asset_field,
     load_norm_stats,
-    resolve_norm_stats_dir,
+    normalize_quantile,
 )
+from rlinf.models.embodiment.openpi_pytorch.utils.tokenizer import PaligemmaTokenizer
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "BehaviorSftDataConfig",
+    "BehaviorSftDataLoader",
+    "BehaviorSftTransform",
     "build_behavior_sft_dataloader",
     "collate_behavior_sft_items",
     "create_behavior_sft_data_loader",
-    "transform_behavior_sft_item",
 ]
 
-# Default BEHAVIOR pi05 dataset repo (matches the old LeRobotB1KDataConfig).
-_DEFAULT_REPO_ID = "behavior-1k/2025-challenge-demos"
 # Camera views resolved by the BEHAVIOR pi05 transform.
 _IMAGE_KEYS = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")
+_IMAGE_SIZE = 224
+
+# Repack mapping: BehaviorInputs key -> raw LeRobot frame key. Mirrors the old
+# LeRobotB1KDataConfig RepackTransform (with the BehaviorInputs key names).
+_REPACK_KEYS = {
+    "observation/image": "observation.images.rgb.head",
+    "observation/left_wrist_image": "observation.images.rgb.left_wrist",
+    "observation/right_wrist_image": "observation.images.rgb.right_wrist",
+    "observation/state": "observation.state",
+}
+
+
+def _pad_to_dim(x: np.ndarray, target_dim: int, value: float = 0.0) -> np.ndarray:
+    """Zero-pad the last axis of ``x`` up to ``target_dim`` (no-op if already >=)."""
+    current_dim = x.shape[-1]
+    if current_dim >= target_dim:
+        return x
+    pad_width = [(0, 0)] * x.ndim
+    pad_width[-1] = (0, target_dim - current_dim)
+    return np.pad(x, pad_width, constant_values=value)
+
+
+def _repack(frame: dict) -> dict:
+    """Map raw LeRobot keys onto the names ``BehaviorInputs`` expects.
+
+    Images arrive as ``(C, H, W)`` float tensors from the streaming dataset;
+    ``BehaviorInputs`` (via its ``_parse_image``) handles the channel order and
+    the float-to-uint8 conversion, so they are passed through as numpy arrays.
+    """
+    data: dict = {}
+    for dst, src in _REPACK_KEYS.items():
+        data[dst] = np.asarray(frame[src])
+
+    actions = frame.get("action")
+    if actions is not None:
+        data["actions"] = np.asarray(actions)
+
+    prompt = frame.get("prompt", frame.get("task"))
+    if prompt is None:
+        raise ValueError(
+            "BEHAVIOR SFT frame is missing both 'prompt' and 'task'; the streaming "
+            "dataset must set the per-frame task text."
+        )
+    if not isinstance(prompt, str):
+        prompt = prompt.item() if hasattr(prompt, "item") else str(prompt)
+    data["prompt"] = prompt
+    return data
+
+
+@dataclasses.dataclass
+class BehaviorSftTransform:
+    """Map a raw BEHAVIOR LeRobot frame to pi05 model inputs + padded actions.
+
+    Reproduces the old chain (repack -> ``BehaviorInputs`` -> quantile-Normalize
+    state/actions -> resize images -> pi05 discrete-state tokenize -> pad state and
+    actions to ``action_dim``). Images stay ``uint8`` through resize; the final
+    ``uint8 -> float[-1, 1]`` conversion happens in :meth:`Observation.from_dict`.
+
+    Args:
+        norm_stats: Quantile normalization statistics keyed by ``"state"`` and
+            ``"actions"`` (as loaded from the checkpoint ``norm_stats.json``).
+        tokenizer_path: Filesystem path to the PaliGemma SentencePiece model.
+        action_dim: Model action dimension to pad the state and actions to.
+        max_token_len: Maximum tokenized-prompt length.
+        image_size: Target square image resolution.
+        tokenizer: Optional pre-built tokenizer. A new
+            :class:`PaligemmaTokenizer` is created lazily per worker when ``None``
+            so the (non-picklable) SentencePiece processor is not shared across
+            ``spawn`` workers.
+    """
+
+    norm_stats: dict[str, NormStats]
+    tokenizer_path: str
+    action_dim: int = 32
+    max_token_len: int = 200
+    image_size: int = _IMAGE_SIZE
+    tokenizer: PaligemmaTokenizer | None = None
+
+    def __post_init__(self):
+        self._behavior_inputs = BehaviorInputs(
+            extract_state_from_proprio=True,
+            use_all_wrist_images=True,
+        )
+
+    def _get_tokenizer(self) -> PaligemmaTokenizer:
+        if self.tokenizer is None:
+            self.tokenizer = PaligemmaTokenizer(
+                self.tokenizer_path, max_len=self.max_token_len
+            )
+        return self.tokenizer
+
+    def __call__(self, frame: dict) -> dict:
+        """Transform a single raw LeRobot frame into the model-input dict."""
+        # Repack LeRobot keys -> BehaviorInputs keys (+ prompt), then run
+        # BehaviorInputs (23-dim state extraction, image-key mapping, masks).
+        repacked = _repack(frame)
+        inputs = self._behavior_inputs(repacked)
+
+        # Resize each camera image to image_size x image_size (uint8 in/out).
+        images = {
+            key: resize_with_pad(
+                np.asarray(inputs["image"][key]), self.image_size, self.image_size
+            )
+            for key in _IMAGE_KEYS
+        }
+
+        # Quantile-normalize the (still 23-dim) state and actions to [-1, 1] BEFORE
+        # padding, tokenize the pi05 discrete-state prompt on the normalized state,
+        # then zero-pad the state and actions to the model action dimension.
+        state = np.asarray(inputs["state"], dtype=np.float32)
+        state = normalize_quantile(state, self.norm_stats["state"]).astype(np.float32)
+        actions = np.asarray(inputs["actions"], dtype=np.float32)
+        actions = normalize_quantile(actions, self.norm_stats["actions"]).astype(
+            np.float32
+        )
+        tokens, token_masks = self._get_tokenizer().tokenize(inputs["prompt"], state)
+        state = _pad_to_dim(state, self.action_dim).astype(np.float32)
+        actions = _pad_to_dim(actions, self.action_dim).astype(np.float32)
+
+        return {
+            "image": images,
+            "image_mask": {
+                key: np.asarray(inputs["image_mask"][key]) for key in _IMAGE_KEYS
+            },
+            "state": state,
+            "actions": actions,
+            "tokenized_prompt": np.asarray(tokens),
+            "tokenized_prompt_mask": np.asarray(token_masks),
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -105,8 +229,7 @@ class _TransformedStreamingDataset(torch.utils.data.Dataset):
         self._transform = transform
 
     def __getitem__(self, idx):
-        frame = self._dataset[idx]
-        return transform_behavior_sft_item(frame, self._transform)
+        return self._transform(self._dataset[idx])
 
     def __len__(self) -> int:
         # The streaming dataset ignores `idx` and partitions chunks internally;
@@ -172,53 +295,31 @@ def _worker_init_fn(worker_id: int) -> None:
     del worker_id
 
 
-def _collate_id_items(items):
-    """Audit-only collate: stack the value-independent (episode_index, frame_index) ids.
-    Module-level so spawned DataLoader workers can pickle it."""
-    return [(it["episode_index"], it["frame_index"]) for it in items]
-
-
-def _resolve_norm_stats(
-    assets_dir: str | pathlib.Path,
-    asset_id: str | None,
-) -> dict[str, NormStats]:
-    """Resolve the BEHAVIOR norm stats via the shared ``(assets_dir, asset_id)`` rule.
-
-    Delegates to :func:`resolve_norm_stats_dir` so the SFT loader and the eval
-    model factory resolve the *same* canonical ``norm_stats.json``.
-    """
-    directory = resolve_norm_stats_dir(assets_dir, asset_id)
-    logger.info("Loaded BEHAVIOR norm stats from %s", directory)
-    return load_norm_stats(directory)
-
-
 def create_behavior_sft_data_loader(
     *,
     behavior_dataset_root: str,
     assets_dir: str,
-    asset_id: str | None,
-    repo_id: str = _DEFAULT_REPO_ID,
-    tasks: list[str] | None = None,
-    modalities: list[str] | None = None,
-    action_dim: int = 32,
-    action_horizon: int = 32,
-    max_token_len: int = 200,
-    batch_size: int = 1,
-    num_workers: int = 0,
-    fine_grained_level: int = 0,
-    tolerance_s: float = 1e-4,
-    shuffle: bool = True,
-    skip_norm_stats: bool = False,
-    seed: int = 0,
-    norm_stats: dict[str, NormStats] | None = None,
-    skill_labels: dict[int, str] | None = None,
-    use_skill: bool = False,
-    enable_gap: bool = True,
-    allow_left: int = 0,
-    allow_right: int = 0,
-    dist_rank: int | None = None,
-    dist_world_size: int | None = None,
-    id_only: bool = False,
+    asset_id: str,
+    tokenizer_path: str,
+    repo_id: str,
+    tasks: list[str],
+    modalities: list[str],
+    action_dim: int,
+    action_horizon: int,
+    max_token_len: int,
+    batch_size: int,
+    num_workers: int,
+    fine_grained_level: int,
+    tolerance_s: float,
+    shuffle: bool,
+    seed: int,
+    skill_labels: dict[int, str] | None,
+    use_skill: bool,
+    enable_gap: bool,
+    allow_left: int,
+    allow_right: int,
+    dist_rank: int,
+    dist_world_size: int,
 ) -> "BehaviorSftDataLoader":
     """Build the BEHAVIOR-1K SFT data loader yielding ``(Observation, actions)``.
 
@@ -227,9 +328,10 @@ def create_behavior_sft_data_loader(
         assets_dir: Directory holding the checkpoint assets (norm stats).
         asset_id: Sub-directory under ``assets_dir`` for the norm stats
             (``{assets_dir}/{asset_id}/norm_stats.json``).
+        tokenizer_path: Filesystem path to the PaliGemma SentencePiece model.
         repo_id: LeRobot dataset repo id (used for metadata bookkeeping).
-        tasks: BEHAVIOR task names to include (``None`` -> all tasks).
-        modalities: Observation modalities to load (``None`` -> ``["rgb"]``).
+        tasks: BEHAVIOR task names to include.
+        modalities: Observation modalities to load (e.g. ``["rgb"]``).
         action_dim: Model action dimension to pad state/actions to.
         action_horizon: Number of future action steps per sample.
         max_token_len: Maximum tokenized-prompt length.
@@ -238,29 +340,21 @@ def create_behavior_sft_data_loader(
         fine_grained_level: Orchestrator level for the prompt task text.
         tolerance_s: Frame-timestamp sync tolerance.
         shuffle: Whether the streaming dataset shuffles its chunk order.
-        skip_norm_stats: Skip loading norm stats (requires ``norm_stats`` to be
-            supplied if normalization is still desired).
         seed: Base seed for the streaming chunk partition.
-        norm_stats: Pre-loaded norm stats; loaded from disk when ``None``.
         skill_labels: Optional per-skill labels enabling skill mode.
         use_skill: Train on per-frame SKILL text (window-resolved) instead of the
-            main-task text; requires explicit ``skill_labels`` (raises otherwise).
+            main-task text; requires explicit ``skill_labels``.
         enable_gap: Skill mode — absorb a true gap into both adjacent skills.
         allow_left: Skill mode — frames to extend a contiguous skill start left.
         allow_right: Skill mode — frames to extend a contiguous skill end right.
+        dist_rank: This rank's id, threaded into the per-rank chunk partition.
+        dist_world_size: Total ranks, threaded into the per-rank chunk partition.
 
     Returns:
         A loader whose iteration yields ``(Observation, actions)`` 2-tuples.
     """
-    if norm_stats is None and not skip_norm_stats:
-        norm_stats = _resolve_norm_stats(assets_dir, asset_id)
-    elif norm_stats is None:
-        raise ValueError(
-            "norm_stats must be provided when skip_norm_stats=True so the state "
-            "and actions can still be quantile-normalized."
-        )
-
-    repo_id = repo_id or _DEFAULT_REPO_ID
+    norm_stats = load_norm_stats(assets_dir, asset_id)
+    logger.info("Loaded BEHAVIOR norm stats from %s/%s", assets_dir, asset_id)
 
     dataset = BehaviorSftDataset(
         repo_id=repo_id,
@@ -281,24 +375,15 @@ def create_behavior_sft_data_loader(
         allow_right=allow_right,
         dist_rank=dist_rank,
         dist_world_size=dist_world_size,
-        id_only=id_only,
     )
 
-    if id_only:
-        # Audit-only: the dataset yields value-independent {episode_index, frame_index}
-        # ids (no transform/normalization/tokenization). Collate stacks the ids; the rest
-        # of the production topology (partition, num_workers, drop_last, seed) is kept.
-        # The collate must be a module-level function so spawned workers can pickle it.
-        source = dataset
-        collate = _collate_id_items
-    else:
-        transform = BehaviorSftTransform(
-            norm_stats=norm_stats,
-            action_dim=action_dim,
-            max_token_len=max_token_len,
-        )
-        source = _TransformedStreamingDataset(dataset, transform)
-        collate = collate_behavior_sft_items
+    transform = BehaviorSftTransform(
+        norm_stats=norm_stats,
+        tokenizer_path=tokenizer_path,
+        action_dim=action_dim,
+        max_token_len=max_token_len,
+    )
+    source = _TransformedStreamingDataset(dataset, transform)
 
     # The streaming dataset partitions chunks per (rank, worker) on its own, so a
     # DistributedSampler is intentionally omitted: it would only reorder the
@@ -323,7 +408,7 @@ def create_behavior_sft_data_loader(
         num_workers=num_workers,
         multiprocessing_context=mp_context,
         persistent_workers=num_workers > 0,
-        collate_fn=collate,
+        collate_fn=collate_behavior_sft_items,
         worker_init_fn=_worker_init_fn,
         drop_last=True,
         generator=generator,
@@ -342,9 +427,8 @@ def create_behavior_sft_data_loader(
 class BehaviorSftDataLoader:
     """Infinite ``(Observation, actions)`` loop over the BEHAVIOR SFT dataset.
 
-    Mirrors the old behavior data loader: it re-iterates the underlying ``torch``
-    ``DataLoader`` forever. Each batch is already collated into an
-    :class:`Observation` plus an actions tensor of shape
+    Re-iterates the underlying ``torch`` ``DataLoader`` forever. Each batch is
+    already collated into an :class:`Observation` plus an actions tensor of shape
     ``[batch, action_horizon, action_dim]`` by :func:`collate_behavior_sft_items`.
     """
 
@@ -373,131 +457,39 @@ class BehaviorSftDataLoader:
         return len(self._torch_loader)
 
 
-PER_RANK_STREAM = "per_rank_stream"
-REFERENCE_FANOUT = "reference_fanout"
-_LOADER_MODES = (PER_RANK_STREAM, REFERENCE_FANOUT)
-
-
-def resolve_loader_mode(cfg, loader_mode=None):
-    """Resolve the BEHAVIOR SFT loading strategy (validated).
-
-    ``per_rank_stream`` (default): every rank builds its own loader and streams a
-    rank-folded chunk shard (``world_size * num_workers`` lanes) -- the throughput
-    path. ``reference_fanout``: a single loader with a worker-only chunk partition
-    (``num_workers`` lanes, NO rank fold) is pulled ``world_size`` micro-batches per
-    step and scattered, byte-reproducing the reference ``openpi-comet`` rank-0 fanout
-    stream (including the epoch boundary). Selected via ``data.loader_mode``.
-    """
-    mode = loader_mode
-    if mode is None:
-        mode = str(OmegaConf.select(cfg.data, "loader_mode", default=PER_RANK_STREAM))
-    if mode not in _LOADER_MODES:
-        raise ValueError(
-            f"data.loader_mode must be one of {_LOADER_MODES}; got {mode!r}."
-        )
-    return mode
-
-
-def builds_train_loader(loader_mode, rank):
-    """Whether ``rank`` should construct + iterate the TRAIN loader.
-
-    ``per_rank_stream``: every rank owns its shard. ``reference_fanout``: only rank 0 owns
-    the single loader and scatters to the others, so ranks ``> 0`` must NOT build/iterate a
-    train loader they never consume (they receive via the fanout).
-    """
-    return loader_mode != REFERENCE_FANOUT or rank == 0
-
-
-def reference_fanout_micro_batches(
-    data_iter, rank, world_size, grad_accum, send_fn, recv_fn
-):
-    """Return THIS rank's ``grad_accum`` micro-batches for one step via rank-0 fanout.
-
-    Byte-reproduces the reference ``openpi-comet`` ``train_pytorch_new.py`` loop: rank 0
-    owns the single (worker-only-partition) loader and, PER STEP, pulls ``grad_accum``
-    micro-batches for each rank ``1..world_size-1`` (in order) and sends them, then pulls
-    its OWN ``grad_accum`` micro-batches LAST; every other rank receives its micro-batches
-    from rank 0. The pull order (others first, rank 0 last) is what makes each rank's data
-    identical to the reference, not merely the global multiset.
-
-    ``send_fn(batches, dst)`` / ``recv_fn(src)`` are injected so the pure control flow is
-    unit-testable with a fake loader + a CPU process group (the production worker passes
-    ``torch.distributed`` ``send_object_list`` / ``recv_object_list`` wrappers).
-    """
-    if rank == 0:
-        for dst in range(1, world_size):
-            send_fn([next(data_iter) for _ in range(grad_accum)], dst)
-        return [next(data_iter) for _ in range(grad_accum)]
-    return recv_fn(0)
-
-
 def build_behavior_sft_dataloader(
-    cfg, world_size, rank, data_paths, eval_dataset=False, id_only=False, loader_mode=None
+    cfg, world_size, rank, data_paths, eval_dataset=False
 ):
     """Build the self-contained BEHAVIOR SFT data loader for the SFT worker.
 
-    Owns the config extraction the FSDP SFT worker previously did inline. In the
-    default ``per_rank_stream`` mode the streaming dataset partitions chunks per
-    ``(rank, worker)``; ``rank``/``world_size`` are captured here (in the main
-    process) and threaded into the dataset so that SPAWNED DataLoader workers --
-    which cannot read ``torch.distributed`` -- still partition by the correct
-    per-rank id (otherwise every rank replicates rank 0's chunks, collapsing the
-    effective batch to one rank's micro-batch).
-
-    In ``reference_fanout`` mode the dataset is partitioned by WORKER only
-    (``dist_rank=0``, ``dist_world_size=1``) so its ``num_workers`` lanes match the
-    reference's single rank-0 loader; the caller pulls ``world_size`` micro-batches
-    per step and scatters them (see the SFT worker). Returns
-    ``(loader, loader.data_config())``.
+    The streaming dataset partitions chunks per ``(rank, worker)``; ``rank`` /
+    ``world_size`` are captured here (in the main process) and threaded into the
+    dataset so that SPAWNED DataLoader workers -- which cannot read
+    ``torch.distributed`` -- still partition by the correct per-rank id (otherwise
+    every rank replicates rank 0's chunks, collapsing the effective batch to one
+    rank's micro-batch). Every parameter is read directly from YAML (no hidden
+    defaults). Returns ``(loader, loader.data_config())``.
     """
-    # reference_fanout is a TRAIN-only strict-alignment mode; eval always uses the
-    # decentralized per-rank shard so it is not silently made rank-replicated.
-    mode = PER_RANK_STREAM if eval_dataset else resolve_loader_mode(cfg, loader_mode)
-    # reference_fanout: a single worker-only-partition loader (no rank fold), pulled
-    # world_size micro-batches/step downstream, reproduces the reference rank-0 fanout.
-    part_rank, part_world = (0, 1) if mode == REFERENCE_FANOUT else (rank, world_size)
-
     data_path = resolve_lerobot_repo_id(data_paths)
     if data_path is None:
         raise ValueError("openpi_pytorch BEHAVIOR SFT requires data.train_data_paths.")
 
     model_cfg = cfg.actor.model
-    openpi_data = OmegaConf.select(cfg.actor, "openpi_data", default={})
-    if not isinstance(openpi_data, DictConfig):
-        openpi_data = OmegaConf.create(openpi_data)
+    data_cfg = cfg.data
 
-    def model_select(key, default):
-        return OmegaConf.select(model_cfg, key, default=default)
-
-    def data_select(key, default):
-        return OmegaConf.select(openpi_data, key, default=default)
-
-    def data_cfg_select(key, default):
-        return OmegaConf.select(cfg.data, key, default=default)
-
-    # Norm stats are resolved STRICTLY from YAML assets_dir + asset_id — the same
-    # canonical task-0000 distribution the eval model factory resolves.
-    # No checkpoint-relative (model_path) or norm_stats_path fallback, and a blank
-    # (None or empty/whitespace) value is rejected here the same way the eval
-    # factory rejects it, so neither path can silently load non-task-0000 stats.
-    assets_dir = model_select("openpi.assets_dir", None)
-    asset_id = model_select("openpi.asset_id", None)
-    missing = blank_asset_field(assets_dir, asset_id)
-    if missing is not None:
-        raise ValueError(
-            f"openpi_pytorch BEHAVIOR SFT requires a non-empty "
-            f"actor.model.openpi.{missing} (the canonical task-0000 norm-stats "
-            "asset location); it has no default."
-        )
-
-    micro_batch_size = cfg.actor.micro_batch_size
-    eval_batch_size = cfg.actor.get("eval_batch_size", 1)
+    # Norm stats + tokenizer resolve STRICTLY from YAML (no checkpoint-relative
+    # fallback); load_norm_stats rejects a blank assets_dir/asset_id the same way
+    # the eval model factory does, so neither path can silently load non-task-0000
+    # stats.
+    assets_dir = model_cfg.openpi.assets_dir
+    asset_id = model_cfg.openpi.asset_id
+    tokenizer_path = model_cfg.openpi.paligemma_tokenizer
 
     # `cfg.data` is the production source of truth for the BEHAVIOR task set and the
     # prompt-source flag. `use_skill: true` trains on the per-frame REFERENCE skill
     # text; `false` trains on the main-task text.
-    use_skill = bool(data_cfg_select("use_skill", False))
-    tasks = list(data_cfg_select("tasks", ["turning_on_radio"]))
+    use_skill = bool(data_cfg.use_skill)
+    tasks = list(data_cfg.tasks)
     skill_labels, enable_gap, allow_left, allow_right = None, True, 0, 0
     if use_skill:
         # The skill labels are the REFERENCE per-task subtask list from config (NOT
@@ -509,7 +501,7 @@ def build_behavior_sft_dataloader(
                 "openpi_pytorch BEHAVIOR SFT use_skill:true supports exactly one task "
                 f"(the task-0000 skill recipe); got data.tasks={tasks}."
             )
-        subtask_labels = data_cfg_select("task_subtasks", {})
+        subtask_labels = data_cfg.task_subtasks
         labels = subtask_labels.get(tasks[0]) if subtask_labels else None
         if not labels:
             raise ValueError(
@@ -518,37 +510,34 @@ def build_behavior_sft_dataloader(
             )
         skill_labels = {i: str(label) for i, label in enumerate(labels)}
         # Fixed reference skill-window recipe (pi05_b1k-task0000_sft_local_skill);
-        # not read from cfg.data so the reference recipe cannot drift.
+        # intentionally hardcoded so the reference recipe cannot drift via config.
         enable_gap, allow_left, allow_right = True, 100, 100
 
     loader = create_behavior_sft_data_loader(
-        behavior_dataset_root=str(
-            data_select(
-                "behavior_dataset_root",
-                resolve_lerobot_dataset_root(str(data_path)),
-            )
-        ),
+        behavior_dataset_root=str(data_cfg.behavior_dataset_root),
         assets_dir=str(assets_dir),
         asset_id=asset_id,
-        repo_id=str(data_select("repo_id", _DEFAULT_REPO_ID)),
+        tokenizer_path=str(tokenizer_path),
+        repo_id=str(data_cfg.repo_id),
         tasks=tasks,
-        modalities=list(data_select("modalities", ["rgb"])),
-        action_dim=int(model_select("openpi.model_action_dim", 32)),
-        action_horizon=int(model_select("num_action_chunks", 32)),
-        max_token_len=int(model_select("openpi.max_token_len", 200)),
-        batch_size=eval_batch_size if eval_dataset else micro_batch_size,
-        num_workers=int(data_cfg_select("num_workers", 8)),
-        fine_grained_level=int(data_select("fine_grained_level", 0)),
-        tolerance_s=float(data_select("tolerance_s", 1e-4)),
+        modalities=list(data_cfg.modalities),
+        action_dim=int(model_cfg.openpi.model_action_dim),
+        action_horizon=int(model_cfg.num_action_chunks),
+        max_token_len=int(model_cfg.openpi.max_token_len),
+        batch_size=int(cfg.actor.eval_batch_size)
+        if eval_dataset
+        else int(cfg.actor.micro_batch_size),
+        num_workers=int(data_cfg.num_workers),
+        fine_grained_level=int(data_cfg.fine_grained_level),
+        tolerance_s=float(data_cfg.tolerance_s),
         shuffle=not eval_dataset,
-        seed=int(cfg.actor.get("seed", 42)),
+        seed=int(cfg.actor.seed),
         skill_labels=skill_labels,
         use_skill=use_skill,
         enable_gap=enable_gap,
         allow_left=allow_left,
         allow_right=allow_right,
-        dist_rank=part_rank,
-        dist_world_size=part_world,
-        id_only=id_only,
+        dist_rank=rank,
+        dist_world_size=world_size,
     )
     return loader, loader.data_config()

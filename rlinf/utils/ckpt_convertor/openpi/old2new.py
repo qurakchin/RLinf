@@ -1,10 +1,10 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2025-2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,28 +16,25 @@
 
 The old format uses the ``paligemma_with_expert.*`` key layout of the previous
 PyTorch model (and the BEHAVIOR eval checkpoint); the new format is the bare
-``Pi0`` layout this self-contained package loads. ``old_to_new_state_dict`` owns
+``Pi0`` layout the self-contained package loads. ``old_to_new_state_dict`` owns
 the key renaming and weight transforms (SigLIP Q/K/V concat, LLM MLP
-transpose+stack, norm-prefix rewrites); it is the shared helper that lives with
-this converter.
-
-Usage (four-parameter interface; the two norm-stats paths are copied across):
-
-    python -m rlinf.models.embodiment.openpi_pytorch.utils.old_to_new \\
-        --input-model       /mnt/public/xzxuan/models/pi05_base_pytorch \\
-        --input-norm-stats  /path/to/norm_stats.json \\
-        --output-model      /path/to/pi05_base_pytorch_new \\
-        --output-norm-stats /path/to/pi05_base_pytorch_new/physical-intelligence/behavior/norm_stats.json
+transpose+stack, norm-prefix rewrites). When the source dir carries a
+``config.json`` it is copied verbatim; the norm-stats file is copied across too.
 """
 
 from __future__ import annotations
 
-import argparse
-import hashlib
 import pathlib
-import shutil
 
 import torch
+
+from rlinf.utils.ckpt_convertor.openpi._core import (
+    copy_config_json,
+    copy_norm_stats,
+    load_safetensors,
+    resolve_model_safetensors,
+    save_safetensors,
+)
 
 
 def old_to_new_state_dict(old_sd: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -214,74 +211,39 @@ def old_to_new_state_dict(old_sd: dict[str, torch.Tensor]) -> dict[str, torch.Te
     return new_sd
 
 
-def _state_dict_digest(state_dict: dict[str, torch.Tensor]) -> str:
-    """A stable digest over (sorted key, dtype, shape) — for a reproducible report."""
-    hasher = hashlib.sha256()
-    for key in sorted(state_dict):
-        tensor = state_dict[key]
-        hasher.update(key.encode("utf-8"))
-        hasher.update(str(tensor.dtype).encode("utf-8"))
-        hasher.update(str(tuple(tensor.shape)).encode("utf-8"))
-    return hasher.hexdigest()[:16]
-
-
-def _resolve_model_safetensors(input_model: pathlib.Path) -> pathlib.Path:
-    """Accept either a checkpoint directory or a ``model.safetensors`` file."""
-    if input_model.is_dir():
-        return input_model / "model.safetensors"
-    return input_model
-
-
-def copy_norm_stats(src: str | pathlib.Path, dst: str | pathlib.Path) -> None:
-    """Copy the norm-stats file from ``src`` to ``dst`` verbatim (straight copy)."""
-    src = pathlib.Path(src)
-    dst = pathlib.Path(dst)
-    if not src.is_file():
-        raise FileNotFoundError(f"input norm stats not found: {src}")
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, dst)
-
-
-def convert_old_to_new(
+def convert(
     input_model: str | pathlib.Path,
     input_norm_stats: str | pathlib.Path,
     output_model: str | pathlib.Path,
     output_norm_stats: str | pathlib.Path,
 ) -> pathlib.Path:
-    """Convert an old-format checkpoint to the new layout (four-parameter interface).
+    """Convert an old-format checkpoint to the new layout.
 
     Loads the old ``model.safetensors`` from ``input_model`` (a directory or a
     file), converts it via :func:`old_to_new_state_dict`, writes
     ``output_model/model.safetensors`` (copying ``config.json`` if present), and
     copies ``input_norm_stats`` verbatim to ``output_norm_stats``.
     """
-    import safetensors.torch
-
     input_model = pathlib.Path(input_model)
     output_model = pathlib.Path(output_model)
-    old_path = _resolve_model_safetensors(input_model)
+    old_path = resolve_model_safetensors(input_model)
     if not old_path.exists():
         raise FileNotFoundError(f"old checkpoint not found: {old_path}")
 
-    old_sd = safetensors.torch.load_file(str(old_path), device="cpu")
+    old_sd = load_safetensors(old_path)
     new_sd = old_to_new_state_dict(old_sd)
 
-    output_model.mkdir(parents=True, exist_ok=True)
-    out_path = output_model / "model.safetensors"
-    safetensors.torch.save_file(new_sd, str(out_path))
+    save_safetensors(new_sd, output_model / "model.safetensors")
 
-    config_src = (
-        input_model if input_model.is_dir() else input_model.parent
-    ) / "config.json"
-    if config_src.exists():
-        shutil.copy2(config_src, output_model / "config.json")
+    config_src = input_model if input_model.is_dir() else input_model.parent
+    copy_config_json(config_src, output_model)
 
     copy_norm_stats(input_norm_stats, output_norm_stats)
     return output_model
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_arguments(parser) -> None:
+    """Register the ``old2new`` mode arguments on ``parser``."""
     parser.add_argument(
         "--input-model", required=True, help="old checkpoint dir or model.safetensors"
     )
@@ -294,15 +256,13 @@ def main() -> int:
     parser.add_argument(
         "--output-norm-stats", required=True, help="destination norm_stats.json path"
     )
-    args = parser.parse_args()
-    convert_old_to_new(
+
+
+def run(args) -> None:
+    """Execute the ``old2new`` mode from parsed ``args``."""
+    convert(
         args.input_model,
         args.input_norm_stats,
         args.output_model,
         args.output_norm_stats,
     )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -14,42 +14,37 @@
 
 """Self-contained BEHAVIOR-1K streaming SFT data pipeline.
 
-Relocated out of the ``openpi_pytorch`` model package so data loading lives with
-the other datasets under ``rlinf/data/datasets``. The pipeline reuses the
-vendored ``openpi_pytorch`` preprocessing primitives (state extraction, image
-resize/pad, quantile normalization, the PaliGemma tokenizer) but imports no
-externally installed ``openpi``. The SFT worker dispatches to
-:func:`build_behavior_sft_dataloader` the same way it dispatches DreamZero.
+Lives under ``rlinf/data/datasets/openpi_pytorch`` (the package is named for the
+``openpi_pytorch`` model it feeds; other simulators can be added as siblings).
+The pipeline reuses the vendored ``openpi_pytorch`` preprocessing primitives
+(state extraction, image resize/pad, quantile normalization, the PaliGemma
+tokenizer) but imports no externally installed ``openpi``. The SFT worker
+dispatches to :func:`build_behavior_sft_dataloader` the same way it dispatches
+other embodied datasets.
 """
 
-from rlinf.data.datasets.behavior.behavior_pinned_loader import (
-    PinnedBehaviorSftDataLoader,
-    build_pinned_behavior_sft_dataloader,
-)
-from rlinf.data.datasets.behavior.behavior_sft_data_loader import (
+from rlinf.data.datasets.openpi_pytorch.behavior.behavior_sft_data_loader import (
     BehaviorSftDataConfig,
     BehaviorSftDataLoader,
+    BehaviorSftTransform,
     build_behavior_sft_dataloader,
     collate_behavior_sft_items,
     create_behavior_sft_data_loader,
 )
-from rlinf.data.datasets.behavior.behavior_sft_dataset import (
+from rlinf.data.datasets.openpi_pytorch.behavior.behavior_sft_dataset import (
     BehaviorSftDataset,
 )
-from rlinf.data.datasets.behavior.behavior_sft_transform import (
-    BehaviorSftTransform,
-    transform_behavior_sft_item,
+from rlinf.data.datasets.openpi_pytorch.behavior.processing import (
+    BehaviorEvalProcessor,
 )
 
 __all__ = [
+    "BehaviorEvalProcessor",
     "BehaviorSftDataConfig",
     "BehaviorSftDataLoader",
     "BehaviorSftDataset",
     "BehaviorSftTransform",
-    "PinnedBehaviorSftDataLoader",
     "build_behavior_sft_dataloader",
-    "build_pinned_behavior_sft_dataloader",
     "collate_behavior_sft_items",
     "create_behavior_sft_data_loader",
-    "transform_behavior_sft_item",
 ]

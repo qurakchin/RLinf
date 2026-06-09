@@ -34,8 +34,6 @@ from __future__ import annotations
 import logging
 import pathlib
 
-import torch
-
 from rlinf.config import torch_dtype_from_precision
 
 logger = logging.getLogger(__name__)

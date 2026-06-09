@@ -1,10 +1,10 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2025-2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,46 +14,41 @@
 
 """Convert a NEW-format PyTorch OpenPI 0.5 checkpoint to the OLD layout.
 
-The inverse of :mod:`old_to_new`: ``new_to_old_state_dict`` maps every
+The inverse of :mod:`old2new`: ``new_to_old_state_dict`` maps every
 *representable* bare ``Pi0`` key back to the ``paligemma_with_expert.*`` layout
 (QKV split, MLP unstack+transpose, pos-embedding squeeze). It does NOT fabricate
 the 1024-wide action-expert ``lm_head`` (``ACTION_EXPERT_LM_HEAD``), which the new
 format does not carry. ``convert_trained_ckpt`` sources that head from a reference
 old-format model and validates keys/shapes, producing a COMPLETE old checkpoint;
-the four-parameter ``convert_new_to_old`` has no reference, so it FAILS LOUDLY
-rather than write an incomplete old checkpoint missing that mandatory old key.
+the four-parameter ``convert`` has no reference, so it FAILS LOUDLY rather than
+write an incomplete old checkpoint missing that mandatory old key.
 
-Usage. ``--input-model`` accepts a new-format checkpoint dir, a ``model.safetensors``,
-or a torch ``model.pt``. Pass ``--reference-model`` (an OLD-format model dir) to get a
-COMPLETE old checkpoint; without it the four-parameter path fails loudly (the old-only
-action-expert head cannot be reconstructed from the new format):
-
-    python -m rlinf.models.embodiment.openpi_pytorch.utils.new_to_old \
-        --input-model       .../pi05_sft_pytorch_new/model.safetensors \
-        --input-norm-stats  .../pi05_sft_pytorch_new/physical-intelligence/behavior/norm_stats.json \
-        --output-model      .../pi05_sft_pytorch_new_2_old \
-        --output-norm-stats .../pi05_sft_pytorch_new_2_old/physical-intelligence/behavior/norm_stats.json \
-        --reference-model   /mnt/public/xzxuan/models/pi05_base_pytorch
+Pass ``--reference-model`` (an OLD-format model dir) to get a COMPLETE old
+checkpoint; without it the four-parameter path fails loudly.
 """
 
 from __future__ import annotations
 
-import argparse
+import os
 import pathlib
+import shutil
 
 import torch
 
-from rlinf.models.embodiment.openpi_pytorch.utils.old_to_new import (
-    _resolve_model_safetensors,
+from rlinf.utils.ckpt_convertor.openpi._core import (
+    NORM_STATS_SUBDIR,
     copy_norm_stats,
+    load_safetensors,
+    resolve_model_safetensors,
+    save_safetensors,
 )
 
-# The old-format action-expert token head (1024-wide bf16). ``old_to_new`` drops it
-# (the new format keeps only PaliGemma's 2048-wide shared embedder), so the new format
-# does NOT carry it and ``new_to_old_state_dict`` cannot reconstruct it. The
-# reference-backed ``convert_trained_ckpt`` sources it from a reference old-format
-# model; the four-parameter ``convert_new_to_old`` fails loudly rather than write an
-# incomplete old checkpoint.
+# The old-format action-expert token head (1024-wide bf16). ``old2new`` drops it
+# (the new format keeps only PaliGemma's 2048-wide shared embedder), so the new
+# format does NOT carry it and ``new_to_old_state_dict`` cannot reconstruct it.
+# The reference-backed ``convert_trained_ckpt`` sources it from a reference
+# old-format model; the four-parameter ``convert`` fails loudly rather than write
+# an incomplete old checkpoint.
 ACTION_EXPERT_LM_HEAD = "paligemma_with_expert.gemma_expert.lm_head.weight"
 
 
@@ -192,12 +187,12 @@ def new_to_old_state_dict(new_sd: dict[str, torch.Tensor]) -> dict[str, torch.Te
     # --- embedder -> PaliGemma lm_head ---
     # The new format carries a SINGLE shared embedder (PaliGemma's, width 2048),
     # tied to ``paligemma.lm_head``. The old format ALSO has the separate 1024-wide
-    # action-expert head ``ACTION_EXPERT_LM_HEAD`` that ``old_to_new`` drops and the
+    # action-expert head ``ACTION_EXPERT_LM_HEAD`` that ``old2new`` drops and the
     # new format does NOT carry, so it cannot be reconstructed here — emitting the
     # 2048-wide embedder for it would be a malformed (wrong-shape) tensor. This
     # helper therefore maps only the representable tensors; the reference-backed
     # ``convert_trained_ckpt`` sources the correct head, and the four-parameter
-    # ``convert_new_to_old`` fails loudly rather than write an incomplete checkpoint.
+    # ``convert`` fails loudly rather than write an incomplete checkpoint.
     if "llm.embedder.embedding.weight" in new_sd:
         old_sd["paligemma_with_expert.paligemma.lm_head.weight"] = new_sd[
             "llm.embedder.embedding.weight"
@@ -237,9 +232,6 @@ def convert_trained_ckpt(
             model.safetensors and config.json.
         norm_stats: Optional path to norm_stats.json to copy into the output.
     """
-    import os
-    import shutil
-
     import safetensors.torch
 
     if str(input_ckpt).endswith(".safetensors"):
@@ -300,18 +292,18 @@ def convert_trained_ckpt(
         shutil.copy2(ref_config, os.path.join(output_dir, "config.json"))
 
     if norm_stats and os.path.exists(norm_stats):
-        norm_dst_dir = os.path.join(output_dir, "physical-intelligence", "behavior")
+        norm_dst_dir = os.path.join(output_dir, *NORM_STATS_SUBDIR.parts)
         os.makedirs(norm_dst_dir, exist_ok=True)
         shutil.copy2(norm_stats, os.path.join(norm_dst_dir, "norm_stats.json"))
 
 
-def convert_new_to_old(
+def convert(
     input_model: str | pathlib.Path,
     input_norm_stats: str | pathlib.Path,
     output_model: str | pathlib.Path,
     output_norm_stats: str | pathlib.Path,
 ) -> pathlib.Path:
-    """Convert a new-format checkpoint to the old layout (four-parameter interface).
+    """Convert a new-format checkpoint to the old layout (no reference model).
 
     Loads the new ``model.safetensors`` from ``input_model`` (a directory or a
     file), converts it via :func:`new_to_old_state_dict`, writes
@@ -320,20 +312,18 @@ def convert_new_to_old(
 
     The old format requires the 1024-wide action-expert head
     ``ACTION_EXPERT_LM_HEAD``, which the new format does not carry and cannot be
-    reconstructed here. This four-parameter interface has no reference-model
-    parameter, so rather than write a misleading *incomplete* old checkpoint it
-    raises :class:`RuntimeError` and directs callers to the reference-backed
+    reconstructed here. This interface has no reference-model parameter, so rather
+    than write a misleading *incomplete* old checkpoint it raises
+    :class:`RuntimeError` and directs callers to the reference-backed
     :func:`convert_trained_ckpt`, which sources that head from a reference model.
     """
-    import safetensors.torch
-
     input_model = pathlib.Path(input_model)
     output_model = pathlib.Path(output_model)
-    new_path = _resolve_model_safetensors(input_model)
+    new_path = resolve_model_safetensors(input_model)
     if not new_path.exists():
         raise FileNotFoundError(f"new checkpoint not found: {new_path}")
 
-    new_sd = safetensors.torch.load_file(str(new_path), device="cpu")
+    new_sd = load_safetensors(new_path)
     old_sd = new_to_old_state_dict(new_sd)
 
     # Refuse to write an incomplete old checkpoint: the old-only action-expert head
@@ -341,22 +331,21 @@ def convert_new_to_old(
     # to source it from. Fail loudly BEFORE creating any output.
     if ACTION_EXPERT_LM_HEAD not in old_sd:
         raise RuntimeError(
-            "convert_new_to_old cannot produce a complete old-format checkpoint: the "
+            "new2old cannot produce a complete old-format checkpoint: the "
             f"action-expert head {ACTION_EXPERT_LM_HEAD!r} (1024-wide) is not carried "
-            "by the new format and cannot be reconstructed from it. Use "
-            "convert_trained_ckpt(input_ckpt, output_dir, reference_model, ...), which "
-            "sources that head from a reference old-format model."
+            "by the new format and cannot be reconstructed from it. Pass "
+            "--reference-model (an old-format model dir) so the head can be sourced "
+            "from it."
         )
 
-    output_model.mkdir(parents=True, exist_ok=True)
-    safetensors.torch.save_file(old_sd, str(output_model / "model.safetensors"))
+    save_safetensors(old_sd, output_model / "model.safetensors")
 
     copy_norm_stats(input_norm_stats, output_norm_stats)
     return output_model
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_arguments(parser) -> None:
+    """Register the ``new2old`` mode arguments on ``parser``."""
     parser.add_argument(
         "--input-model",
         required=True,
@@ -376,15 +365,21 @@ def main() -> int:
         default=None,
         help="reference OLD-format model dir (e.g. .../pi05_base_pytorch). When given, "
         "produce a COMPLETE old checkpoint via convert_trained_ckpt, sourcing the "
-        "1024-wide action-expert lm_head from this reference. Without it, the "
-        "four-parameter path fails loudly because that head cannot be reconstructed "
-        "from the new format.",
+        "1024-wide action-expert lm_head from this reference. Without it, this mode "
+        "fails loudly because that head cannot be reconstructed from the new format.",
     )
-    args = parser.parse_args()
+
+
+def run(args) -> None:
+    """Execute the ``new2old`` mode from parsed ``args``.
+
+    With ``--reference-model`` a COMPLETE old checkpoint is produced; without it
+    this raises rather than emit an incomplete checkpoint.
+    """
     if args.reference_model:
         input_path = pathlib.Path(args.input_model)
         if input_path.is_dir():
-            input_path = _resolve_model_safetensors(input_path)
+            input_path = resolve_model_safetensors(input_path)
         convert_trained_ckpt(
             input_ckpt=str(input_path),
             output_dir=args.output_model,
@@ -392,14 +387,9 @@ def main() -> int:
         )
         copy_norm_stats(args.input_norm_stats, args.output_norm_stats)
     else:
-        convert_new_to_old(
+        convert(
             args.input_model,
             args.input_norm_stats,
             args.output_model,
             args.output_norm_stats,
         )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

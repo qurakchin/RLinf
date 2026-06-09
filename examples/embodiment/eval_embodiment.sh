@@ -35,7 +35,16 @@ else
 fi
 
 # NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
-ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-"LIBERO"}}
+# A second arg that looks like a Hydra override (contains "=") is NOT the robot
+# platform; it is forwarded as an override (see the CMD below), so guard against
+# consuming it here.
+if [[ "$2" == *"="* ]]; then
+    ROBOT_PLATFORM="${ROBOT_PLATFORM:-LIBERO}"
+    HYDRA_OVERRIDES=("${@:2}")
+else
+    ROBOT_PLATFORM="${2:-${ROBOT_PLATFORM:-LIBERO}}"
+    HYDRA_OVERRIDES=("${@:3}")
+fi
 
 export ROBOT_PLATFORM
 
@@ -57,5 +66,7 @@ LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}" #/$(date +
 MEGA_LOG_FILE="${LOG_DIR}/eval_embodiment.log"
 mkdir -p "${LOG_DIR}"
 CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
-echo ${CMD}
-${CMD} 2>&1 | tee ${MEGA_LOG_FILE}
+# Forward any extra "key=value" args as Hydra overrides, e.g.
+#   bash eval_embodiment.sh <config> env.eval.seed=1 actor.model.model_path=/path
+echo ${CMD} "${HYDRA_OVERRIDES[@]}"
+${CMD} "${HYDRA_OVERRIDES[@]}" 2>&1 | tee ${MEGA_LOG_FILE}

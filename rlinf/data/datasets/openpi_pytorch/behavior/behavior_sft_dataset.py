@@ -24,9 +24,12 @@ two changes relative to the old module:
   ``torchrun``/``DistributedDataParallel``, each rank streams a disjoint slice of
   the keyframe chunks (see :meth:`BehaviorSftDataset.__getitem__`).
 
-Everything else (LeRobot/omnigibson constants, video loaders, orchestrator and
-skill-boundary helpers) is inlined exactly as in the old module so the streaming
-behavior is unchanged.
+The video/stat utilities (``hf_transform_to_torch``, ``aggregate_stats``,
+``decode_video_frames`` and the per-camera video loaders) are the real ones from
+``omnigibson.learning.utils`` rather than local copies. They are imported lazily
+(inside the methods that use them, via :func:`_omnigibson_utils`) so that merely
+importing this module never pulls OmniGibson — config validation must not trigger
+any scene/asset load.
 """
 
 from __future__ import annotations
@@ -39,9 +42,7 @@ import random
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Optional
 
-import av
 import numpy as np
 import torch as th
 import torch.distributed as dist
@@ -157,269 +158,51 @@ ORCHESTRATORS_PATH = "orchestrators"
 
 
 # ---------------------------------------------------------------------------
-# Inlined utility functions
+# Lazy OmniGibson utility access
 # ---------------------------------------------------------------------------
 
 
-def hf_transform_to_torch(items_dict: dict):
-    """Convert HuggingFace dataset items to torch tensors.
+def _omnigibson_utils():
+    """Lazily import the OmniGibson video/stat utilities used by this dataset.
 
-    Preserves float64 for timestamps to avoid precision issues.
-    Ported from omnigibson.learning.utils.lerobot_utils.
+    Imported on first call (never at module import) so that loading this module
+    — e.g. during config validation — does not pull OmniGibson or trigger any
+    scene/asset load. Returns ``(hf_transform_to_torch, aggregate_stats,
+    decode_video_frames, OBS_LOADER_MAP)``.
+
+    A small compatibility shim is installed before importing
+    ``omnigibson.learning.utils.lerobot_utils``: that module imports
+    ``_assert_type_and_shape`` from ``lerobot.datasets.compute_stats`` (the new
+    LeRobot layout), but the pinned LeRobot here exposes it under
+    ``lerobot.common.datasets.compute_stats``. We alias the new path to the
+    existing implementation so the real OmniGibson utilities import unchanged.
     """
-    from PIL import Image as PILImage
-    from torchvision import transforms as tv_transforms
+    import sys
 
-    for key in items_dict:
-        if key == "timestamp":
-            items_dict[key] = [
-                x if isinstance(x, str) else th.tensor(x, dtype=th.float64)
-                for x in items_dict[key]
-            ]
-        else:
-            first_item = items_dict[key][0]
-            if isinstance(first_item, PILImage.Image):
-                to_tensor = tv_transforms.ToTensor()
-                items_dict[key] = [to_tensor(img) for img in items_dict[key]]
-            elif first_item is None:
-                pass
-            else:
-                items_dict[key] = [
-                    x if isinstance(x, str) else th.tensor(x) for x in items_dict[key]
-                ]
-    return items_dict
-
-
-def aggregate_feature_stats(stats_ft_list):
-    """Aggregate stats for a single feature across multiple episodes."""
-    means = np.stack([s["mean"] for s in stats_ft_list])
-    variances = np.stack([s["std"] ** 2 for s in stats_ft_list])
-    counts = np.stack([s["count"] for s in stats_ft_list])
-    q01 = np.stack([s["q01"] for s in stats_ft_list])
-    q99 = np.stack([s["q99"] for s in stats_ft_list])
-    total_count = counts.sum(axis=0)
-
-    while counts.ndim < means.ndim:
-        counts = np.expand_dims(counts, axis=-1)
-
-    weighted_means = means * counts
-    total_mean = weighted_means.sum(axis=0) / total_count
-
-    delta_means = means - total_mean
-    weighted_variances = (variances + delta_means**2) * counts
-    total_variance = weighted_variances.sum(axis=0) / total_count
-
-    weighted_q01 = np.percentile(q01, 1, axis=0)
-    weighted_q99 = np.percentile(q99, 99, axis=0)
-
-    return {
-        "min": np.min(np.stack([s["min"] for s in stats_ft_list]), axis=0),
-        "max": np.max(np.stack([s["max"] for s in stats_ft_list]), axis=0),
-        "mean": total_mean,
-        "std": np.sqrt(total_variance),
-        "q01": weighted_q01,
-        "q99": weighted_q99,
-        "count": total_count,
-    }
-
-
-def aggregate_stats(stats_list):
-    """Aggregate stats from multiple per-episode stat dicts."""
-    data_keys = {key for stats in stats_list for key in stats}
-    aggregated_stats = {key: {} for key in data_keys}
-    for key in data_keys:
-        stats_with_key = [stats[key] for stats in stats_list if key in stats]
-        aggregated_stats[key] = aggregate_feature_stats(stats_with_key)
-    return aggregated_stats
-
-
-def decode_video_frames(video_path, timestamps, tolerance_s, backend=None):
-    """Decode specific frames from a video file.
-
-    Ported from omnigibson.learning.utils.lerobot_utils.
-    """
-    import torchvision
-
-    video_path = str(video_path)
-    keyframes_only = False
-    if "depth" in video_path:
-        backend = "pyav"
-    torchvision.set_video_backend(backend or "pyav")
-    if backend == "pyav":
-        keyframes_only = True
-
-    reader = torchvision.io.VideoReader(video_path, "video")
-    first_ts = min(timestamps) - 5
-    last_ts = max(timestamps)
-    reader.seek(first_ts, keyframes_only=keyframes_only)
-
-    loaded_frames = []
-    loaded_ts = []
-    for frame in reader:
-        current_ts = frame["pts"]
-        loaded_frames.append(frame["data"])
-        loaded_ts.append(current_ts)
-        if current_ts >= last_ts:
-            break
-
-    reader.container.close()
-    reader = None
-
-    query_ts = th.tensor(timestamps)
-    loaded_ts = th.tensor(loaded_ts)
-    dist_matrix = th.cdist(query_ts[:, None], loaded_ts[:, None], p=1)
-    min_, argmin_ = dist_matrix.min(1)
-
-    is_within_tol = min_ < tolerance_s
-    assert is_within_tol.all(), (
-        f"Timestamp tolerance violated ({min_[~is_within_tol]} > {tolerance_s=}). "
-        f"video: {video_path}"
-    )
-
-    closest_frames = th.stack([loaded_frames[idx] for idx in argmin_])
-    closest_frames = closest_frames.type(th.float32)
-    if "depth" not in video_path:
-        closest_frames = closest_frames / 255
-    return closest_frames
-
-
-# ---------------------------------------------------------------------------
-# VideoLoader + RGBVideoLoader (from omnigibson.learning.utils.obs_utils)
-# ---------------------------------------------------------------------------
-
-
-class VideoLoader:
-    """Sequential video frame loader using PyAV."""
-
-    def __init__(
-        self,
-        *args,
-        path: str,
-        batch_size: Optional[int] = None,
-        stride: int = 1,
-        output_size: tuple[int, int] | None = None,
-        start_idx: int = 0,
-        end_idx: Optional[int] = None,
-        start_idx_is_keyframe: bool = False,
-        fps: int = 30,
-        downsample_factor: int = 1,
-        **kwargs,
-    ):
-        self.container = av.open(path.replace(":", "+"))
-        self.stream = self.container.streams.video[0]
-        self._frames = []
-        self.batch_size = batch_size
-        self.stride = stride
-        self._frame_iter = None
-        self._done = False
-        self.output_size = output_size
-        self._start_frame = start_idx
-        self._end_frame = end_idx if end_idx is not None else self.stream.frames
-        self._start_idx_is_keyframe = start_idx_is_keyframe
-        self._current_frame = start_idx
-        self._time_base = self.stream.time_base
-        self._fps = fps
-        self._downsample_factor = downsample_factor
-        start_frame = (
-            self._start_frame
-            if self._start_idx_is_keyframe
-            else max(0, self._start_frame - 5)
-        )
-        self._start_pts = int(start_frame / self._fps / self._time_base)
-        self.reset()
-
-    def __iter__(self):
-        self.reset()
-        self._frames = []
-        self._done = False
-        return self
-
-    def __next__(self):
-        if self._done:
-            raise StopIteration
+    if "lerobot.datasets.compute_stats" not in sys.modules:
         try:
-            while True:
-                for _ in range(self._downsample_factor - 1):
-                    next(self._frame_iter)
-                frame = next(self._frame_iter)
-                processed_frame = self._process_single_frame(frame)
-                self._current_frame += 1
-                if self._current_frame == self._end_frame:
-                    self._done = True
-                self._frames.append(processed_frame)
-                if (
-                    self.batch_size and len(self._frames) == self.batch_size
-                ) or self._done:
-                    batch = th.cat(self._frames, dim=0)
-                    self._frames = self._frames[self.stride :]
-                    return batch
-        except StopIteration:
-            self._done = True
-            if len(self._frames) > 0:
-                batch = th.cat(self._frames, dim=0)
-                self._frames = []
-                return batch
-            else:
-                raise
-        except Exception as e:
-            self._done = True
-            raise e
+            import lerobot.datasets.compute_stats  # noqa: F401
+        except ModuleNotFoundError:
+            import types
 
-    def _process_single_frame(self, frame):
-        raise NotImplementedError("Subclasses must implement this method")
+            from lerobot.common.datasets.compute_stats import _assert_type_and_shape
 
-    def reset(self):
-        self._current_frame = self._start_frame
-        self.container.seek(
-            self._start_pts,
-            stream=self.stream,
-            backward=True,
-            any_frame=False,
-        )
-        self._frame_iter = self.container.decode(self.stream)
-        if self._start_frame > 0 and not self._start_idx_is_keyframe:
-            for frame in self._frame_iter:
-                if frame.pts is None:
-                    continue
-                cur_frame = round(frame.pts * self._time_base * self._fps)
-                if cur_frame == self._start_frame - 1:
-                    return
-                elif cur_frame > self._start_frame - 1:
-                    raise ValueError(
-                        f"Start frame {self._start_frame} beyond video length. "
-                        f"Current: {cur_frame}"
-                    )
+            pkg = sys.modules.setdefault(
+                "lerobot.datasets", types.ModuleType("lerobot.datasets")
+            )
+            shim = types.ModuleType("lerobot.datasets.compute_stats")
+            shim._assert_type_and_shape = _assert_type_and_shape
+            sys.modules["lerobot.datasets.compute_stats"] = shim
+            pkg.compute_stats = shim
 
-    def close(self):
-        self.container.close()
+    from omnigibson.learning.utils.lerobot_utils import (
+        aggregate_stats,
+        decode_video_frames,
+        hf_transform_to_torch,
+    )
+    from omnigibson.learning.utils.obs_utils import OBS_LOADER_MAP
 
-
-class RGBVideoLoader(VideoLoader):
-    """RGB video loader resolving the BEHAVIOR per-camera ``.mp4`` path."""
-
-    def __init__(
-        self,
-        data_path: str,
-        task_id: int,
-        camera_id: str,
-        demo_id: str,
-        *args,
-        **kwargs,
-    ):
-        super().__init__(
-            path=f"{data_path}/videos/task-{task_id:04d}/observation.images.rgb.{camera_id}/episode_{demo_id}.mp4",
-            *args,
-            **kwargs,
-        )
-
-    def _process_single_frame(self, frame):
-        rgb = frame.to_ndarray(format="rgb24")  # (H, W, 3)
-        return th.from_numpy(rgb).movedim(-1, -3).unsqueeze(0)  # (1, 3, H, W)
-
-
-OBS_LOADER_MAP = {
-    "rgb": RGBVideoLoader,
-}
+    return hf_transform_to_torch, aggregate_stats, decode_video_frames, OBS_LOADER_MAP
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +378,7 @@ class BehaviorSftDatasetMetadata(LeRobotDatasetMetadata):
             )
         else:
             self.episodes_stats = self.load_episodes_stats(self.root)
+            _, aggregate_stats, _, _ = _omnigibson_utils()
             self.stats = aggregate_stats(list(self.episodes_stats.values()))
 
     def load_tasks(self, local_dir: Path):
@@ -792,7 +576,6 @@ class BehaviorSftDataset(LeRobotDataset):
         allow_right: int = 0,
         dist_rank: int | None = None,
         dist_world_size: int | None = None,
-        id_only: bool = False,
     ):
         import packaging.version
 
@@ -838,12 +621,15 @@ class BehaviorSftDataset(LeRobotDataset):
         # back to ``torch.distributed`` only when these are not provided.
         self._dist_rank = dist_rank
         self._dist_world_size = dist_world_size
-        # Audit-only fast path: yield the value-independent frame id
-        # (episode_index, frame_index) using the EXACT streaming cursor, but skip the
-        # video decode / image transform / prompt build. Default off (production builds
-        # the full sample). Only valid for the production SFT path (use_skill off, no
-        # stochastic/gap skips), which is deterministic one-frame-per-step.
-        self.id_only = id_only
+        # Real OmniGibson video/stat utilities, imported lazily here (never at module
+        # import) and cached so the streaming hot path and `load_hf_dataset` can reuse
+        # them without re-importing. See `_omnigibson_utils`.
+        (
+            self._hf_transform_to_torch,
+            self._aggregate_stats,
+            self._decode_video_frames,
+            self._obs_loader_map,
+        ) = _omnigibson_utils()
 
         self.image_writer = None
         self.episode_buffer = None
@@ -910,7 +696,7 @@ class BehaviorSftDataset(LeRobotDataset):
             episodes_stats = [
                 self.meta.episodes_stats[ep_idx] for ep_idx in self.episodes
             ]
-            self.stats = aggregate_stats(episodes_stats)
+            self.stats = self._aggregate_stats(episodes_stats)
 
         try:
             if force_cache_sync:
@@ -1134,7 +920,7 @@ class BehaviorSftDataset(LeRobotDataset):
                 for ep_idx in self.episodes
             ]
             hf_dataset = load_dataset("parquet", data_files=files, split="train")
-        hf_dataset.set_transform(hf_transform_to_torch)
+        hf_dataset.set_transform(self._hf_transform_to_torch)
         return hf_dataset
 
     def _select_streaming_chunk(self) -> None:
@@ -1227,14 +1013,6 @@ class BehaviorSftDataset(LeRobotDataset):
             item.pop("observation.task_info")
         ep_idx = item["episode_index"].item()
 
-        if self.id_only:
-            # Value-independent frame identity from the raw metadata, BEFORE any video
-            # decode / normalization / tokenization. Advances the same cursor as the
-            # production path (one frame per step; production SFT takes no skip branch).
-            frame_index = round(item["timestamp"].item() * self.fps)
-            self.current_streaming_frame_idx += 1
-            return {"episode_index": int(ep_idx), "frame_index": int(frame_index)}
-
         if self._should_obs_loaders_reload:
             for loader in self.obs_loaders.values():
                 loader.close()
@@ -1245,7 +1023,7 @@ class BehaviorSftDataset(LeRobotDataset):
                 task_id = item["task_index"].item()
                 if "rgb" in vid_key:
                     kwargs["train_rgb_type"] = self.train_rgb_type
-                loader_cls = OBS_LOADER_MAP.get(vid_key.split(".")[2])
+                loader_cls = self._obs_loader_map.get(vid_key.split(".")[2])
                 if loader_cls is None:
                     continue
                 self.obs_loaders[vid_key] = iter(
@@ -1377,7 +1155,7 @@ class BehaviorSftDataset(LeRobotDataset):
         item = {}
         for vid_key, query_ts in query_timestamps.items():
             video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
-            frames = decode_video_frames(
+            frames = self._decode_video_frames(
                 video_path, query_ts, self.tolerance_s, self.video_backend
             )
             item[vid_key] = frames.squeeze(0)

@@ -32,15 +32,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from rlinf.models.embodiment.base_policy import ForwardType
-from rlinf.models.embodiment.openpi_pytorch.pi0_model.model import Observation
-from rlinf.models.embodiment.openpi_pytorch.utils.normalize import (
-    normalize_quantile,
-)
 from rlinf.data.datasets.openpi_pytorch.behavior.processing import (
     BehaviorEvalProcessor,
 )
+from rlinf.models.embodiment.base_policy import ForwardType
+from rlinf.models.embodiment.openpi_pytorch.pi0_model.model import Observation
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.pi0 import Pi0
+from rlinf.models.embodiment.openpi_pytorch.utils.normalize import (
+    normalize_quantile,
+)
 
 
 class OpenPiPytorchActionModel(nn.Module):

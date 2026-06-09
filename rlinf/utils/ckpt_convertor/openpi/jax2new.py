@@ -1,10 +1,10 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2025-2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,37 +14,28 @@
 
 """Convert a JAX Pi0/Pi05 checkpoint to the NEW self-contained PyTorch layout.
 
-Self-contained port of the reference
-``openpi-comet-pytorch-mixed/scripts/convert_jax_model_to_pytorch_new.py``: it
-reproduces the SigLIP / dual-expert-LLM / projection weight transforms exactly,
-but takes the model-shape fields as explicit arguments instead of looking them
-up in an in-code config registry, and loads the JAX parameter tree with a lazily
-imported ``orbax``/``jax`` (kept out of module import so this package imports
+Reproduces the SigLIP / dual-expert-LLM / projection weight transforms exactly,
+taking the model-shape fields as explicit arguments instead of looking them up in
+an in-code config registry. The JAX parameter tree is loaded with a lazily
+imported ``orbax`` / ``jax`` (kept out of module import so this package imports
 without JAX installed and without depending on the external ``openpi`` package).
 
-The pure-tensor transforms are exercised by the package's unit tests; the
-end-to-end value-level verification against the reference JAX base model
-(``/mnt/public/xzxuan/models/pi05_base``) runs with the reference toolchain.
-
-Usage (four-parameter interface; the two norm-stats paths are copied across):
-
-    python -m rlinf.models.embodiment.openpi_pytorch.utils.jax_to_new_pytorch \\
-        --input-model       /mnt/public/xzxuan/models/pi05_base \\
-        --input-norm-stats  /path/to/norm_stats.json \\
-        --output-model      /mnt/public/xzxuan/models/pi05_base_pytorch_new \\
-        --output-norm-stats /mnt/public/xzxuan/models/pi05_base_pytorch_new/physical-intelligence/behavior/norm_stats.json
+The converted weights are written as fp32 ``model.safetensors`` while the emitted
+``config.json`` records a ``dtype: bfloat16`` hint for the eval loader.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import pathlib
 
 import numpy as np
 import torch
 
-from rlinf.models.embodiment.openpi_pytorch.utils.old_to_new import copy_norm_stats
+from rlinf.utils.ckpt_convertor.openpi._core import (
+    copy_norm_stats,
+    save_safetensors,
+    write_config_json,
+)
 
 # So400m/14 SigLIP width and the two LLM expert widths (pi05 base).
 _SIGLIP_WIDTH = 1152
@@ -269,7 +260,7 @@ def convert_projections(params: dict, pi05: bool) -> dict:
     return pt
 
 
-def convert_jax_to_new_pytorch(
+def convert(
     input_model: str | pathlib.Path,
     input_norm_stats: str | pathlib.Path,
     output_model: str | pathlib.Path,
@@ -284,15 +275,13 @@ def convert_jax_to_new_pytorch(
     pcd: bool = False,
     dtype: str = "bfloat16",
 ) -> pathlib.Path:
-    """Convert a JAX checkpoint dir to a new-format PyTorch checkpoint (four-parameter interface).
+    """Convert a JAX checkpoint dir to a new-format PyTorch checkpoint.
 
     Loads the JAX params from ``input_model``, converts SigLIP/LLM/projections,
-    writes ``output_model/model.safetensors`` + ``config.json`` (from the model-
-    shape arguments), and copies ``input_norm_stats`` verbatim to
-    ``output_norm_stats``.
+    writes ``output_model/model.safetensors`` (fp32 weights) + ``config.json``
+    (carrying a ``dtype: bfloat16`` hint), and copies ``input_norm_stats`` verbatim
+    to ``output_norm_stats``.
     """
-    import safetensors.torch
-
     output_model = pathlib.Path(output_model)
     params = _load_jax_params(input_model)
 
@@ -303,33 +292,28 @@ def convert_jax_to_new_pytorch(
         convert_projections(params, pi05),
     ):
         for k, v in part.items():
-            # ``contiguous()`` is a no-op (returns the same tensor) when already
-            # contiguous, so the guard ternary was redundant.
             merged[k] = v.contiguous()
 
-    output_model.mkdir(parents=True, exist_ok=True)
-    safetensors.torch.save_file(merged, str(output_model / "model.safetensors"))
-    (output_model / "config.json").write_text(
-        json.dumps(
-            {
-                "action_dim": action_dim,
-                "action_horizon": action_horizon,
-                "max_token_len": max_token_len,
-                "paligemma_variant": paligemma_variant,
-                "action_expert_variant": action_expert_variant,
-                "pi05": pi05,
-                "pcd": pcd,
-                "dtype": dtype,
-            },
-            indent=2,
-        )
+    save_safetensors(merged, output_model / "model.safetensors")
+    write_config_json(
+        {
+            "action_dim": action_dim,
+            "action_horizon": action_horizon,
+            "max_token_len": max_token_len,
+            "paligemma_variant": paligemma_variant,
+            "action_expert_variant": action_expert_variant,
+            "pi05": pi05,
+            "pcd": pcd,
+            "dtype": dtype,
+        },
+        output_model,
     )
     copy_norm_stats(input_norm_stats, output_norm_stats)
     return output_model
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_arguments(parser) -> None:
+    """Register the ``jax2new`` mode arguments on ``parser``."""
     parser.add_argument("--input-model", required=True, help="JAX checkpoint directory")
     parser.add_argument(
         "--input-norm-stats", required=True, help="norm_stats.json to copy across"
@@ -348,8 +332,11 @@ def main() -> int:
     parser.add_argument("--max-token-len", type=int, default=200)
     parser.add_argument("--paligemma-variant", default="gemma_2b")
     parser.add_argument("--action-expert-variant", default="gemma_300m")
-    args = parser.parse_args()
-    convert_jax_to_new_pytorch(
+
+
+def run(args) -> None:
+    """Execute the ``jax2new`` mode from parsed ``args``."""
+    convert(
         args.input_model,
         args.input_norm_stats,
         args.output_model,
@@ -361,8 +348,3 @@ def main() -> int:
         paligemma_variant=args.paligemma_variant,
         action_expert_variant=args.action_expert_variant,
     )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
