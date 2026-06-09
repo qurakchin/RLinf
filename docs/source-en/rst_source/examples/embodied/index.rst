@@ -306,6 +306,18 @@ as well as reinforcement learning training examples on real robots.
        </p>
      </div>
 
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <!-- TODO(thumbnail): replace placeholder cover image URL for sft_openpi_pytorch -->
+       <img src="https://github.com/RLinf/misc/raw/main/pic/pi0_icon.jpg"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="sft_openpi_pytorch.html" style="text-decoration: underline; color: blue;">
+           <b>PyTorch OpenPI (Pi0.5) SFT on BEHAVIOR</b>
+         </a><br>
+         Run BEHAVIOR SFT with the self-contained PyTorch OpenPI Pi0.5 VLA
+       </p>
+     </div>
+
    </div>
 
    <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
@@ -532,6 +544,7 @@ as well as reinforcement learning training examples on real robots.
    mlp
    sac_flow
    sft_openpi
+   sft_openpi_pytorch
    sft_dreamzero
    sft_vlm
    dsrl

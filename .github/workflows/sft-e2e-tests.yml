@@ -62,6 +62,44 @@ jobs:
           rm -rf .venv
           uv cache prune
 
+  sft-openpi-pytorch-behavior-test:
+    runs-on: embodied
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create sft environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          export BEHAVIOR_PATH=/workspace/dataset/BEHAVIOR-1K
+          export ISAAC_SIM_WHEEL_PATH=/workspace/dataset/isaac_sim_wheels
+          bash requirements/install.sh embodied --model openpi --env behavior
+
+      - name: SFT BEHAVIOR OpenPI-PyTorch test
+        timeout-minutes: 30
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          export OMNIGIBSON_DATA_PATH=/workspace/dataset/behavior-datasets
+          export ISAAC_PATH=/workspace/dataset/isaac-sim
+          # Minimal openpi_pytorch fixture (see ci_behavior README).
+          export BEHAVIOR_DATASET_ROOT=/workspace/ci_behavior/dataset
+          export OPENPI_PYTORCH_BASE=/workspace/ci_behavior/base_model
+          export OPENPI_PYTORCH_SFT_ASSETS=/workspace/ci_behavior/assets
+          export OPENPI_PYTORCH_TOKENIZER=/workspace/ci_behavior/paligemma_tokenizer/paligemma_tokenizer.model
+          bash tests/e2e_tests/sft/run_vla_sft.sh behavior_openpi_pytorch_sft
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+          rm -rf /tmp/tmp*
+
   recap-sft-cfg-test:
     runs-on: embodied
     steps:

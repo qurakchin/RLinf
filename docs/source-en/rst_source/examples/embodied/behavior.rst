@@ -488,6 +488,44 @@ Run evaluation with:
    export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
    bash examples/embodiment/eval_embodiment.sh behavior_ppo_openpi_pi05_eval
 
+--------------
+
+**5. Evaluate with the PyTorch OpenPI (Pi0.5) code**
+
+BEHAVIOR evaluation is also supported with the new **self-contained PyTorch
+OpenPI** code (model ``model_type: openpi_pytorch``; see
+:doc:`sft_openpi_pytorch` for the matching SFT flow). The eval config is:
+
+- ``examples/embodiment/config/behavior_ppo_openpi_pi05_pytorch_eval.yaml``
+
+This config runs in eval-only mode (``runner.only_eval: True``) and consumes a
+**new-format** PyTorch checkpoint, i.e. one produced by the OpenPI checkpoint
+convertor (``ckpt_convertor.openpi`` ``old2new`` / ``sft2new``). All filesystem
+paths are relocatable through environment variables:
+
+- ``OPENPI_PYTORCH_MODEL_PATH``: the new-format eval checkpoint, shared by
+  ``rollout.model.model_path`` and ``actor.model.model_path``.
+- ``OPENPI_PYTORCH_ASSETS_DIR``: directory holding the BEHAVIOR norm-stats
+  (``actor.model.openpi.assets_dir``). Norm stats resolve at
+  ``{assets_dir}/{asset_id}/norm_stats.json``.
+- ``OPENPI_PYTORCH_TOKENIZER``: the PaliGemma SentencePiece tokenizer model
+  (``actor.model.openpi.paligemma_tokenizer``).
+
+.. code:: bash
+
+   export ISAAC_PATH=/path/to/isaac-sim
+   export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
+   export OPENPI_PYTORCH_MODEL_PATH=/path/to/pi05_pytorch_new
+   export OPENPI_PYTORCH_ASSETS_DIR=/path/to/pi05_pytorch_new
+   export OPENPI_PYTORCH_TOKENIZER=/path/to/paligemma_tokenizer/paligemma_tokenizer.model
+   bash examples/embodiment/eval_embodiment.sh behavior_ppo_openpi_pi05_pytorch_eval
+
+.. note::
+
+   Evaluation runs the flow-matching action head with non-deterministic
+   (random) sampling noise, so per-run trajectories and success counts will vary
+   slightly between repeated runs.
+
 
 Visualization and Results
 -------------------------
