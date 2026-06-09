@@ -86,6 +86,23 @@ def test_existing_model_builders_preserved():
         assert model_type in registry, f"{model_type} builder missing from registry"
 
 
+def test_existing_model_configs_still_build():
+    """Existing embodied configs must still Hydra-build after openpi_pytorch is added."""
+    pytest.importorskip("hydra")
+    try:
+        import rlinf.config  # noqa: F401
+    except ImportError as exc:
+        pytest.skip(f"rlinf.config unavailable: {exc}")
+    for config_name, model_type in (
+        ("behavior_ppo_openpi_pi05", "openpi"),
+        ("libero_spatial_ppo_gr00t_n1d6", "gr00t_n1d6"),
+    ):
+        cfg = _compose(
+            EMBODIED_CONFIG, config_name, REPO_ROOT / "examples" / "embodiment"
+        )
+        assert cfg.actor.model.model_type == model_type
+
+
 # --------------------------------------------------------------------------- #
 # Rank-disjoint streaming partition (pure, always runs) — the AC-3 invariant
 # --------------------------------------------------------------------------- #
