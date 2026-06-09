@@ -162,6 +162,43 @@ ORCHESTRATORS_PATH = "orchestrators"
 # ---------------------------------------------------------------------------
 
 
+def _install_lerobot_compat_shim():
+    """Alias ``lerobot.datasets.compute_stats`` to the pinned LeRobot's
+    ``lerobot.common.datasets.compute_stats`` so OmniGibson's ``lerobot_utils`` (which
+    imports ``_assert_type_and_shape`` from the new LeRobot layout) loads unchanged.
+
+    This imports only LeRobot — never OmniGibson — so running it at module import does
+    not regress the lazy-OmniGibson contract. It must be installed at import time
+    (below) because spawned (``num_workers>0``) DataLoader workers unpickle this
+    dataset's cached OmniGibson helper references, which re-imports
+    ``omnigibson.learning.utils.lerobot_utils`` before any method runs; without the
+    shim already in place that import raises ``ModuleNotFoundError: lerobot.datasets``.
+    """
+    import sys
+
+    if "lerobot.datasets.compute_stats" in sys.modules:
+        return
+    try:
+        import lerobot.datasets.compute_stats  # noqa: F401
+    except ModuleNotFoundError:
+        import types
+
+        from lerobot.common.datasets.compute_stats import _assert_type_and_shape
+
+        pkg = sys.modules.setdefault(
+            "lerobot.datasets", types.ModuleType("lerobot.datasets")
+        )
+        shim = types.ModuleType("lerobot.datasets.compute_stats")
+        shim._assert_type_and_shape = _assert_type_and_shape
+        sys.modules["lerobot.datasets.compute_stats"] = shim
+        pkg.compute_stats = shim
+
+
+# Install the LeRobot compat shim at import time (LeRobot-only, no OmniGibson) so
+# spawned DataLoader workers can unpickle this dataset's OmniGibson helper references.
+_install_lerobot_compat_shim()
+
+
 def _omnigibson_utils():
     """Lazily import the OmniGibson video/stat utilities used by this dataset.
 
@@ -169,32 +206,7 @@ def _omnigibson_utils():
     — e.g. during config validation — does not pull OmniGibson or trigger any
     scene/asset load. Returns ``(hf_transform_to_torch, aggregate_stats,
     decode_video_frames, OBS_LOADER_MAP)``.
-
-    A small compatibility shim is installed before importing
-    ``omnigibson.learning.utils.lerobot_utils``: that module imports
-    ``_assert_type_and_shape`` from ``lerobot.datasets.compute_stats`` (the new
-    LeRobot layout), but the pinned LeRobot here exposes it under
-    ``lerobot.common.datasets.compute_stats``. We alias the new path to the
-    existing implementation so the real OmniGibson utilities import unchanged.
     """
-    import sys
-
-    if "lerobot.datasets.compute_stats" not in sys.modules:
-        try:
-            import lerobot.datasets.compute_stats  # noqa: F401
-        except ModuleNotFoundError:
-            import types
-
-            from lerobot.common.datasets.compute_stats import _assert_type_and_shape
-
-            pkg = sys.modules.setdefault(
-                "lerobot.datasets", types.ModuleType("lerobot.datasets")
-            )
-            shim = types.ModuleType("lerobot.datasets.compute_stats")
-            shim._assert_type_and_shape = _assert_type_and_shape
-            sys.modules["lerobot.datasets.compute_stats"] = shim
-            pkg.compute_stats = shim
-
     from omnigibson.learning.utils.lerobot_utils import (
         aggregate_stats,
         decode_video_frames,

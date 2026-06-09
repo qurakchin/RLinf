@@ -75,6 +75,17 @@ def test_no_eval_validator_migrated():
     assert not hasattr(config, "_validate_openpi_pytorch_eval_cfg")
 
 
+def test_existing_model_builders_preserved():
+    """Registering openpi_pytorch must not clobber existing embodied builders."""
+    import rlinf.models as models
+
+    registry = models._MODEL_REGISTRY
+    # openpi_pytorch is added; the existing builders (openpi, the openpi_cfg
+    # builder under cfg_model, gr00t_n1d6) remain reachable via get_model.
+    for model_type in ("openpi", "openpi_pytorch", "cfg_model", "gr00t_n1d6"):
+        assert model_type in registry, f"{model_type} builder missing from registry"
+
+
 # --------------------------------------------------------------------------- #
 # Rank-disjoint streaming partition (pure, always runs) — the AC-3 invariant
 # --------------------------------------------------------------------------- #
