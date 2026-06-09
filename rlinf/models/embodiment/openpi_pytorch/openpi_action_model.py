@@ -125,26 +125,15 @@ class OpenPiPytorchActionModel(nn.Module):
         """Compute the flow-matching SFT loss for one batch.
 
         ``data`` is either a ``(observation, actions)`` tuple or a dict with
-        ``observation`` and ``actions``. Preferred actions are already
-        normalized and padded to the model action dim by the dataloader. If raw
-        env-dim actions are supplied and action stats are available, this method
-        normalizes before zero-padding to match the reference transform order.
-        A dict batch may also carry explicit flow-matching ``noise`` and
-        ``time`` tensors; when present they are passed through verbatim instead
-        of being sampled (used by the reproducibility-only pinned-input path).
-        Returns the scalar mean of the ``(B, action_horizon)`` per-timestep
-        loss from :meth:`Pi0.compute_loss`.
+        ``observation`` and ``actions`` (the dataloader already normalizes and
+        pads actions to the model action dim). Returns the scalar mean of the
+        ``(B, action_horizon)`` per-timestep loss from :meth:`Pi0.compute_loss`
+        (which samples the flow-matching noise/time internally).
         """
-        observation, actions, noise, time = self._unpack_sft_batch(data)
+        observation, actions = self._unpack_sft_batch(data)
         observation = self._observation_to_device(observation)
         actions = self._actions_to_device(actions)
-        if noise is not None:
-            noise = torch.as_tensor(noise).to(self.device)
-        if time is not None:
-            time = torch.as_tensor(time).to(self.device)
-        per_timestep_loss = self.model.compute_loss(
-            observation, actions, train=True, noise=noise, time=time
-        )
+        per_timestep_loss = self.model.compute_loss(observation, actions, train=True)
         return per_timestep_loss.mean()
 
     def compute_loss(self, data: Any) -> torch.Tensor:
@@ -152,8 +141,7 @@ class OpenPiPytorchActionModel(nn.Module):
         return self.sft_forward(data)
 
     @staticmethod
-    def _unpack_sft_batch(data: Any) -> tuple[Any, Any, Any, Any]:
-        noise = time = None
+    def _unpack_sft_batch(data: Any) -> tuple[Any, Any]:
         if isinstance(data, (tuple, list)):
             if len(data) != 2:
                 raise ValueError(
@@ -168,14 +156,11 @@ class OpenPiPytorchActionModel(nn.Module):
                     f"got keys {sorted(data)}."
                 )
             observation, actions = data["observation"], data["actions"]
-            # Optional pinned flow-matching noise/time (reproducibility-only path);
-            # absent in normal training, where the model samples them internally.
-            noise, time = data.get("noise"), data.get("time")
         else:
             raise TypeError(f"Unsupported SFT batch type: {type(data)!r}.")
         if observation is None or actions is None:
             raise ValueError("SFT batch is missing observation or actions.")
-        return observation, actions, noise, time
+        return observation, actions
 
     def _observation_to_device(self, observation: Any) -> Observation:
         if isinstance(observation, dict):

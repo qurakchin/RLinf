@@ -201,29 +201,57 @@ def test_sft_forward_step_finite_loss():
     torch = pytest.importorskip("torch")
     if not torch.cuda.is_available():
         pytest.skip("SFT forward step skipped: no CUDA device available.")
-    # The full forward exercise lives in the e2e SFT config; here we only assert
-    # the factory builds a model whose Pi0 exposes the SFT loss entry point.
+    asset_id = os.environ.get("OPENPI_PYTORCH_ASSET_ID", "physical-intelligence/behavior")
     from omegaconf import OmegaConf
 
     from rlinf.models.embodiment.openpi_pytorch import get_model
+    from rlinf.models.embodiment.openpi_pytorch.pi0_model.pi0_config import Pi0Config
 
-    cfg = OmegaConf.create(
-        {
-            "model_path": base,
-            "precision": "fp32",
-            "num_steps": 5,
-            "num_action_chunks": 32,
-            "action_dim": 23,
-            "openpi": {
-                "model_action_dim": 32,
-                "paligemma_variant": "gemma_2b",
-                "action_expert_variant": "gemma_300m",
-                "max_token_len": 200,
-                "assets_dir": assets,
-                "asset_id": "behavior-1k/2025-challenge-demos",
-                "paligemma_tokenizer": tokenizer,
-            },
-        }
+    def _build(precision):
+        cfg = OmegaConf.create(
+            {
+                "model_path": base,
+                "precision": precision,
+                "num_steps": 5,
+                "num_action_chunks": 32,
+                "action_dim": 23,
+                "openpi": {
+                    "model_action_dim": 32,
+                    "paligemma_variant": "gemma_2b",
+                    "action_expert_variant": "gemma_300m",
+                    "max_token_len": 200,
+                    "assets_dir": assets,
+                    "asset_id": asset_id,
+                    "paligemma_tokenizer": tokenizer,
+                },
+            }
+        )
+        return get_model(cfg)
+
+    # fp32 build keeps an fp32 master (the cast is a no-op, not a narrowing).
+    fp32_model = _build("fp32")
+    assert next(fp32_model.model.parameters()).dtype == torch.float32
+    assert hasattr(fp32_model, "gradient_checkpointing_enable")
+
+    # A single SFT forward/loss step on a minimal synthetic batch (the bf16 weights
+    # mimic the FSDP-cast compute dtype) must produce a finite loss and a populated,
+    # finite gradient.
+    model = _build("bf16").to("cuda").train()
+    pi0_config = Pi0Config(
+        pi05=True,
+        action_horizon=32,
+        action_dim=32,
+        paligemma_variant="gemma_2b",
+        action_expert_variant="gemma_300m",
+        dtype="bfloat16",
+        pcd=False,
     )
-    model = get_model(cfg)
-    assert hasattr(model, "gradient_checkpointing_enable")
+    observation = pi0_config.fake_obs(batch_size=1)
+    actions = pi0_config.fake_act(batch_size=1)
+    loss = model.sft_forward((observation, actions))
+    loss.backward()
+    grad_norm = sum(
+        p.grad.float().norm() ** 2 for p in model.parameters() if p.grad is not None
+    ) ** 0.5
+    assert torch.isfinite(loss).item()
+    assert torch.isfinite(grad_norm).item() and grad_norm.item() > 0
