@@ -31,7 +31,7 @@ runner:
 data:
   # Minimal CI fixture (see the ci_behavior README): the task-0000 subset staged
   # under /workspace.
-  train_data_paths: ${oc.env:BEHAVIOR_DATASET_ROOT,/workspace/ci_behavior/dataset}
+  train_data_paths: /workspace/ci_behavior/dataset
   behavior_dataset_root: ${data.train_data_paths}
   repo_id: "behavior-1k/2025-challenge-demos"
   modalities: ["rgb"]
@@ -59,11 +59,11 @@ actor:
   seed: 42
 
   model:
-    model_path: ${oc.env:OPENPI_PYTORCH_BASE,/workspace/ci_behavior/base_model}
+    model_path: /workspace/ci_behavior/base_model
     openpi:
-      assets_dir: ${oc.env:OPENPI_PYTORCH_SFT_ASSETS,/workspace/ci_behavior/assets}
+      assets_dir: /workspace/ci_behavior/assets
       asset_id: "behavior-1k/2025-challenge-demos"
-      paligemma_tokenizer: ${oc.env:OPENPI_PYTORCH_TOKENIZER,/workspace/ci_behavior/paligemma_tokenizer/paligemma_tokenizer.model}
+      paligemma_tokenizer: /workspace/ci_behavior/paligemma_tokenizer/paligemma_tokenizer.model
 
   optim:
     lr: 2.5e-5

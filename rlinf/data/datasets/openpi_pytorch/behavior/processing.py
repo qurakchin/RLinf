@@ -35,6 +35,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from rlinf.data.datasets.openpi_pytorch.eval_processor import EvalProcessor
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.model import Observation
 from rlinf.models.embodiment.openpi_pytorch.policies.behavior_policy import (
     BehaviorInputs,
@@ -68,7 +69,7 @@ def _pad_to_dim(x: np.ndarray, target_dim: int, axis: int = -1) -> np.ndarray:
     return np.pad(x, pad_width, constant_values=0.0)
 
 
-class BehaviorEvalProcessor:
+class BehaviorEvalProcessor(EvalProcessor):
     """Stateless (per-call) BEHAVIOR pi05 eval transform, matching the old path."""
 
     def __init__(

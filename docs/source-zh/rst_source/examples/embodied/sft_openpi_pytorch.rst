@@ -82,8 +82,8 @@ BEHAVIOR 流式加载器直接从 ``data:`` 段读取其全部参数（没有隐
 .. code:: yaml
 
    data:
-     train_data_paths: ${oc.env:BEHAVIOR_DATASET_ROOT,/workspace/ci_behavior/dataset}
-     behavior_dataset_root: ${data.train_data_paths}
+     train_data_paths: /path/to/2025-challenge-demos
+     behavior_dataset_root: /path/to/2025-challenge-demos
      repo_id: "behavior-1k/2025-challenge-demos"
      modalities: ["rgb"]
      num_workers: 8
@@ -121,11 +121,11 @@ BEHAVIOR 流式加载器直接从 ``data:`` 段读取其全部参数（没有隐
 
    actor:
      model:
-       model_path: ${oc.env:OPENPI_PYTORCH_BASE,/workspace/ci_behavior/base_model}
+       model_path: /path/to/pi05_base_pytorch_new
        openpi:
-         assets_dir: ${oc.env:OPENPI_PYTORCH_SFT_ASSETS,/workspace/ci_behavior/assets}
+         assets_dir: /path/to/assets
          asset_id: "behavior-1k/2025-challenge-demos"
-         paligemma_tokenizer: ${oc.env:OPENPI_PYTORCH_TOKENIZER,/workspace/ci_behavior/paligemma_tokenizer/paligemma_tokenizer.model}
+         paligemma_tokenizer: /path/to/paligemma_tokenizer/paligemma_tokenizer.model
 
 - ``assets_dir``：存放分位数归一化统计的目录。
 - ``asset_id``：在 ``assets_dir`` 下对应本任务统计信息的子路径。
@@ -134,28 +134,18 @@ BEHAVIOR 流式加载器直接从 ``data:`` 段读取其全部参数（没有隐
 
 归一化统计会在 ``{assets_dir}/{asset_id}/norm_stats.json`` 处解析。
 
-通过环境变量实现可重定位路径
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+文件系统路径
+~~~~~~~~~~~~
 
-该配置通过环境变量让所有文件系统路径都可重定位，每个变量都带有
-``/workspace/ci_behavior`` 默认值：
+所有文件系统路径都以 ``/path/to/...`` 占位符的形式直接写在配置中。在
+``examples/sft/config/behavior_pi05_vla.yaml`` 中将它们改为你自己暂存的资源路径：
 
-- ``BEHAVIOR_DATASET_ROOT``：BEHAVIOR 流式数据集根目录。
-- ``OPENPI_PYTORCH_BASE``：训练器加载的新格式 **fp32 基础 checkpoint**
-  （``actor.model.model_path``）。
-- ``OPENPI_PYTORCH_SFT_ASSETS``：归一化统计目录
-  （``actor.model.openpi.assets_dir``）。
-- ``OPENPI_PYTORCH_TOKENIZER``：PaliGemma SentencePiece tokenizer 模型
-  （``actor.model.openpi.paligemma_tokenizer``）。
-
-将这些变量指向你自己暂存的资源即可，例如：
-
-.. code:: bash
-
-   export BEHAVIOR_DATASET_ROOT=/path/to/behavior-1k/dataset
-   export OPENPI_PYTORCH_BASE=/path/to/pi05_base_pytorch_new
-   export OPENPI_PYTORCH_SFT_ASSETS=/path/to/assets
-   export OPENPI_PYTORCH_TOKENIZER=/path/to/paligemma_tokenizer/paligemma_tokenizer.model
+- ``data.train_data_paths`` / ``data.behavior_dataset_root``：BEHAVIOR 流式数据集
+  根目录。
+- ``actor.model.model_path``：训练器加载的新格式 **fp32 基础 checkpoint**。
+- ``actor.model.openpi.assets_dir``：归一化统计目录。
+- ``actor.model.openpi.paligemma_tokenizer``：PaliGemma SentencePiece tokenizer
+  模型。
 
 
 启动脚本

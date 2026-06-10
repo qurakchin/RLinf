@@ -536,10 +536,6 @@ jobs:
           source .venv/bin/activate
           export OMNIGIBSON_DATA_PATH=/workspace/dataset/behavior-datasets
           export ISAAC_PATH=/workspace/dataset/isaac-sim
-          # Minimal openpi_pytorch fixture (see ci_behavior README).
-          export OPENPI_PYTORCH_MODEL_PATH=/workspace/ci_behavior/model
-          export OPENPI_PYTORCH_ASSETS_DIR=/workspace/ci_behavior/model
-          export OPENPI_PYTORCH_TOKENIZER=/workspace/ci_behavior/paligemma_tokenizer/paligemma_tokenizer.model
           bash tests/e2e_tests/embodied/run.sh behavior_openpi_pytorch_eval
 
       - name: Clean up

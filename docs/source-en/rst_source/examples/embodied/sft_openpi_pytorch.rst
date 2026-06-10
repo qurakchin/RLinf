@@ -92,8 +92,8 @@ The BEHAVIOR streaming loader reads all of its parameters directly from the
 .. code:: yaml
 
    data:
-     train_data_paths: ${oc.env:BEHAVIOR_DATASET_ROOT,/workspace/ci_behavior/dataset}
-     behavior_dataset_root: ${data.train_data_paths}
+     train_data_paths: /path/to/2025-challenge-demos
+     behavior_dataset_root: /path/to/2025-challenge-demos
      repo_id: "behavior-1k/2025-challenge-demos"
      modalities: ["rgb"]
      num_workers: 8
@@ -134,11 +134,11 @@ The normalization statistics and PaliGemma tokenizer live under
 
    actor:
      model:
-       model_path: ${oc.env:OPENPI_PYTORCH_BASE,/workspace/ci_behavior/base_model}
+       model_path: /path/to/pi05_base_pytorch_new
        openpi:
-         assets_dir: ${oc.env:OPENPI_PYTORCH_SFT_ASSETS,/workspace/ci_behavior/assets}
+         assets_dir: /path/to/assets
          asset_id: "behavior-1k/2025-challenge-demos"
-         paligemma_tokenizer: ${oc.env:OPENPI_PYTORCH_TOKENIZER,/workspace/ci_behavior/paligemma_tokenizer/paligemma_tokenizer.model}
+         paligemma_tokenizer: /path/to/paligemma_tokenizer/paligemma_tokenizer.model
 
 - ``assets_dir``: directory holding the quantile-normalization stats.
 - ``asset_id``: sub-path under ``assets_dir`` for this task's stats.
@@ -147,28 +147,20 @@ The normalization statistics and PaliGemma tokenizer live under
 
 The norm stats are resolved at ``{assets_dir}/{asset_id}/norm_stats.json``.
 
-Relocatable paths via environment variables
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Filesystem paths
+~~~~~~~~~~~~~~~~~
 
-The config keeps all filesystem paths relocatable through environment
-variables, each with a ``/workspace/ci_behavior`` default:
+All filesystem paths are set directly in the config as ``/path/to/...``
+placeholders. Edit them in ``examples/sft/config/behavior_pi05_vla.yaml`` to
+point at your own staged assets:
 
-- ``BEHAVIOR_DATASET_ROOT``: root of the BEHAVIOR streaming dataset.
-- ``OPENPI_PYTORCH_BASE``: the new-format **fp32 base checkpoint** the trainer
-  loads (``actor.model.model_path``).
-- ``OPENPI_PYTORCH_SFT_ASSETS``: the norm-stats directory
-  (``actor.model.openpi.assets_dir``).
-- ``OPENPI_PYTORCH_TOKENIZER``: the PaliGemma SentencePiece tokenizer model
-  (``actor.model.openpi.paligemma_tokenizer``).
-
-Set these to point at your own staged assets, for example:
-
-.. code:: bash
-
-   export BEHAVIOR_DATASET_ROOT=/path/to/behavior-1k/dataset
-   export OPENPI_PYTORCH_BASE=/path/to/pi05_base_pytorch_new
-   export OPENPI_PYTORCH_SFT_ASSETS=/path/to/assets
-   export OPENPI_PYTORCH_TOKENIZER=/path/to/paligemma_tokenizer/paligemma_tokenizer.model
+- ``data.train_data_paths`` / ``data.behavior_dataset_root``: root of the
+  BEHAVIOR streaming dataset.
+- ``actor.model.model_path``: the new-format **fp32 base checkpoint** the
+  trainer loads.
+- ``actor.model.openpi.assets_dir``: the norm-stats directory.
+- ``actor.model.openpi.paligemma_tokenizer``: the PaliGemma SentencePiece
+  tokenizer model.
 
 
 Launch scripts

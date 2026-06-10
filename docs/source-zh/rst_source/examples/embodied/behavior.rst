@@ -470,23 +470,19 @@ BEHAVIOR 评估同样支持新的 **自包含 PyTorch OpenPI** 代码（模型
 该配置以纯评估模式运行（``runner.only_eval: True``），并消费 **新格式** 的
 PyTorch checkpoint，即由 OpenPI checkpoint 转换器
 （``ckpt_convertor.openpi`` 的 ``old2new`` / ``sft2new``）产出的 checkpoint。
-所有文件系统路径都可通过环境变量重定位：
+将模型路径以 ``/path/to/...`` 占位符的形式直接写在配置中：
 
-- ``OPENPI_PYTORCH_MODEL_PATH``：新格式评估 checkpoint，由
-  ``rollout.model.model_path`` 与 ``actor.model.model_path`` 共享。
-- ``OPENPI_PYTORCH_ASSETS_DIR``：存放 BEHAVIOR 归一化统计的目录
-  （``actor.model.openpi.assets_dir``）。归一化统计在
+- ``rollout.model.model_path`` / ``actor.model.model_path``：新格式评估
+  checkpoint（后者引用前者）。
+- ``actor.model.openpi.assets_dir``：存放 BEHAVIOR 归一化统计的目录。归一化统计在
   ``{assets_dir}/{asset_id}/norm_stats.json`` 处解析。
-- ``OPENPI_PYTORCH_TOKENIZER``：PaliGemma SentencePiece tokenizer 模型
-  （``actor.model.openpi.paligemma_tokenizer``）。
+- ``actor.model.openpi.paligemma_tokenizer``：PaliGemma SentencePiece tokenizer
+  模型。
 
 .. code:: bash
 
    export ISAAC_PATH=/path/to/isaac-sim
    export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
-   export OPENPI_PYTORCH_MODEL_PATH=/path/to/pi05_pytorch_new
-   export OPENPI_PYTORCH_ASSETS_DIR=/path/to/pi05_pytorch_new
-   export OPENPI_PYTORCH_TOKENIZER=/path/to/paligemma_tokenizer/paligemma_tokenizer.model
    bash examples/embodiment/eval_embodiment.sh behavior_ppo_openpi_pi05_pytorch_eval
 
 .. note::

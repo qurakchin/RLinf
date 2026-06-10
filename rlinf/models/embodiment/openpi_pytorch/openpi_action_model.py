@@ -32,9 +32,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from rlinf.data.datasets.openpi_pytorch.behavior.processing import (
-    BehaviorEvalProcessor,
-)
+from rlinf.data.datasets.openpi_pytorch.eval_processor import EvalProcessor
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.model import Observation
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.pi0 import Pi0
@@ -49,7 +47,7 @@ class OpenPiPytorchActionModel(nn.Module):
     def __init__(
         self,
         pi0_model: Pi0,
-        processor: BehaviorEvalProcessor | None,
+        processor: EvalProcessor | None,
         *,
         num_steps: int,
         action_chunk: int,
@@ -87,7 +85,7 @@ class OpenPiPytorchActionModel(nn.Module):
         """
         if self.processor is None:
             raise RuntimeError(
-                "predict_action_batch requires a BehaviorEvalProcessor; "
+                "predict_action_batch requires an eval processor; "
                 "the current model was built for SFT training only."
             )
         observation = self.processor.build_observation(env_obs, self.device)

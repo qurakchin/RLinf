@@ -89,7 +89,7 @@ env:
       video_base_dir: ${runner.logger.log_path}/video/train
       fps: 15
   eval:
-    total_num_envs: 16
+    total_num_envs: 8
     max_episode_steps: 4096
     max_steps_per_rollout_epoch: 4096
     video_cfg:
@@ -105,9 +105,8 @@ rollout:
 
   model:
     # NEW-format checkpoint produced by ckpt_convertor.openpi (old2new / sft2new).
-    # Relocatable: set OPENPI_PYTORCH_MODEL_PATH, or stage the checkpoint at the
-    # default /workspace location (see the ci_behavior fixture README).
-    model_path: ${oc.env:OPENPI_PYTORCH_MODEL_PATH,/workspace/ci_behavior/model}
+    # Set this to your local new-format eval checkpoint directory.
+    model_path: /path/to/pi05_sft_pytorch_new
     precision: ${actor.model.precision}
 
 actor:
@@ -130,11 +129,11 @@ actor:
       # Canonical BEHAVIOR task-0000 norm stats — the SAME assets the SFT path
       # resolves, so eval and SFT share one norm-stats distribution. Norm stats
       # live at {assets_dir}/{asset_id}/norm_stats.json.
-      assets_dir: ${oc.env:OPENPI_PYTORCH_ASSETS_DIR,/workspace/ci_behavior/model}
+      assets_dir: /path/to/pi05_sft_pytorch_new
       asset_id: physical-intelligence/behavior
       # PaliGemma SentencePiece tokenizer model (resolved from YAML, not hardcoded
       # in code).
-      paligemma_tokenizer: ${oc.env:OPENPI_PYTORCH_TOKENIZER,/workspace/ci_behavior/paligemma_tokenizer/paligemma_tokenizer.model}
+      paligemma_tokenizer: /path/to/paligemma_tokenizer/paligemma_tokenizer.model
 
   optim:
     lr: 1.0e-4
