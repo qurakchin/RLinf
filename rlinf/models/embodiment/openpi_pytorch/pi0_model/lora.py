@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ import re
 
 import torch
 import torch.nn as nn
+
+from .utils import gelu_glu
 
 
 @dataclasses.dataclass
@@ -179,19 +181,16 @@ class FeedForward(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with gating and optional LoRA."""
-        dtype = x.dtype
-
         # Gate
         ff_gate = self._dot(x, self.w_gating[0], 0)
-        gate_value = torch.nn.functional.gelu(ff_gate)
 
         # FF1
         ff1 = self._dot(x, self.w_gating[1], 1)
-        activations = gate_value * ff1
+        activations = gelu_glu(ff_gate, ff1)
 
         # Output
         outputs = self._dot(activations, self.w_linear, -1)
-        return outputs.to(dtype)
+        return outputs
 
     def _dot(self, x: torch.Tensor, w: torch.Tensor, index: int) -> torch.Tensor:
         """Dot product with optional LoRA."""

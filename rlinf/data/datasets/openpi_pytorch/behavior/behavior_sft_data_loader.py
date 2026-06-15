@@ -41,6 +41,7 @@ import torch
 from rlinf.data.datasets.openpi_pytorch.behavior.behavior_sft_dataset import (
     BehaviorSftDataset,
 )
+from rlinf.data.datasets.openpi_pytorch.behavior.processing import _pad_to_dim
 from rlinf.data.lerobot_paths import (
     resolve_lerobot_repo_id,
 )
@@ -79,16 +80,6 @@ _REPACK_KEYS = {
     "observation/right_wrist_image": "observation.images.rgb.right_wrist",
     "observation/state": "observation.state",
 }
-
-
-def _pad_to_dim(x: np.ndarray, target_dim: int, value: float = 0.0) -> np.ndarray:
-    """Zero-pad the last axis of ``x`` up to ``target_dim`` (no-op if already >=)."""
-    current_dim = x.shape[-1]
-    if current_dim >= target_dim:
-        return x
-    pad_width = [(0, 0)] * x.ndim
-    pad_width[-1] = (0, target_dim - current_dim)
-    return np.pad(x, pad_width, constant_values=value)
 
 
 def _repack(frame: dict) -> dict:

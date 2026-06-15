@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,13 @@
 # limitations under the License.
 
 import torch
+import torch.nn.functional as F
+
+
+@torch.compile
+def gelu_glu(gate_input: torch.Tensor, value_input: torch.Tensor) -> torch.Tensor:
+    """Fused GELU-GLU activation: ``gelu(gate_input) * value_input``."""
+    return F.gelu(gate_input) * value_input
 
 
 def _str_to_dtype(dtype_str: str) -> torch.dtype:

@@ -52,3 +52,4 @@ VLA / WAM 模型监督微调
    embodied/sft_openpi
    embodied/sft_dreamzero
    embodied/sft_vlm
+   embodied/sft_openpi_pytorch

@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -115,11 +115,16 @@ class Encoder(nn.Module):
         )
         self.norm = nn.LayerNorm(dim, eps=1e-6)
         self.gradient_checkpointing = use_gradient_checkpointing
+        # Whether the activation checkpoint uses reentrant autograd. Configurable
+        # via Pi0.gradient_checkpointing_enable(gradient_checkpointing_kwargs=...).
+        self.gradient_checkpointing_use_reentrant = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
             if self.gradient_checkpointing and self.training:
-                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
+                x = torch.utils.checkpoint.checkpoint(
+                    layer, x, use_reentrant=self.gradient_checkpointing_use_reentrant
+                )
             else:
                 x = layer(x)
         x = self.norm(x.to(self.norm.weight.dtype))

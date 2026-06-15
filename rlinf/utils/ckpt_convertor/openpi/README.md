@@ -42,10 +42,10 @@ JAX Pi0/Pi05 orbax checkpoint -> new bare `Pi0` layout.
 
 ```bash
 python -m rlinf.utils.ckpt_convertor.openpi.convert --mode jax2new \
-    --input-model       /mnt/public/xzxuan/models/pi05_base \
+    --input-model       /path/to/pi05_base \
     --input-norm-stats  /path/to/norm_stats.json \
-    --output-model      /mnt/public/xzxuan/models/pi05_base_pytorch_new \
-    --output-norm-stats /mnt/public/xzxuan/models/pi05_base_pytorch_new/physical-intelligence/behavior/norm_stats.json
+    --output-model      /path/to/pi05_base_pytorch_new \
+    --output-norm-stats /path/to/pi05_base_pytorch_new/physical-intelligence/behavior/norm_stats.json
 ```
 
 Optional shape flags: `--no-pi05`, `--action-dim`, `--action-horizon`,
@@ -69,7 +69,7 @@ Old `paligemma_with_expert.*` checkpoint -> new bare `Pi0` layout.
 
 ```bash
 python -m rlinf.utils.ckpt_convertor.openpi.convert --mode old2new \
-    --input-model       /mnt/public/xzxuan/models/pi05_base_pytorch \
+    --input-model       /path/to/pi05_base_pytorch \
     --input-norm-stats  /path/to/norm_stats.json \
     --output-model      /path/to/pi05_base_pytorch_new \
     --output-norm-stats /path/to/pi05_base_pytorch_new/physical-intelligence/behavior/norm_stats.json
@@ -134,5 +134,5 @@ python -m rlinf.utils.ckpt_convertor.openpi.convert --mode new2old \
     --input-norm-stats  /path/to/pi05_sft_pytorch_new/physical-intelligence/behavior/norm_stats.json \
     --output-model      /path/to/pi05_sft_pytorch_new_2_old \
     --output-norm-stats /path/to/pi05_sft_pytorch_new_2_old/physical-intelligence/behavior/norm_stats.json \
-    --reference-model   /mnt/public/xzxuan/models/pi05_base_pytorch
+    --reference-model   /path/to/pi05_base_pytorch
 ```

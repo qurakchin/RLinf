@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Vendored, self-contained PyTorch OpenPI 0.5 model core.
 #

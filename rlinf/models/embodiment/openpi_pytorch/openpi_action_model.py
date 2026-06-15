@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -220,8 +220,12 @@ class OpenPiPytorchActionModel(nn.Module):
         return torch.as_tensor(padded, device=self.device, dtype=torch.float32)
 
     # --- Gradient checkpointing pass-through (used by the FSDP training path) ---
-    def gradient_checkpointing_enable(self, **kwargs) -> None:
-        self.model.gradient_checkpointing_enable()
+    def gradient_checkpointing_enable(
+        self, gradient_checkpointing_kwargs: dict | None = None, **kwargs
+    ) -> None:
+        self.model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=gradient_checkpointing_kwargs
+        )
 
     def gradient_checkpointing_disable(self, **kwargs) -> None:
         self.model.gradient_checkpointing_disable()

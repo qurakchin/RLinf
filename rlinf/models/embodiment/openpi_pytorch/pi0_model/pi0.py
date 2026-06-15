@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -244,7 +244,6 @@ class Pi0(model.BaseModel):
             adarms_cond: (B, emb_dim) or None
         """
         input_mask = []
-        ar_mask = []
         tokens = []
 
         B = noisy_actions.shape[0]
@@ -303,13 +302,13 @@ class Pi0(model.BaseModel):
         input_mask = torch.cat(input_mask, dim=1)
 
         # Build ar_mask with correct length matching input_mask.shape[1]
+        ar_mask = torch.zeros(
+            input_mask.shape[1], dtype=torch.bool, device=tokens.device
+        )
         if not self.pi05:
-            # state token [True] + action tokens [True, False, ..., False]
-            ar_mask += [True] + [True] + [False] * (input_mask.shape[1] - 2)
+            ar_mask[:2] = True
         else:
-            # action tokens only [True, False, ..., False]
-            ar_mask += [True] + [False] * (input_mask.shape[1] - 1)
-        ar_mask = torch.tensor(ar_mask, device=tokens.device)
+            ar_mask[0] = True
 
         return tokens, input_mask, ar_mask, adarms_cond
 
@@ -480,10 +479,22 @@ class Pi0(model.BaseModel):
             observation, actions, train=train, rng=rng, noise=noise, time=time
         )
 
-    def gradient_checkpointing_enable(self):
-        """Enable gradient checkpointing for memory efficiency."""
+    def gradient_checkpointing_enable(
+        self, gradient_checkpointing_kwargs: dict | None = None
+    ):
+        """Enable gradient checkpointing for memory efficiency.
+
+        Args:
+            gradient_checkpointing_kwargs: Optional kwargs forwarded to the activation
+                checkpoint. Currently honors ``use_reentrant`` (default ``False``), so
+                the FSDP ``gradient_checkpointing_use_reentrant`` setting is respected.
+        """
+        kwargs = gradient_checkpointing_kwargs or {}
+        use_reentrant = kwargs.get("use_reentrant", False)
         self.llm.gradient_checkpointing = True
+        self.llm.gradient_checkpointing_use_reentrant = use_reentrant
         self.img.encoder.gradient_checkpointing = True
+        self.img.encoder.gradient_checkpointing_use_reentrant = use_reentrant
 
     def gradient_checkpointing_disable(self):
         """Disable gradient checkpointing (used by the eval / no-recompute path)."""

@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ import torch.utils.checkpoint
 
 from . import lora
 from .lora import FeedForward as LoRAFeedForward
-from .utils import _str_to_dtype
+from .utils import _str_to_dtype, gelu_glu
 
 PALIGEMMA_VOCAB_SIZE = 257_152
 
@@ -202,7 +202,7 @@ class Attention(nn.Module):
 
     def __init__(self, configs: Sequence[Config]):
         super().__init__()
-        self.configs = configs
+        self.expert_configs = configs
         self.num_heads = configs[0].num_heads
         self.num_kv_heads = configs[0].num_kv_heads
         self.head_dim = configs[0].head_dim
@@ -253,7 +253,7 @@ class Attention(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        for i, config in enumerate(self.configs):
+        for i, config in enumerate(self.expert_configs):
             # Q projection
             nn.init.normal_(self.q_proj[i].weight, std=1.0 / math.sqrt(config.width))
             if self.k_proj[i] is not None:
@@ -404,10 +404,8 @@ class FeedForward(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         dtype = x.dtype
         ff_gate = torch.matmul(x, self.w_gating[0].to(dtype))
-        gate_value = F.gelu(ff_gate)
-
         ff1 = torch.matmul(x, self.w_gating[1].to(dtype))
-        activations = gate_value * ff1
+        activations = gelu_glu(ff_gate, ff1)
         outputs = torch.matmul(activations, self.w_linear.to(dtype))
         return outputs
 
@@ -548,6 +546,9 @@ class Module(nn.Module):
         )
 
         self.gradient_checkpointing = use_gradient_checkpointing
+        # Whether the activation checkpoint uses reentrant autograd. Configurable
+        # via Pi0.gradient_checkpointing_enable(gradient_checkpointing_kwargs=...).
+        self.gradient_checkpointing_use_reentrant = False
 
     def embed(self, tokens: torch.Tensor) -> torch.Tensor:
         """Embed token indices."""
@@ -609,7 +610,7 @@ class Module(nn.Module):
                     positions,
                     mask,
                     adarms_cond,
-                    use_reentrant=False,
+                    use_reentrant=self.gradient_checkpointing_use_reentrant,
                 )
             else:
                 xs, new_kv = layer(xs, layer_kv, positions, mask, adarms_cond)
@@ -630,6 +631,7 @@ class Module(nn.Module):
         return outputs, kv_cache
 
 
+@torch.compile
 def _apply_rope(
     x: torch.Tensor, *, positions: torch.Tensor, max_wavelength: float = 10000.0
 ) -> torch.Tensor:
@@ -648,9 +650,15 @@ def _apply_rope(
     return res.to(x.dtype)
 
 
+@torch.compile
+def _fused_gated_residual(x, y, gate):
+    """Fuse the gated residual ``x + y * gate`` into a single kernel."""
+    return x + y * gate
+
+
 def _gated_residual(x, y, gate):
     if x is None:
         return None
     if gate is None:
         return x + y
-    return x + y * gate
+    return _fused_gated_residual(x, y, gate)

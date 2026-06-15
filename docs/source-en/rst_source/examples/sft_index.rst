@@ -52,3 +52,4 @@ After running SFT here, continue to :doc:`vla_wam_index` (model-centric RL) or :
    embodied/sft_openpi
    embodied/sft_dreamzero
    embodied/sft_vlm
+   embodied/sft_openpi_pytorch

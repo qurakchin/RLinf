@@ -104,6 +104,10 @@ actor:
     sharding_strategy: "full_shard"
     use_orig_params: True
     gradient_checkpointing: True
+    # This model is validated with non-reentrant activation checkpointing (False).
+    # The value is forwarded to Pi0.gradient_checkpointing_enable and applied to the
+    # dual-expert Gemma + SigLIP checkpoints.
+    gradient_checkpointing_use_reentrant: False
     mixed_precision:
       # Match the reference recipe (init_model fsdp1 branch:
       # MixedPrecision(param_dtype=bf16, reduce_dtype=fp32)): bf16 compute, but the

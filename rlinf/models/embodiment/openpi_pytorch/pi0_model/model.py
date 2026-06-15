@@ -1,4 +1,4 @@
-# Copyright (c) 2025, RLinf contributors.
+# Copyright 2026 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -205,9 +205,9 @@ def preprocess_observation(
         image = observation.images[key]
 
         # Standardize to (B, H, W, C) format if input is (B, C, H, W)
-        if image.shape[-1] == 3 and image.shape[1] != 3:
+        if image.shape[-1] <= 4 and image.shape[1] > 4:
             pass  # already (B, H, W, C)
-        elif image.shape[1] == 3:
+        elif image.shape[1] <= 4:
             image = image.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
 
         if image.shape[1:3] != image_resolution:
