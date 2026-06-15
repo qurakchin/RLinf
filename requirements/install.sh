@@ -74,9 +74,8 @@ GITHUB_PREFIX=""
 NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
 SUPPORTED_TARGETS=("embodied" "agentic" "docs")
-SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "gr00t_n1d6" "dexbotic" "starvla" "lingbotvla" "dreamzero" "qwen3_vl" "abot_m0")
-SUPPORTED_ENVS=("behavior" "maniskill_libero" "libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "franka-dexhand" "frankasim" "robotwin" "habitat" "opensora" "wan" "genesis" "xsquare_turtle2" "liberopro" "liberoplus" "roboverse" "embodichain" "d4rl" "dosw1" "gim_arm" "dummy")
-
+SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "gr00t_n1d6" "gr00t_n1d7" "dexbotic" "starvla" "lingbotvla" "dreamzero" "qwen3_vl" "abot_m0")
+SUPPORTED_ENVS=("behavior" "maniskill_libero" "libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "franka-dexhand" "franka-franky" "frankasim" "robotwin" "habitat" "opensora" "wan" "genesis" "xsquare_turtle2" "liberopro" "liberoplus" "roboverse" "embodichain" "d4rl" "dosw1" "gim_arm" "dummy" "polaris")
 
 #=======================Utility Functions=======================
 
@@ -755,7 +754,8 @@ unset_mirror() {
         unset UV_PYTHON_INSTALL_MIRROR
         unset UV_DEFAULT_INDEX
         unset HF_ENDPOINT
-        git config --global --unset url."${GITHUB_PREFIX}github.com/".insteadOf
+        git config --global --unset url."${GITHUB_PREFIX}github.com/".insteadOf "https://github.com/" || true
+        unset GITHUB_PREFIX
     fi
 }
 
@@ -1153,6 +1153,23 @@ install_openpi_model() {
             install_flash_attn
             install_roboverse_env
             ;;
+        franka-franky)
+            create_and_sync_venv
+            install_common_embodied_deps
+            uv sync --extra franka --inexact --active $NO_INSTALL_RLINF_CMD
+            if [ "$NO_ROOT" -eq 0 ]; then
+                bash $SCRIPT_DIR/embodied/franky_install.sh
+            fi
+            install_franka_franky_env
+            uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            install_flash_attn
+            ;;
+        polaris)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_polaris_env
+            uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for OpenPI model." >&2
             exit 1
@@ -1261,6 +1278,29 @@ install_gr00t_n1d6_model() {
     uv pip uninstall pynvml || true
 }
 
+install_gr00t_n1d7_model() {
+    create_and_sync_venv
+    install_common_embodied_deps
+
+    local gr00t_path
+    gr00t_path=$(clone_or_reuse_repo GR00T_PATH "$VENV_DIR/gr00t" "https://github.com/NVIDIA/Isaac-GR00T.git" -b n1.7-release)
+    uv pip install -e "$gr00t_path" --no-deps
+    uv pip install -r "$SCRIPT_DIR/embodied/models/gr00t_n1d7.txt"
+
+    case "$ENV_NAME" in
+        maniskill_libero)
+            install_maniskill_libero_env
+            install_flash_attn
+            ;;
+        *)
+            echo "Environment '$ENV_NAME' is not yet validated for Gr00t N1.7." >&2
+            exit 1
+            ;;
+    esac
+
+    uv pip uninstall pynvml || true
+}
+
 install_dexbotic_model() {
     case "$ENV_NAME" in
         maniskill_libero|libero)
@@ -1349,7 +1389,7 @@ install_abot_m0_model() {
 
     uv pip uninstall pynvml || true
 }
-    
+
 install_dreamzero_model() {
     case "$ENV_NAME" in
         maniskill_libero|libero)
@@ -1421,6 +1461,13 @@ install_env_only() {
             install_franka_realworld_env
             install_franka_dexhand_deps
             ;;
+        franka-franky)
+            uv sync --extra franka --active $NO_INSTALL_RLINF_CMD
+            if [ "$NO_ROOT" -eq 0 ]; then
+                bash $SCRIPT_DIR/embodied/franky_install.sh
+            fi
+            install_franka_franky_env
+            ;;
         xsquare_turtle2)
             uv sync --extra xsquare_turtle2 --active $NO_INSTALL_RLINF_CMD
             install_xsquare_turtle2_env
@@ -1442,6 +1489,9 @@ install_env_only() {
             ;;
         dosw1)
             install_dosw1_env
+            ;;
+        polaris)
+            install_polaris_env
             ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for env-only installation." >&2
@@ -1595,6 +1645,24 @@ install_calvin_env() {
     uv pip install --upgrade hydra-core==1.3.2
 }
 
+install_polaris_env() {
+    local polaris_dir
+    polaris_dir=$(clone_or_reuse_repo POLARIS_PATH "$VENV_DIR/polaris" https://github.com/RLinf/polaris.git --recurse-submodules)
+    export OMNI_KIT_ACCEPT_EULA=YES
+    if ! grep -q '^export OMNI_KIT_ACCEPT_EULA=' "$VENV_DIR/bin/activate" 2>/dev/null; then
+        echo "export OMNI_KIT_ACCEPT_EULA=YES" >> "$VENV_DIR/bin/activate"
+    fi
+
+    uv pip install "setuptools<82"
+    uv pip install "flatdict==4.0.1" --no-build-isolation
+    uv pip install sympy==1.13.3
+    uv pip install -e "$polaris_dir"
+    
+    python - <<'EOF'
+import isaacsim
+EOF
+}
+
 install_isaaclab_env() {
     local isaaclab_dir
     isaaclab_dir=$(clone_or_reuse_repo ISAAC_LAB_PATH "$VENV_DIR/isaaclab" https://github.com/RLinf/IsaacLab)
@@ -1670,6 +1738,23 @@ install_franka_env() {
     echo "export CMAKE_PREFIX_PATH=$ROS_CATKIN_PATH/libfranka/build:\$CMAKE_PREFIX_PATH" >> "$VENV_DIR/bin/activate"
     echo "source /opt/ros/noetic/setup.bash" >> "$VENV_DIR/bin/activate"
     echo "source $ROS_CATKIN_PATH/devel/setup.bash" >> "$VENV_DIR/bin/activate"
+}
+
+install_franka_franky_env() {
+    # Prebuilt franky-control wheel (libfranka bundled), published per
+    # libfranka version by the Brunch-Life/franky fork.  LIBFRANKA_VERSION
+    # must match your Franka firmware (compatibility matrix:
+    # https://frankarobotics.github.io/docs/compatibility.html); defaults
+    # to 0.19.0.  Override FRANKY_WHEEL (URL / local path / PyPI spec) when
+    # the host cannot reach github.com.
+    local LIBFRANKA_VERSION="${LIBFRANKA_VERSION:-0.19.0}"
+    local PYTAG
+    PYTAG=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
+    local FRANKY_WHEEL="${FRANKY_WHEEL:-https://github.com/Brunch-Life/franky/releases/download/wheels-libfranka-${LIBFRANKA_VERSION}/franky_control-1.1.3-${PYTAG}-${PYTAG}-manylinux_2_28_x86_64.whl}"
+    echo "Installing franky-control (libfranka $LIBFRANKA_VERSION): $FRANKY_WHEEL"
+    # --no-deps keeps the franka extra's pins (e.g. numpy<2); letting pip
+    # re-resolve them breaks Ray pickling across nodes.
+    uv pip install --reinstall-package franky-control --no-deps "$FRANKY_WHEEL"
 }
 
 install_franka_dexhand_deps() {
@@ -1791,7 +1876,7 @@ install_dosw1_env() {
 
 install_habitat_env() {
     local habitat_sim_dir
-    habitat_sim_dir=$(clone_or_reuse_repo HABITAT_SIM_PATH "$VENV_DIR/habitat" https://github.com/facebookresearch/habitat-sim.git -b v0.3,3 --recurse-submodules)
+    habitat_sim_dir=$(clone_or_reuse_repo HABITAT_SIM_PATH "$VENV_DIR/habitat" https://github.com/facebookresearch/habitat-sim.git -b v0.3.3 --recurse-submodules)
     if [ -d "$habitat_sim_dir/build" ]; then
         rm -rf $habitat_sim_dir/build
     fi
@@ -1826,7 +1911,7 @@ install_opensora_world_model() {
     opensora_dir=$(clone_or_reuse_repo OPENSORA_PATH "$VENV_DIR/opensora" ${GITHUB_PREFIX}https://github.com/RLinf/opensora.git)
     
     uv pip install -e "$opensora_dir"
-
+    
     # xformers 0.0.29.post2 only has wheels for torch<=2.5, but we pin
     # torch==2.6.0. UV_TORCH_BACKEND=auto rejects mismatched torch-version
     # labels, so unset UV_TORCH_BACKEND entirely for this install so uv
@@ -1940,6 +2025,9 @@ main() {
                     ;;
                 gr00t_n1d6)
                     install_gr00t_n1d6_model
+                    ;;
+                gr00t_n1d7)
+                    install_gr00t_n1d7_model
                     ;;
                 dexbotic)
                     install_dexbotic_model
