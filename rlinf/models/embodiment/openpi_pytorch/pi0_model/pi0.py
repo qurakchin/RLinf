@@ -101,7 +101,7 @@ class Pi0(model.BaseModel):
             configs=[paligemma_config, action_expert_config],
             embed_dtype=config.dtype,
             adarms=adarms,
-            use_gradient_checkpointing=True,
+            use_gradient_checkpointing=False,
         )
 
         # SigLIP vision encoder
@@ -109,7 +109,7 @@ class Pi0(model.BaseModel):
             variant="So400m/14",
             pool_type="none",
             num_classes=paligemma_config.width,
-            remat=True,
+            use_gradient_checkpointing=False,
             dtype_mm=config.dtype,
         )
 
