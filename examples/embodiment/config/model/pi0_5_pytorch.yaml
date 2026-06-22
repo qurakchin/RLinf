@@ -27,8 +27,9 @@ add_value_head: False
 
 # openpi_pytorch model-shape parameters. get_model builds Pi0Config from
 # num_action_chunks (action_horizon) + the openpi.* shape fields; no config.json
-# is read. assets_dir/asset_id/paligemma_tokenizer are placeholders resolved in
-# the eval experiment config.
+# is read. assets_dir/asset_id are placeholders resolved in the eval experiment
+# config. paligemma_tokenizer is optional: if absent, the factory falls back to
+# the openpi default cache (``~/.cache/openpi/big_vision/paligemma_tokenizer.model``).
 openpi:
   num_images_in_input: 3
   action_chunk: ${actor.model.num_action_chunks}
@@ -42,8 +43,6 @@ openpi:
   paligemma_variant: "gemma_2b"
   action_expert_variant: "gemma_300m"
   max_token_len: 200
-  # Placeholders — set the real norm-stats + tokenizer locations in the eval
-  # experiment config.
+  # Placeholders — set the real norm-stats location in the eval experiment config.
   assets_dir: "/path/to/assets"
   asset_id: "behavior-1k/2025-challenge-demos"
-  paligemma_tokenizer: "/path/to/paligemma_tokenizer.model"

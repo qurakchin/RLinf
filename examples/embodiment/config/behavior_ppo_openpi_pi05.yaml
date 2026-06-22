@@ -3,7 +3,7 @@ defaults:
   - env/behavior_r1pro@env.eval
   - model/pi0_5@actor.model
   - training_backend/fsdp@actor.fsdp_config
-  - weight_syncer/bucket_syncer@weight_syncer # use bucket_syncer to avoid OOM in training on 4090
+  - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
 
 hydra:
@@ -45,12 +45,15 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl
   group_size: 1
+  reward_coef: 10.0
+
   rollout_epoch: 2
   eval_rollout_epoch: 2
 
   reward_type: chunk_level
-  logprob_type: token_level
+  logprob_type: chunk_level
   entropy_type: token_level
+  update_epoch: 2
 
   adv_type: gae
   loss_type: actor_critic
@@ -66,6 +69,10 @@ algorithm:
   gamma: 0.99
   gae_lambda: 0.95
 
+  filter_rewards: False
+  rewards_lower_bound: 1
+  rewards_upper_bound: 9
+
   sampling_params:
     do_sample: True
     temperature_train: 1.0
@@ -79,8 +86,6 @@ algorithm:
     max_length: 1024
     min_length: 1
 
-  reward_coef: 5.0
-
 env:
   group_name: "EnvGroup"
 
@@ -93,9 +98,6 @@ env:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/train
       fps: 15
-    num_env_subprocess: 2
-    enable_offload: True
-    enable_init_offload: False
   eval:
     total_num_envs: 8
     max_episode_steps: 4096
@@ -104,11 +106,9 @@ env:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
       fps: 15
-    num_env_subprocess: 2
 
 rollout:
   group_name: "RolloutGroup"
-  backend: "huggingface"
   enable_offload: True
   pipeline_stage_num: 1
 
@@ -122,7 +122,6 @@ actor:
   micro_batch_size: 4
   global_batch_size: 64
   seed: 1234
-  num_steps: 10
   enable_offload: True
 
   model:
@@ -132,26 +131,33 @@ actor:
     proprio_dim: 32
     action_dim: 23
     num_action_chunks: 32
+    num_steps: 8
     openpi:
       config_name: "pi05_behavior"
-      detach_critic_input: True
-      joint_logprob: False
-      noise_level: 0.5
+      num_images_in_input: ${actor.model.num_images_in_input}
+      num_steps: ${actor.model.num_steps}
       action_env_dim: ${actor.model.action_dim}
+      detach_critic_input: True
+      noise_level: 0.4
+      joint_logprob: False
+      ignore_last: True
+      value_after_vlm: True
+      value_vlm_mode: "mean_token"
       noise_method: "flow_sde"
 
   optim:
-    lr: 1.0e-4
-    value_lr: 3.0e-3
+    lr: 5.0e-6
+    value_lr: 1.0e-4
     adam_beta1: 0.9
     adam_beta2: 0.999
     adam_eps: 1.0e-08
-    clip_grad: 10.0
+    clip_grad: 1.0
     weight_decay: 0.01
     critic_warmup_steps: 0
 
   fsdp_config:
     strategy: "fsdp"
+    sharding_strategy: "shard_grad_op"
     gradient_checkpointing: False
     mixed_precision:
       param_dtype: ${actor.model.precision}

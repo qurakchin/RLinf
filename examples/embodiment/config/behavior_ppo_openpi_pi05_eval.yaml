@@ -47,7 +47,7 @@ algorithm:
   eval_rollout_epoch: 2
 
   reward_type: chunk_level
-  logprob_type: token_level
+  logprob_type: chunk_level
   entropy_type: token_level
 
   adv_type: gae
@@ -96,7 +96,6 @@ env:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
       fps: 15
-    num_env_subprocess: 2
 
 rollout:
   group_name: "RolloutGroup"
@@ -114,31 +113,34 @@ actor:
   micro_batch_size: 4
   global_batch_size: 64
   seed: 1234
-  num_steps: 10
   enable_offload: True
 
   model:
     model_path: ${rollout.model.model_path}
-    add_value_head: True
+    add_value_head: False
     num_images_in_input: 3
     proprio_dim: 32
     action_dim: 23
     num_action_chunks: 32
+    num_steps: 8
     openpi:
       config_name: "pi05_behavior"
-      detach_critic_input: True
-      joint_logprob: False
-      noise_level: 0.0
+      num_images_in_input: ${actor.model.num_images_in_input}
+      num_steps: ${actor.model.num_steps}
       action_env_dim: ${actor.model.action_dim}
+      detach_critic_input: True
+      noise_level: 0.0
+      joint_logprob: False
+      ignore_last: True
       noise_method: "flow_sde"
 
   optim:
-    lr: 1.0e-4
-    value_lr: 3.0e-3
+    lr: 5.0e-6
+    value_lr: 1.0e-4
     adam_beta1: 0.9
     adam_beta2: 0.999
     adam_eps: 1.0e-08
-    clip_grad: 10.0
+    clip_grad: 1.0
     weight_decay: 0.01
     critic_warmup_steps: 0
 
