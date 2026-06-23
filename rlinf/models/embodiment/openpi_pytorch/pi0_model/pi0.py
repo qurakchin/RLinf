@@ -426,9 +426,7 @@ class Pi0(model.BaseModel):
         )
         suffix_len = suffix_tokens.shape[1]
         suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
-        prefix_to_suffix_mask = einops.repeat(
-            prefix_mask, "b p -> b s p", s=suffix_len
-        )
+        prefix_to_suffix_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_len)
         full_attn_mask = torch.cat([prefix_to_suffix_mask, suffix_attn_mask], dim=-1)
         suffix_positions = (
             torch.sum(prefix_mask, dim=-1)[:, None]

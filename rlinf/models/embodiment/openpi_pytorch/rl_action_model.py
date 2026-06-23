@@ -226,9 +226,7 @@ class OpenPiPytorchRLActionModel(OpenPiPytorchEvalActionModel):
         for idx in range(num_steps):
             method = rl_cfg.noise_method if idx == chosen else "flow_ode"
             t_val = float(timesteps[idx].item())
-            t_tensor = torch.full(
-                (B,), t_val, device=device, dtype=torch.float32
-            )
+            t_tensor = torch.full((B,), t_val, device=device, dtype=torch.float32)
             suffix_act = self.model.run_suffix(
                 observation, x_t, t_tensor, kv_cache, prefix_mask
             )
@@ -334,14 +332,18 @@ class OpenPiPytorchRLActionModel(OpenPiPytorchEvalActionModel):
         # so gradients must flow through paligemma here.
         if rl_cfg.train_expert_only:
             with torch.no_grad():
-                prefix_out, prefix_mask, kv_cache = self.model.build_prefix_cache(observation)
+                prefix_out, prefix_mask, kv_cache = self.model.build_prefix_cache(
+                    observation
+                )
         else:
-            prefix_out, prefix_mask, kv_cache = self.model.build_prefix_cache(observation)
+            prefix_out, prefix_mask, kv_cache = self.model.build_prefix_cache(
+                observation
+            )
 
         idx0 = denoise_inds[:, 0].to(torch.long)
         arange_B = torch.arange(B, device=device)
-        chains_pre = chains[arange_B, idx0]            # x_t   at the chosen step
-        chains_next = chains[arange_B, idx0 + 1]       # x_{t-dt} actually drawn at rollout
+        chains_pre = chains[arange_B, idx0]  # x_t   at the chosen step
+        chains_next = chains[arange_B, idx0 + 1]  # x_{t-dt} actually drawn at rollout
 
         timesteps = rl_sampler.get_timesteps(self.num_steps, device)
         t_input = timesteps[idx0].to(torch.float32)
@@ -362,9 +364,11 @@ class OpenPiPytorchRLActionModel(OpenPiPytorchEvalActionModel):
         log_probs = rl_sampler.gaussian_logprob(
             chains_next.to(torch.float32), x_t_mean, x_t_std
         )
-        log_probs = log_probs[
-            :, : self.action_chunk, : self.action_env_dim
-        ].float().contiguous()
+        log_probs = (
+            log_probs[:, : self.action_chunk, : self.action_env_dim]
+            .float()
+            .contiguous()
+        )
 
         if compute_values and rl_cfg.add_value_head and rl_cfg.value_after_vlm:
             values = rl_sampler.value_from_prefix(

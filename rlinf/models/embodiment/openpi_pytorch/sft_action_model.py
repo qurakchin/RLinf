@@ -24,7 +24,7 @@ value head, no chain sampler, and refuses train-mode rollouts.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import torch

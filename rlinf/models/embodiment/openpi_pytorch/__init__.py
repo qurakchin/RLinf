@@ -188,16 +188,12 @@ def _build_openpi_transforms(cfg, model_cfg, *, config_name):
     input_transforms = [
         transforms.InjectDefaultPrompt(None),
         *data_config.data_transforms.inputs,
-        transforms.Normalize(
-            norm_stats, use_quantiles=data_config.use_quantile_norm
-        ),
+        transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
         *data_config.model_transforms.inputs,
     ]
     output_transforms = [
         *data_config.model_transforms.outputs,
-        transforms.Unnormalize(
-            norm_stats, use_quantiles=data_config.use_quantile_norm
-        ),
+        transforms.Unnormalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
         *data_config.data_transforms.outputs,
     ]
     return input_transforms, output_transforms
@@ -269,19 +265,14 @@ def _build_sft_model(
     )
 
     norm_stats = load_norm_stats(model_cfg.assets_dir, model_cfg.asset_id)
-    tokenizer_path = OmegaConf.select(
-        model_cfg, "paligemma_tokenizer", default=None
-    )
+    tokenizer_path = OmegaConf.select(model_cfg, "paligemma_tokenizer", default=None)
     if tokenizer_path is None:
         # Match the openpi default cache location so SFT YAMLs can stay
         # tokenizer-path-free if openpi has previously populated the file.
-        tokenizer_path = (
-            pathlib.Path("~/.cache/openpi/big_vision/paligemma_tokenizer.model")
-            .expanduser()
-        )
-    tokenizer = PaligemmaTokenizer(
-        tokenizer_path, max_len=pi0_config.max_token_len
-    )
+        tokenizer_path = pathlib.Path(
+            "~/.cache/openpi/big_vision/paligemma_tokenizer.model"
+        ).expanduser()
+    tokenizer = PaligemmaTokenizer(tokenizer_path, max_len=pi0_config.max_token_len)
     env_type = model_cfg.get("env", "behavior")
     processor = get_eval_processer(
         env_type,
@@ -336,21 +327,13 @@ def _build_rl_model(
     )
 
     rl_cfg = OpenPiPytorchRLConfig(
-        add_value_head=bool(
-            OmegaConf.select(cfg, "add_value_head", default=False)
-        ),
+        add_value_head=bool(OmegaConf.select(cfg, "add_value_head", default=False)),
         noise_method=str(
             OmegaConf.select(model_cfg, "noise_method", default="flow_ode")
         ),
-        noise_level=float(
-            OmegaConf.select(model_cfg, "noise_level", default=0.0)
-        ),
-        joint_logprob=bool(
-            OmegaConf.select(model_cfg, "joint_logprob", default=False)
-        ),
-        ignore_last=bool(
-            OmegaConf.select(model_cfg, "ignore_last", default=False)
-        ),
+        noise_level=float(OmegaConf.select(model_cfg, "noise_level", default=0.0)),
+        joint_logprob=bool(OmegaConf.select(model_cfg, "joint_logprob", default=False)),
+        ignore_last=bool(OmegaConf.select(model_cfg, "ignore_last", default=False)),
         value_after_vlm=bool(
             OmegaConf.select(model_cfg, "value_after_vlm", default=False)
         ),
