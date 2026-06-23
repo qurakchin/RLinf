@@ -126,7 +126,7 @@ actor:
     num_action_chunks: 32
     num_steps: 8
     openpi:
-      task: rl
+      task: eval
       config_name: "pi05_behavior"
       num_images_in_input: ${actor.model.num_images_in_input}
       num_steps: ${actor.model.num_steps}

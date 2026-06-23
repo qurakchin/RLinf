@@ -31,6 +31,7 @@ add_value_head: False
 # value-head, RL). get_model builds Pi0Config from num_action_chunks
 # (action_horizon) + the openpi.* shape fields below; no config.json is read.
 openpi:
+  task: eval # eval / sft / rl
   num_images_in_input: 3
   action_chunk: ${actor.model.num_action_chunks}
   action_env_dim: ${actor.model.action_dim}

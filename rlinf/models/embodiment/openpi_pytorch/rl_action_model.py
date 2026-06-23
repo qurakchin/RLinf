@@ -21,9 +21,9 @@ SDE sampler and the VLM-pooled value head needed by PPO:
   sampler that emits ``forward_inputs`` ready for PPO.
 * :meth:`OpenPiPytorchRLActionModel.default_forward` — PPO recompute of
   logprobs and values from the stored chain.
-* :meth:`OpenPiPytorchRLActionModel.setup_wrappers` /
-  :meth:`input_transform` / :meth:`output_transform` — the openpi.transforms
-  glue (port of ``OpenPi0ForRLActionPrediction.setup_wrappers`` etc.).
+* :class:`ValueHead` over the PaliGemma prefix output.
+* :meth:`freeze_vlm` — train-expert-only freezing of SigLIP + paligemma
+  expert-0 of the multi-expert gemma LLM.
 
 Scope (only what BEHAVIOR pi05 PPO exercises): ``noise_method`` ∈
 {``flow_ode``, ``flow_sde``}, ``joint_logprob=False``,
@@ -36,26 +36,19 @@ from __future__ import annotations
 
 import dataclasses
 import random
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
-import numpy as np
 import torch
-from torch.utils._pytree import tree_map
 
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.models.embodiment.modules.value_head import ValueHead
-from rlinf.models.embodiment.openpi_pytorch.openpi_action_model import (
-    OpenPiPytorchActionModel,
+from rlinf.models.embodiment.openpi_pytorch.eval_action_model import (
+    OpenPiPytorchEvalActionModel,
 )
 from rlinf.models.embodiment.openpi_pytorch.pi0_model import model as pi0_model_module
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.model import Observation
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.pi0 import Pi0
 from rlinf.models.embodiment.openpi_pytorch.utils import rl_sampler
-
-
-def _to_numpy(x):
-    return np.asarray(x.detach().cpu()) if torch.is_tensor(x) else x
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,8 +67,8 @@ class OpenPiPytorchRLConfig:
     config_name: str = ""
 
 
-class OpenPiPytorchRLActionModel(OpenPiPytorchActionModel):
-    """Eval + PPO variant of :class:`OpenPiPytorchActionModel`."""
+class OpenPiPytorchRLActionModel(OpenPiPytorchEvalActionModel):
+    """Eval + PPO variant of :class:`OpenPiPytorchEvalActionModel`."""
 
     def __init__(
         self,
@@ -89,21 +82,17 @@ class OpenPiPytorchRLActionModel(OpenPiPytorchActionModel):
     ):
         super().__init__(
             pi0_model,
-            processor=None,
             num_steps=num_steps,
             action_env_dim=action_env_dim,
+            action_chunk=action_chunk,
+            config_name=rl_cfg.config_name,
         )
-        # RL-only shape knobs: ``action_chunk`` slices the env-action subspace
-        # out of the chain logp tensor; ``action_horizon`` / ``model_action_dim``
-        # size the SDE chain. The base class / SFT path don't need them.
-        self.action_chunk = action_chunk
+        # RL-only shape knobs for the SDE chain. ``action_chunk`` is already
+        # stored on the base (used by :meth:`output_transform`); these two are
+        # exclusive to PPO and size the chain tensor.
         self.action_horizon = pi0_model.action_horizon
         self.model_action_dim = pi0_model.action_dim
         self.rl_cfg = rl_cfg
-
-        # openpi.transforms pipeline (installed by ``setup_wrappers``).
-        self._input_transform_fn = None
-        self._output_transform_fn = None
 
         if rl_cfg.add_value_head:
             if not rl_cfg.value_after_vlm:
@@ -132,124 +121,6 @@ class OpenPiPytorchRLActionModel(OpenPiPytorchActionModel):
         """Noise-annealing hook — currently a no-op (constant noise_level)."""
         del global_step
 
-    # ------------------------------------------------------------ transforms
-
-    def setup_wrappers(
-        self,
-        transforms: Sequence,
-        output_transforms: Sequence,
-    ) -> None:
-        """Install the openpi.transforms input/output pipelines.
-
-        ``transforms`` is the list passed to the openpi-side ``compose`` —
-        typically ``BehaviorInputs → Normalize(norm_stats) → ModelTransformFactory(model_config)``
-        (the last stage carries the auto-downloading PaliGemma tokenizer).
-        ``output_transforms`` is the matching reverse pipeline used to turn
-        sampled model actions back into env-frame actions.
-        """
-        from openpi.transforms import compose
-
-        self._input_transform_fn = compose(transforms)
-        self._output_transform_fn = compose(output_transforms)
-
-    def _ensure_wrappers(self) -> None:
-        if self._input_transform_fn is None or self._output_transform_fn is None:
-            raise RuntimeError(
-                "OpenPiPytorchRLActionModel.setup_wrappers(...) must be called "
-                "after construction (the factory does this); the openpi "
-                "transforms pipeline is not yet installed."
-            )
-
-    def _repack_env_obs(self, env_obs: dict) -> dict:
-        """Map the env's observation dict to the ``observation/*`` keys the openpi pipeline expects."""
-        config_name = self.rl_cfg.config_name
-        if "behavior" in config_name:
-            return {
-                "observation/image": env_obs["main_images"],
-                "observation/wrist_image": env_obs["wrist_images"],
-                "observation/state": env_obs["states"],
-                "prompt": env_obs["task_descriptions"],
-            }
-        raise NotImplementedError(
-            f"openpi_pytorch RL repack only knows BEHAVIOR configs today; "
-            f"got config_name={config_name!r}."
-        )
-
-    def input_transform(self, obs: dict, transpose: bool = False) -> dict:
-        """Apply the openpi input pipeline per-sample then recombine into a batched dict.
-
-        Mirrors :meth:`OpenPi0ForRLActionPrediction.input_transform`. Two modes:
-
-        * Rollout (``"prompt"`` key present) — runs the full pipeline including
-          prompt tokenization; result has ``image``/``image_mask``/``state``/
-          ``tokenized_prompt``/``tokenized_prompt_mask`` keys.
-        * Train recompute (no ``"prompt"``; only ``observation/*`` and the cached
-          ``tokenized_prompt`` keys present) — re-runs the pipeline using the
-          cached tokens rather than re-tokenising every micro-batch.
-        """
-        self._ensure_wrappers()
-        inputs = tree_map(lambda x: x, obs)
-        first_process = "prompt" in inputs.keys()
-        if first_process:
-            inputs.pop("prompt")
-        else:
-            inputs = {k: inputs[k] for k in inputs.keys() if "/" in k}
-
-        inputs = tree_map(_to_numpy, inputs)
-        batch_size = next(v.shape[0] for v in inputs.values() if hasattr(v, "shape"))
-
-        batch_samples = []
-        for i in range(batch_size):
-            sample = tree_map(lambda x: x[i], inputs)
-            if transpose:
-                sample = tree_map(
-                    lambda x: x.transpose(1, 2, 0)
-                    if isinstance(x, np.ndarray) and x.ndim == 3
-                    else x,
-                    sample,
-                )
-            if first_process:
-                prompts = obs["prompt"]
-                if isinstance(prompts, np.ndarray):
-                    prompts = prompts.tolist()
-                sample["prompt"] = prompts[i]
-            else:
-                # Pipeline still runs Tokenize, but the cached tokens below
-                # overwrite its output — placeholder text is fine.
-                sample["prompt"] = "xxxx"
-            batch_samples.append(sample)
-
-        with ThreadPoolExecutor(max_workers=min(len(batch_samples), 8)) as ex:
-            transformed = list(ex.map(self._input_transform_fn, batch_samples))
-
-        recombined = tree_map(
-            lambda *xs: torch.from_numpy(np.asarray(xs).copy()),
-            *transformed,
-        )
-        if not first_process:
-            recombined["tokenized_prompt"] = obs["tokenized_prompt"]
-            recombined["tokenized_prompt_mask"] = obs["tokenized_prompt_mask"]
-        return recombined
-
-    def output_transform(self, outputs: dict) -> dict:
-        """Apply the openpi output pipeline per-sample then recombine."""
-        self._ensure_wrappers()
-        batch_size = outputs["actions"].shape[0]
-        transformed = []
-        for i in range(batch_size):
-            sample = tree_map(
-                lambda x: _to_numpy(x[i]) if torch.is_tensor(x) else x[i],
-                outputs,
-            )
-            sample = self._output_transform_fn(sample)
-            transformed.append(sample)
-        recombined = tree_map(
-            lambda *xs: torch.from_numpy(np.asarray(xs).copy()),
-            *transformed,
-        )
-        recombined["actions"] = recombined["actions"][:, : self.action_chunk]
-        return recombined
-
     # ------------------------------------------------------------------ rollout
 
     @torch.no_grad()
@@ -263,65 +134,29 @@ class OpenPiPytorchRLActionModel(OpenPiPytorchActionModel):
         rng: torch.Generator | None = None,
         **kwargs,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
-        """Sample env actions, in eval (Euler ODE) or train (SDE chain) mode."""
+        """Sample env actions, in eval (Euler ODE) or train (SDE chain) mode.
+
+        ``mode="eval"`` delegates straight to the base
+        :meth:`OpenPiPytorchActionModel.predict_action_batch` (deterministic
+        Euler sampler + openpi output transform). ``mode="train"`` runs the
+        PPO chain-collecting SDE sampler implemented in :meth:`_predict_train`.
+        """
         del kwargs
+        if mode == "eval":
+            return super().predict_action_batch(
+                env_obs, mode=mode, noise=noise, rng=rng
+            )
+        if mode != "train":
+            raise ValueError(f"Unknown predict mode: {mode!r}")
+        # Train mode: rerun the same preprocessing the base eval path uses,
+        # then route to the SDE chain sampler.
         self._ensure_wrappers()
         repacked = self._repack_env_obs(env_obs)
         processed = self.input_transform(repacked, transpose=False)
-        observation = Observation.from_dict(processed).to_dict()  # fp32 image conversion
-        # Move to device
         observation = self._observation_dict_to_device(processed)
-
-        if mode == "eval":
-            return self._predict_eval_rl(observation, noise=noise, rng=rng)
-        if mode != "train":
-            raise ValueError(f"Unknown predict mode: {mode!r}")
         return self._predict_train(
             observation, noise=noise, rng=rng, compute_values=compute_values
         )
-
-    def _observation_dict_to_device(self, processed: dict) -> Observation:
-        """Convert a per-key dict (from :meth:`input_transform`) into a device-resident :class:`Observation`."""
-        device = self.device
-        obs = Observation.from_dict(processed)
-
-        def _move(x):
-            return x.to(device) if isinstance(x, torch.Tensor) else x
-
-        return Observation(
-            images={k: _move(v) for k, v in obs.images.items()},
-            image_masks={k: _move(v) for k, v in obs.image_masks.items()},
-            state=_move(obs.state),
-            tokenized_prompt=_move(obs.tokenized_prompt),
-            tokenized_prompt_mask=_move(obs.tokenized_prompt_mask),
-            token_ar_mask=_move(obs.token_ar_mask),
-            token_loss_mask=_move(obs.token_loss_mask),
-            pcd_xyz=_move(obs.pcd_xyz),
-        )
-
-    def _predict_eval_rl(
-        self,
-        observation: Observation,
-        *,
-        noise: torch.Tensor | None,
-        rng: torch.Generator | None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        model_actions = self.model.sample_actions(
-            observation, num_steps=self.num_steps, noise=noise, rng=rng
-        )
-        env_outputs = self.output_transform(
-            {"actions": model_actions, "state": observation.state}
-        )
-        actions = env_outputs["actions"].to(self.device)
-        B = actions.shape[0]
-        return actions, {
-            "prev_logprobs": None,
-            "prev_values": None,
-            "forward_inputs": {
-                "action": actions.reshape(B, -1).contiguous(),
-                "model_action": model_actions.reshape(B, -1).contiguous(),
-            },
-        }
 
     def _predict_train(
         self,

@@ -16,23 +16,26 @@
 
 Selected by ``actor.model.openpi.task: sft`` in YAML. Implements
 :meth:`ForwardType.SFT` via :class:`Pi0.compute_loss` (flow-matching MSE) and
-keeps the deterministic eval path inherited from
-:class:`OpenPiPytorchActionModel`. Has no value head, no chain sampler, and
-refuses train-mode rollouts.
+overrides :meth:`predict_action_batch` to build observations through the
+vendored :class:`EvalProcessor` (the base class only knows the
+openpi.transforms pipeline; this variant owns the processor entirely). Has no
+value head, no chain sampler, and refuses train-mode rollouts.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
 
+from rlinf.data.datasets.openpi_pytorch.eval_processor import EvalProcessor
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.models.embodiment.openpi_pytorch.openpi_action_model import (
     OpenPiPytorchActionModel,
 )
 from rlinf.models.embodiment.openpi_pytorch.pi0_model.model import Observation
+from rlinf.models.embodiment.openpi_pytorch.pi0_model.pi0 import Pi0
 from rlinf.models.embodiment.openpi_pytorch.utils.normalize import (
     normalize_quantile,
 )
@@ -40,6 +43,25 @@ from rlinf.models.embodiment.openpi_pytorch.utils.normalize import (
 
 class OpenPiPytorchSFTActionModel(OpenPiPytorchActionModel):
     """Eval + SFT variant of :class:`OpenPiPytorchActionModel`."""
+
+    def __init__(
+        self,
+        pi0_model: Pi0,
+        *,
+        num_steps: int,
+        action_env_dim: int,
+        processor: EvalProcessor,
+    ):
+        super().__init__(
+            pi0_model,
+            num_steps=num_steps,
+            action_env_dim=action_env_dim,
+        )
+        # The SFT variant drives observation construction and action
+        # normalization via the vendored :class:`EvalProcessor` instead of the
+        # openpi.transforms pipeline the base supports. Kept here so the base
+        # stays processor-free.
+        self.processor = processor
 
     def forward(self, forward_type: ForwardType = ForwardType.SFT, **kwargs):
         """Dispatch — SFT variant only supports :attr:`ForwardType.SFT`."""

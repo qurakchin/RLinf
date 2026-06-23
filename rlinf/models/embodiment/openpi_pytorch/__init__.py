@@ -43,10 +43,17 @@ def get_model(cfg, torch_dtype=None):
     The concrete wrapper class is selected by ``cfg.openpi.task``:
 
     * ``task: sft`` → :class:`OpenPiPytorchSFTActionModel` (built by
-      :func:`_build_sft_model`).
+      :func:`_build_sft_model`). Uses the vendored
+      :class:`EvalProcessor` + :class:`PaligemmaTokenizer` for observation
+      construction.
     * ``task: rl``  → :class:`OpenPiPytorchRLActionModel` (built by
-      :func:`_build_rl_model`; uses the upstream openpi.transforms pipeline
-      so ``openpi.paligemma_tokenizer`` is not read).
+      :func:`_build_rl_model`). Uses the upstream openpi.transforms pipeline,
+      adds the PPO chain-collecting SDE sampler + VLM value head.
+    * ``task: eval`` → :class:`OpenPiPytorchEvalActionModel` (built by
+      :func:`_build_eval_model`). Same openpi.transforms pipeline as
+      ``task: rl``, but with no value head, no chain collection, no
+      training-mode forward — produced for eval-only deployments that don't
+      need any of the PPO scaffolding.
     """
     import safetensors.torch
     from omegaconf import OmegaConf
@@ -90,7 +97,7 @@ def get_model(cfg, torch_dtype=None):
     task = OmegaConf.select(model_cfg, "task", default=None)
     if task is None:
         raise ValueError(
-            "actor.model.openpi.task is required: set it to 'sft' or 'rl' "
+            "actor.model.openpi.task is required: set it to 'sft', 'rl', or 'eval' "
             "to pick the concrete OpenPI PyTorch model variant."
         )
     task = str(task).lower()
@@ -105,6 +112,16 @@ def get_model(cfg, torch_dtype=None):
         cfg.precision,
         num_steps,
     )
+
+    if task == "eval":
+        return _build_eval_model(
+            cfg,
+            model_cfg,
+            model,
+            num_steps=num_steps,
+            action_chunk=action_chunk,
+            action_env_dim=action_env_dim,
+        )
 
     if task == "sft":
         return _build_sft_model(
@@ -130,8 +147,104 @@ def get_model(cfg, torch_dtype=None):
 
     raise ValueError(
         f"actor.model.openpi.task={task!r} is not supported; "
-        "use 'sft' or 'rl'."
+        "use 'eval', 'sft', or 'rl'."
     )
+
+
+def _build_openpi_transforms(cfg, model_cfg, *, config_name):
+    """Build the openpi.transforms input/output lists for transforms-pipeline
+    tasks (``rl`` / ``eval``).
+
+    Mirrors :func:`rlinf.models.embodiment.openpi.__init__.get_model`'s wiring:
+    consume :func:`get_openpi_config` for the upstream TrainConfig, derive
+    ``data_config`` + ``norm_stats`` from the checkpoint dir, and assemble the
+    two compose-ready transform lists. Returns ``(input_transforms,
+    output_transforms)``.
+    """
+    import openpi.shared.download as download
+    import openpi.transforms as transforms
+    from omegaconf import OmegaConf
+    from openpi.training import checkpoints as _checkpoints
+
+    from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+
+    data_kwargs = OmegaConf.select(cfg, "openpi_data", default=None)
+    if data_kwargs is not None:
+        data_kwargs = OmegaConf.to_container(data_kwargs, resolve=True)
+
+    train_config = get_openpi_config(
+        config_name, model_path=str(cfg.model_path), data_kwargs=data_kwargs
+    )
+    upstream_model_config = train_config.model
+
+    data_config = train_config.data.create(
+        train_config.assets_dirs, upstream_model_config
+    )
+    checkpoint_dir = download.maybe_download(str(cfg.model_path))
+    if data_config.asset_id is None:
+        raise ValueError("data_config.asset_id is required to load norm_stats.")
+    norm_stats = _checkpoints.load_norm_stats(checkpoint_dir, data_config.asset_id)
+
+    input_transforms = [
+        transforms.InjectDefaultPrompt(None),
+        *data_config.data_transforms.inputs,
+        transforms.Normalize(
+            norm_stats, use_quantiles=data_config.use_quantile_norm
+        ),
+        *data_config.model_transforms.inputs,
+    ]
+    output_transforms = [
+        *data_config.model_transforms.outputs,
+        transforms.Unnormalize(
+            norm_stats, use_quantiles=data_config.use_quantile_norm
+        ),
+        *data_config.data_transforms.outputs,
+    ]
+    return input_transforms, output_transforms
+
+
+def _build_eval_model(
+    cfg,
+    model_cfg,
+    model,
+    *,
+    num_steps,
+    action_chunk,
+    action_env_dim,
+):
+    """Build the eval variant: openpi.transforms pipeline, no value head, no
+    chain collection, no training-mode forward.
+
+    Produces a bare :class:`OpenPiPytorchEvalActionModel` — same eval path the RL
+    subclass uses, but stripped of every PPO-only bit (value head, chain
+    sampler, freeze logic). Selected by ``actor.model.openpi.task: eval``.
+    """
+    from omegaconf import OmegaConf
+
+    from rlinf.models.embodiment.openpi_pytorch.eval_action_model import (
+        OpenPiPytorchEvalActionModel,
+    )
+
+    config_name = str(OmegaConf.select(model_cfg, "config_name", default=""))
+    if not config_name:
+        raise ValueError(
+            "actor.model.openpi.config_name is required for task='eval' "
+            "(it selects the upstream openpi TrainConfig, e.g. 'pi05_behavior')."
+        )
+
+    input_transforms, output_transforms = _build_openpi_transforms(
+        cfg, model_cfg, config_name=config_name
+    )
+
+    eval_model = OpenPiPytorchEvalActionModel(
+        model,
+        num_steps=num_steps,
+        action_env_dim=action_env_dim,
+        action_chunk=action_chunk,
+        config_name=config_name,
+    )
+    eval_model.setup_wrappers(input_transforms, output_transforms)
+    return eval_model
 
 
 def _build_sft_model(
@@ -181,7 +294,7 @@ def _build_sft_model(
 
     return OpenPiPytorchSFTActionModel(
         model,
-        processor,
+        processor=processor,
         num_steps=num_steps,
         action_env_dim=action_env_dim,
     )
@@ -197,21 +310,15 @@ def _build_rl_model(
     action_env_dim,
     paligemma_width,
 ):
-    """Build the RL variant: openpi.transforms pipeline (auto-downloads tokenizer).
+    """Build the RL variant: openpi.transforms pipeline + value head + chain
+    sampler + optional train-expert-only freeze.
 
-    Mirrors :func:`rlinf.models.embodiment.openpi.__init__.get_model`'s wiring:
-    consume :func:`get_openpi_config` for the upstream TrainConfig, derive
-    ``data_config`` + ``norm_stats`` from the checkpoint, build the input/output
-    transform lists, and install them on the model via ``setup_wrappers``. The
-    PaliGemma tokenizer is created (and if necessary downloaded) inside that
-    pipeline — the YAML does not specify a tokenizer path.
+    Uses :func:`_build_openpi_transforms` to derive the shared transforms
+    pipeline (same logic the eval task path runs) and layers the PPO-only
+    knobs (``rl_cfg``, value head, freeze) on top.
     """
-    import openpi.shared.download as download
-    import openpi.transforms as transforms
     from omegaconf import OmegaConf
-    from openpi.training import checkpoints as _checkpoints
 
-    from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
     from rlinf.models.embodiment.openpi_pytorch.rl_action_model import (
         OpenPiPytorchRLActionModel,
         OpenPiPytorchRLConfig,
@@ -223,38 +330,10 @@ def _build_rl_model(
             "actor.model.openpi.config_name is required for task='rl' "
             "(it selects the upstream openpi TrainConfig, e.g. 'pi05_behavior')."
         )
-    data_kwargs = OmegaConf.select(cfg, "openpi_data", default=None)
-    if data_kwargs is not None:
-        data_kwargs = OmegaConf.to_container(data_kwargs, resolve=True)
 
-    train_config = get_openpi_config(
-        config_name, model_path=str(cfg.model_path), data_kwargs=data_kwargs
+    input_transforms, output_transforms = _build_openpi_transforms(
+        cfg, model_cfg, config_name=config_name
     )
-    upstream_model_config = train_config.model
-
-    data_config = train_config.data.create(
-        train_config.assets_dirs, upstream_model_config
-    )
-    checkpoint_dir = download.maybe_download(str(cfg.model_path))
-    if data_config.asset_id is None:
-        raise ValueError("data_config.asset_id is required to load norm_stats.")
-    norm_stats = _checkpoints.load_norm_stats(checkpoint_dir, data_config.asset_id)
-
-    input_transforms = [
-        transforms.InjectDefaultPrompt(None),
-        *data_config.data_transforms.inputs,
-        transforms.Normalize(
-            norm_stats, use_quantiles=data_config.use_quantile_norm
-        ),
-        *data_config.model_transforms.inputs,
-    ]
-    output_transforms_list = [
-        *data_config.model_transforms.outputs,
-        transforms.Unnormalize(
-            norm_stats, use_quantiles=data_config.use_quantile_norm
-        ),
-        *data_config.data_transforms.outputs,
-    ]
 
     rl_cfg = OpenPiPytorchRLConfig(
         add_value_head=bool(
@@ -295,7 +374,7 @@ def _build_rl_model(
         rl_cfg=rl_cfg,
         paligemma_width=paligemma_width,
     )
-    rl_model.setup_wrappers(input_transforms, output_transforms_list)
+    rl_model.setup_wrappers(input_transforms, output_transforms)
     if bool(OmegaConf.select(model_cfg, "train_expert_only", default=False)):
         # Mirror the legacy ``openpi/openpi_action_model.OpenPi0ForRLActionPrediction``
         # PPO path: freeze the PaliGemma VLM (SigLIP vision + LLM expert 0) and

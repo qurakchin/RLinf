@@ -72,6 +72,7 @@ actor:
     # New-format fp32 base checkpoint (exactly what the reference trainer loads).
     model_path: /path/to/pi05_base_pytorch_new
     openpi:
+      task: sft
       # Quantile-normalization stats for the 2025-challenge-demos BEHAVIOR task
       # 0000, resolved as {assets_dir}/{asset_id}/norm_stats.json (the same
       # canonical stats the eval path resolves).
