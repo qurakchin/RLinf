@@ -167,6 +167,7 @@ def _worker(
                 # Returns plain lists/floats (picklable) so the driver can
                 # back-project pixels to world without GT object poses.
                 from robosuite.utils import camera_utils as _cu
+
                 rob = getattr(env, "env", env)
                 while hasattr(rob, "env"):
                     rob = rob.env
@@ -179,12 +180,17 @@ def _worker(
                 extent = float(sim.model.stat.extent)
                 near = float(sim.model.vis.map.znear) * extent
                 far = float(sim.model.vis.map.zfar) * extent
-                p.send({
-                    "camera_name": cam, "height": h, "width": w,
-                    "intrinsic_K": K.tolist(),
-                    "extrinsic_cam2world": E.tolist(),
-                    "depth_near": near, "depth_far": far,
-                })
+                p.send(
+                    {
+                        "camera_name": cam,
+                        "height": h,
+                        "width": w,
+                        "intrinsic_K": K.tolist(),
+                        "extrinsic_cam2world": E.tolist(),
+                        "depth_near": near,
+                        "depth_far": far,
+                    }
+                )
             else:
                 p.close()
                 raise NotImplementedError
