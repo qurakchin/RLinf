@@ -298,7 +298,7 @@ YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
    * - 字段
      - 含义与作用
    * - ``target_video_height`` / ``target_video_width``
-     - WAN 策略头目标分辨率（5B 预设如 176×320；可在 YAML 覆盖）。避免在 transform 代码里写死尺寸，以兼容 WAN2.1 / WAN2.2。
+     - WAN 策略头在 **多视角拼接后** 的目标分辨率（5B 预设如 176×320；Libero 常用 160×320）。仅作用于模型内部 resize， **不要** 用于 data transform 的单视角 resize。
    * - ``droid_view_height`` / ``droid_view_width``
      - （可选）DROID 各视角 resize 覆盖。
    * - ``relative_action`` / ``relative_action_keys`` / ``relative_action_per_horizon``
@@ -587,7 +587,7 @@ YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
 - ``action_horizon`` × ``max_chunk_size`` 决定数据集动作长度；勿只改其一。
 - 多视角拼接顺序与 prompt 文案不一致会导致训练信号错乱。
 - 继续微调官方权重时，随意改 ``DEFAULT_TAG_MAPPING`` 的整数 ID 会导致 projector 对不上。
-- 视频 resize：优先在 transform 链或 ``target_video_height/width`` 配置，避免写死尺寸导致 WAN2.1/2.2 不兼容。
+- 视频 resize：单视角 ``VideoResize`` 写在各 embodiment 的 ``data_transforms`` 代码中（如 ``libero_sim``、``franka_pnp`` 均为 256×256）；``target_video_height/width`` 仅用于 WAN 在多视角拼接 **之后** 的模型内 resize，二者勿混用。 **混合数据集训练** 须保证各子数据集经 ``DreamTransform`` 拼接后输出相同 ``images`` 空间形状（H×W），否则 collate 无法组 batch；若各 embodiment 拼接布局不同（如 ``oxe_droid`` 为 2×2 网格）或单视角默认尺寸不一致，请在对应 transform 模块中手动对齐 ``VideoResize`` 参数。
 - 推理 / 评测：``examples/embodiment/config/`` 下的 DreamZero 评测配置 中同样需要正确的 ``embodiment_tag``。
 
 若仅推理、不改 RLinf 代码，且 Groot/DreamZero 上游已支持该 tag，有时只需准备 ``metadata.json`` 与评测配置；**SFT 新数据** 则须完成上述枚举成员、registry 注册与 transform 实现（``get_model`` 会自动 patch Groot ``EmbodimentTag``）。
@@ -619,7 +619,7 @@ YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
 
 5. **DROID 视频尺寸错误**
 
-   - 勿在代码中写死分辨率；使用 ``target_video_height/width`` 或 ``droid_view_*`` 配置项
+   - 勿将 ``target_video_height/width`` 用于 data transform 的单视角 resize；DROID 视角尺寸在 ``oxe_droid`` transform 代码中调整
 
 6. **multi_anchor 报错要求 lazy_load**
 
@@ -638,3 +638,81 @@ YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
 - 全量适配 WAN2.2 可冷启动，但需更大数据与更长训练；改配置后先用 50–200 step 试跑验证 shape 与 loss。
 - 每次更换数据集或 ``embodiment_tag``，务必重新生成或更新 ``metadata.json``。
 - LIBERO 与 DROID 的 ``action_horizon``、 ``embodiment_tag``、多视角拼接逻辑不同，不要混用配置模板。
+
+
+训练加速
+----------------------------------------
+
+RLinf 团队对 DreamZero 的训练管线进行了深度的系统级重构与加速。相比 DreamZero 官方提供的基线训练脚本，RLinf **实现了近 4 倍的训练吞吐加速**，同时保持甚至优化了收敛效果。
+
+
+端到端性能实测
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+以下所有测试均在 Droid 数据集（单样本含左、右、腕部三个视角，视频规格 33 frames × 480 × 640）上，使用 8×H100 GPU 完成。
+
+**DreamZero-14B**
+
+在 14B 大模型上，由于显存压力巨大，官方基线通常被迫采用 DeepSpeed ZeRO-offload 方案，这导致了严重的计算/通信浪费与 CPU 换入换出开销。我们通过工程优化，以 FSDP2 full_shard 替代 DeepSpeed ZeRO-offload 方案，并进一步结合了计算图优化（算子融合与 CUDA Graph）。
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 22 18
+
+   * - 实验配置
+     - 迭代耗时 (Step Time)
+     - 训练吞吐 (Samples/sec/GPU)
+     - 性能收益 (vs. 基线)
+   * - DeepSpeed ZeRO2 + Offload（官方版本）
+     - 18.0 s
+     - 0.055
+     - 基线
+   * - FSDP2 Base（原生支持）
+     - 9.0 s
+     - 0.111
+     - +100%（2.0x）
+   * - **RLinf 深度优化版**
+     - **6.7 s**
+     - **0.150**
+     - **+170%（2.7x）**
+
+14B 模型使用 MBS=1 和 GBS=8 进行测试。RLinf 相比原生 DeepSpeed 方案实现了 **2.7 倍**的加速；即便相比于未经优化的 FSDP2，吞吐量也进一步提升了 **35%**。
+
+**DreamZero-5B**
+
+对于 5B 中等规模模型，RLinf 的优势在于能够通过高效率的重计算逻辑稳定开启更大的 Microbatch Size，并配合计算图调优，彻底释放 GPU 算力。
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 22 18
+
+   * - 实验配置
+     - 迭代耗时 (Step Time)
+     - 训练吞吐 (Samples/sec/GPU)
+     - 性能收益 (vs. 基线)
+   * - DeepSpeed ZeRO2 + Offload（官方版本，mbs=32 × 8 GPU）
+     - 30.0 s
+     - 1.10
+     - 基线
+   * - FSDP2 Base（mbs=1 × 8 GPU）
+     - 1.8 s
+     - 0.56
+     - -49%（受限于小 MBS 算子效率低、CPU 开销显著、FSDP2 通信无法掩盖）
+   * - **RLinf 深度优化版（mbs=32 + Recompute × 8 GPU）**
+     - **7.2 s**
+     - **4.44**
+     - **+300%（4.0x）**
+
+5B 模型使用 GBS=256 测试。FSDP2 Base 版本由于 PyTorch 的一些限制不能开大 MBS，导致吞吐受限；RLinf 解决了这些问题并取得了显著的吞吐增长。训练吞吐从官方代码的 1.1 samples/sec/gpu 飙升至 4.44 samples/sec/gpu，实现了约 4 倍的训练加速。
+
+.. figure:: https://raw.githubusercontent.com/RLinf/misc/main/pic/dream0acctime.jpg
+   :align: center
+   :width: 45%
+
+   DreamZero 5B 与 14B 模型的加速效果对比
+
+.. figure:: https://raw.githubusercontent.com/RLinf/misc/main/pic/dream0accthpt.jpg
+   :align: center
+   :width: 45%
+
+   DreamZero 5B 与 14B 模型的吞吐提升对比

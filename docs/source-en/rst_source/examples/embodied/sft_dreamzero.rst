@@ -301,7 +301,7 @@ Model and Training Settings
    * - Field
      - Meaning and role
    * - ``target_video_height`` / ``target_video_width``
-     - WAN policy head target resolution (5B preset e.g. 176×320; override in YAML). Avoid hard-coded sizes in transform code for WAN2.1/WAN2.2 compatibility.
+     - WAN policy head target resolution **after multi-view concat** (5B preset e.g. 176×320; Libero often 160×320). Model-internal resize only; **do not** use for per-view data transform resize.
    * - ``droid_view_height`` / ``droid_view_width``
      - (Optional) per-view resize overrides for DROID.
    * - ``relative_action`` / ``relative_action_keys`` / ``relative_action_per_horizon``
@@ -593,7 +593,7 @@ Step 5: Validate with a Short Run
 - Dataset action length is ``action_horizon × max_chunk_size``; do not change only one.
 - Multi-view **concat order** must match **prompt text** or training signal is wrong.
 - Do not change ``DEFAULT_TAG_MAPPING`` integer IDs arbitrarily when fine-tuning official weights.
-- Prefer ``target_video_height/width`` or transform-chain resize over hard-coded sizes for WAN2.1/2.2.
+- Per-view ``VideoResize`` lives in each embodiment's ``data_transforms`` module (e.g. ``libero_sim`` and ``franka_pnp`` both use 256×256); ``target_video_height/width`` is for WAN resize **after** multi-view concat only—do not mix the two. **Mix dataset training** requires identical post-concat ``images`` spatial shape (H×W) from ``DreamTransform`` across sub-datasets, or collate will fail; align ``VideoResize`` in the corresponding transform modules when concat layouts differ (e.g. ``oxe_droid`` uses a 2×2 grid) or per-view defaults differ.
 - Inference/eval: set ``embodiment_tag`` correctly in DreamZero eval configs under ``examples/embodiment/config/``.
 
 For inference only (no RLinf code changes) when upstream Groot/DreamZero already supports the tag, ``metadata.json`` and eval config may suffice; **SFT on new data** requires the enum member, registry entry, and transform module above (``get_model`` patches Groot ``EmbodimentTag`` automatically).
@@ -625,7 +625,7 @@ Common Issues
 
 5. **DROID video size errors**
 
-   - Do not hard-code resolution in code; use ``target_video_height/width`` or ``droid_view_*``
+   - Do not use ``target_video_height/width`` for per-view data transform resize; adjust DROID view sizes in the ``oxe_droid`` transform code
 
 6. **multi_anchor requires lazy_load**
 
@@ -644,3 +644,81 @@ Practical Recommendations
 - Full WAN2.2 adaptation via cold start needs more data and longer training; after config changes, run 50–200 steps to validate shapes and loss.
 - Regenerate or update ``metadata.json`` whenever you change datasets or ``embodiment_tag``.
 - Do not mix LIBERO and DROID config templates; ``action_horizon``, ``embodiment_tag``, and multi-view concat logic differ.
+
+
+Training Acceleration
+---------------------
+
+The RLinf team has deeply rebuilt and accelerated the DreamZero training pipeline at the systems level. Compared to the official DreamZero baseline training script, **RLinf achieves a ~4× training throughput boost** while maintaining, and in some cases improving, convergence quality.
+
+
+End-to-End Performance Benchmarks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+All tests below use the **Droid dataset** (three views per sample: left, right, wrist; video spec: 33 frames × 480 × 640) on 8×H100 GPUs.
+
+**DreamZero-14B**
+
+For the 14B model, memory pressure leaves the official baseline little choice but DeepSpeed ZeRO-offload, incurring severe compute/communication waste and CPU swap overhead. Through engineering optimization, we replaced DeepSpeed ZeRO-offload with FSDP2 full_shard, and further incorporated compute graph optimizations (operator fusion and CUDA Graph).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 22 18
+
+   * - Configuration
+     - Step Time
+     - Throughput (samples/sec/GPU)
+     - Speedup (vs. baseline)
+   * - DeepSpeed ZeRO2 + Offload (official)
+     - 18.0 s
+     - 0.055
+     - baseline
+   * - FSDP2 Base (native)
+     - 9.0 s
+     - 0.111
+     - +100% (2.0×)
+   * - **RLinf optimized**
+     - **6.7 s**
+     - **0.150**
+     - **+170% (2.7×)**
+
+14B tested with MBS=1 and GBS=8. RLinf achieves a **2.7×** speedup over the DeepSpeed baseline, and **35%** further gain even over unoptimized FSDP2.
+
+**DreamZero-5B**
+
+For the 5B mid-scale model, RLinf's advantage lies in stable large-microbatch execution through recompute, combined with compute graph tuning to fully unleash GPU utilization.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 22 18
+
+   * - Configuration
+     - Step Time
+     - Throughput (samples/sec/GPU)
+     - Speedup (vs. baseline)
+   * - DeepSpeed ZeRO2 + Offload (official, mbs=32 × 8 GPU)
+     - 30.0 s
+     - 1.10
+     - baseline
+   * - FSDP2 Base (mbs=1 × 8 GPU)
+     - 1.8 s
+     - 0.56
+     - -49% (constrained: small mbs, low operator efficiency, high CPU overhead, FSDP2 comm not hidden)
+   * - **RLinf optimized (mbs=32 + recompute × 8 GPU)**
+     - **7.2 s**
+     - **4.44**
+     - **+300% (4.0×)**
+
+5B tested with GBS=256. The FSDP2 Base version cannot open large mbs due to PyTorch limitations, capping throughput; RLinf resolves these issues and achieves substantial throughput growth. Training throughput soars from 1.1 samples/sec/gpu (official) to 4.44 samples/sec/gpu—a ~4× training acceleration.
+
+.. figure:: https://raw.githubusercontent.com/RLinf/misc/main/pic/dream0acctime.jpg
+   :align: center
+   :width: 45%
+
+   Speedup comparison for DreamZero 5B and 14B models
+
+.. figure:: https://raw.githubusercontent.com/RLinf/misc/main/pic/dream0accthpt.jpg
+   :align: center
+   :width: 45%
+
+   Throughput improvement for DreamZero 5B and 14B models
