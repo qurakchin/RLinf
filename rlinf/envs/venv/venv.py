@@ -432,6 +432,63 @@ class SubprocEnvWorker(EnvWorker):
         ])
         return self.parent_remote.recv()
 
+    def render_raw(self, cam, h, w, depth) -> Any:
+        """Robocasa-style raw render (rgb + metric depth when ``depth`` is
+        set). Handled by the robocasa worker loop."""
+        self.parent_remote.send([
+            "render_raw",
+            {"cam": cam, "h": h, "w": w, "depth": depth},
+        ])
+        return self.parent_remote.recv()
+
+    def get_camera_transform(self, camera_name, height=None, width=None) -> Any:
+        """Pixel-to-world 4x4 (inv of camera transform) for the named
+        camera. Handled by the robocasa worker loop."""
+        self.parent_remote.send([
+            "get_camera_transform",
+            {"camera_name": camera_name, "height": height, "width": width},
+        ])
+        return self.parent_remote.recv()
+
+    def get_ep_meta(self) -> Any:
+        """Episode meta (language, layout/style ids, …). Handled by the
+        robocasa worker loop."""
+        self.parent_remote.send(["get_ep_meta", {}])
+        return self.parent_remote.recv()
+
+    def grasp_contact(self) -> Any:
+        """Return ``[contacting, object_name]``. Handled by the robocasa
+        worker loop."""
+        self.parent_remote.send(["grasp_contact", {}])
+        return self.parent_remote.recv()
+
+    def reassemble_env_action(self, unmap_result) -> Any:
+        """Reassemble an RLDX ``unmap_result`` dict into a flat robosuite
+        action. Handled by the robocasa worker loop."""
+        self.parent_remote.send([
+            "reassemble_env_action",
+            {"unmap_result": unmap_result},
+        ])
+        return self.parent_remote.recv()
+
+    def get_success_criteria_text(self) -> Any:
+        """Source of ``_check_success`` + resolved helper/fixture methods.
+        Handled by the robocasa worker loop."""
+        self.parent_remote.send(["get_success_criteria_text", {}])
+        return self.parent_remote.recv()
+
+    def get_task_progress(self) -> Any:
+        """Scalar/bool progress dict mined from ``_check_success`` locals.
+        Handled by the robocasa worker loop."""
+        self.parent_remote.send(["get_task_progress", {}])
+        return self.parent_remote.recv()
+
+    def set_seed(self, seed) -> Any:
+        """Full re-seed (random + np + env.seed + env.rng) for paired
+        comparisons. Handled by the robocasa worker loop."""
+        self.parent_remote.send(["set_seed", seed])
+        return self.parent_remote.recv()
+
     def _decode_obs(self) -> Union[dict, tuple, np.ndarray]:
         def decode_obs(
             buffer: Optional[Union[dict, tuple, ShArray]]

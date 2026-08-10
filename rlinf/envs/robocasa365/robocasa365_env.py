@@ -749,3 +749,124 @@ class Robocasa365Env(gym.Env):
         """Close the vectorized RoboCasa365 environments."""
         if hasattr(self, "env"):
             self.env.close()
+
+    # ------------------------------------------------------------------
+    # Agentic-facade surface (RPent robocasa integration)
+    # ------------------------------------------------------------------
+    # The methods below expose raw robosuite-level operations through the
+    # subprocess worker pipe.  They are deliberately thin: each delegates to
+    # ``self.env.workers[env_idx].<method>`` (handled by the robocasa
+    # ``_worker`` loop in ``venv.py``), so the parent process never touches
+    # the MuJoCo sim directly — the subprocess owns the EGL context.  All
+    # return values are picklable plain Python / numpy / dict structures so
+    # they cross the parent↔worker pipe (and the RPent RPC boundary)
+    # cleanly.
+
+    def _worker(self, env_idx: int = 0):
+        """Return the subprocess worker for ``env_idx`` (assumes num_envs=1)."""
+        return self.env.workers[env_idx]
+
+    def raw_reset(self, env_idx: int = 0):
+        """Reset and return the *raw* (unwrapped) robosuite obs + info.
+
+        Unlike :meth:`reset`, this skips Pi0-style image/state wrapping.
+        Used by the RPent robocasa facade whose primitives read raw obs
+        keys (``robot0_eef_pos``, ``language``, …) directly.
+        """
+        raw_obs, info_list = self.env.reset(id=[env_idx])
+        if self.current_raw_obs is None:
+            self.current_raw_obs = [None] * self.num_envs
+        if self.current_info_list is None:
+            self.current_info_list = [None] * self.num_envs
+        self.current_raw_obs[env_idx] = raw_obs[env_idx]
+        self.current_info_list[env_idx] = info_list[env_idx]
+        return raw_obs[env_idx], info_list[env_idx]
+
+    def raw_step(self, action, env_idx: int = 0):
+        """Step a single env with a flat ``[action_dim]`` action.
+
+        Returns the robosuite 4-tuple ``(obs, reward, done, info)`` (single
+        env, env dim stripped).  ``info`` already carries ``success`` and
+        ``ep_meta`` (injected by the robocasa worker loop).
+        """
+        actions = np.asarray(action, dtype=np.float64)[None, :]
+        raw_obs, rewards, dones, info_list = self.env.step(actions)
+        if self.current_raw_obs is None:
+            self.current_raw_obs = [None] * self.num_envs
+        if self.current_info_list is None:
+            self.current_info_list = [None] * self.num_envs
+        self.current_raw_obs[env_idx] = raw_obs[env_idx]
+        self.current_info_list[env_idx] = info_list[env_idx]
+        return raw_obs[env_idx], rewards[env_idx], dones[env_idx], info_list[env_idx]
+
+    def get_camera_meta(
+        self,
+        camera_name: str = "agentview",
+        height: int = 256,
+        width: int = 256,
+        env_idx: int = 0,
+    ) -> dict:
+        """Static camera calibration (K, cam→world extrinsics, depth near/far)."""
+        return self._worker(env_idx).get_camera_meta(
+            camera_name=camera_name, height=height, width=width
+        )
+
+    def render_camera(
+        self,
+        camera_name: str = "agentview",
+        height: int = 1024,
+        width: int = 1024,
+        depth: bool = False,
+        env_idx: int = 0,
+    ):
+        """Render an arbitrary camera at the requested resolution (raw)."""
+        return self._worker(env_idx).render_camera(
+            camera_name=camera_name, height=height, width=width, depth=depth
+        )
+
+    def render_raw(self, cam, h, w, depth, env_idx: int = 0):
+        """Robocasa-style raw render: rgb (uint8 HxWx3) and, when ``depth``
+        is set, *metric* depth (HxW) post-processed via
+        ``CU.get_real_depth_map`` so it back-projects to world space."""
+        return self._worker(env_idx).render_raw(cam=cam, h=h, w=w, depth=depth)
+
+    def get_camera_transform(
+        self, camera_name, height=None, width=None, env_idx: int = 0
+    ):
+        """Pixel-to-world 4x4 (``inv(T_world2cam)``) for the named camera."""
+        return self._worker(env_idx).get_camera_transform(
+            camera_name=camera_name, height=height, width=width
+        )
+
+    def get_ep_meta(self, env_idx: int = 0) -> dict:
+        """Episode meta (language, layout/style ids, …) from the raw env."""
+        return self._worker(env_idx).get_ep_meta()
+
+    def get_action_dim(self, env_idx: int = 0) -> int:
+        """Flat action dimensionality of the underlying robosuite env."""
+        return int(self._worker(env_idx).get_env_attr("action_dim"))
+
+    def check_success(self, env_idx: int = 0) -> bool:
+        """Call the raw env's ``_check_success()``."""
+        return bool(self._worker(env_idx).check_success())
+
+    def grasp_contact(self, env_idx: int = 0):
+        """Return ``(contacting: bool, object_name: str | None)``."""
+        return self._worker(env_idx).grasp_contact()
+
+    def reassemble_env_action(self, unmap_result, env_idx: int = 0):
+        """Reassemble an RLDX ``unmap_result`` dict into a flat robosuite action."""
+        return self._worker(env_idx).reassemble_env_action(unmap_result)
+
+    def get_success_criteria_text(self, env_idx: int = 0) -> str:
+        """Source of ``_check_success`` + resolved helper fixtures/methods."""
+        return self._worker(env_idx).get_success_criteria_text()
+
+    def get_task_progress(self, env_idx: int = 0) -> dict:
+        """Scalar/bool progress dict mined from ``_check_success`` locals."""
+        return self._worker(env_idx).get_task_progress()
+
+    def set_seed(self, seed: int, env_idx: int = 0) -> bool:
+        """Re-seed the subprocess env (random/np/env.seed/env.rng) — used by
+        the RLDX_RESET_SEED paired-comparison flow."""
+        return bool(self._worker(env_idx).set_seed(seed))
