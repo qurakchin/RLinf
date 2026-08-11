@@ -153,7 +153,8 @@ def _get_success_criteria_text(env):
             if obj is not None and hasattr(type(obj), meth):
                 try:
                     out.append(
-                        "## %s.%s\n%s" % (fix, meth, inspect.getsource(getattr(type(obj), meth)))
+                        "## %s.%s\n%s"
+                        % (fix, meth, inspect.getsource(getattr(type(obj), meth)))
                     )
                 except Exception:
                     pass
@@ -171,7 +172,9 @@ def _get_task_progress(env):
         # Capture both ``self.attr`` AND dotted ``self.fixture._attr`` paths used
         # in the success check — a bare-attr regex would only grab the fixture
         # object and miss the real gating flag (e.g. self.coffee_machine._turned_on).
-        for path in sorted(set(re.findall(r"self\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)", src))):
+        for path in sorted(
+            set(re.findall(r"self\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)", src))
+        ):
             obj = env
             ok = True
             for part in path.split("."):
@@ -195,6 +198,7 @@ def _get_task_progress(env):
 
     def _tracer(frame, event, arg):
         if event == "call" and frame.f_code is code:
+
             def _local(f, e, a):
                 if e == "return":
                     captured.update(f.f_locals)
@@ -353,13 +357,15 @@ def _worker(
                 # Render an arbitrary camera at the requested resolution.
                 # Falls back to the env's render() when no sim attribute.
                 if hasattr(env, "sim"):
-                    p.send(_render_raw(
-                        env,
-                        cam=data["camera_name"],
-                        h=data["height"],
-                        w=data["width"],
-                        depth=data["depth"],
-                    ))
+                    p.send(
+                        _render_raw(
+                            env,
+                            cam=data["camera_name"],
+                            h=data["height"],
+                            w=data["width"],
+                            depth=data["depth"],
+                        )
+                    )
                 else:
                     p.send(env.render(**data) if hasattr(env, "render") else None)
             elif cmd == "render_raw":
