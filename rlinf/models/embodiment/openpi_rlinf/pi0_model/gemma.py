@@ -28,6 +28,7 @@ import dataclasses
 import math
 from collections.abc import Sequence
 from typing import Literal
+import os
 
 import torch
 import torch.nn as nn
@@ -251,6 +252,7 @@ class Attention(nn.Module):
 
         # Initialize weights
         self._init_weights()
+        self.attn_impl = os.environ.get("PI_ATTN_IMPL", None)
 
     def _init_weights(self):
         for i, config in enumerate(self.expert_configs):
@@ -335,39 +337,64 @@ class Attention(nn.Module):
         if attn_mask.dim() == 4:
             attn_mask = attn_mask[:, 0:1, :, :]  # (B, 1, T, S)
 
-        # GQA einsum pattern matching JAX:
-        q = q * (self.head_dim**-0.5)
+        if self.attn_impl == "SDPA":
+            # Flash attention via F.scaled_dot_product_attention with native GQA support.
+            # q: (B, T, num_heads, H) -> (B, num_heads, T, H)
+            # k/v: (B, S, num_kv_heads, H) -> (B, num_kv_heads, S, H)
+            q_sdpa = q.transpose(1, 2)
+            k_sdpa = k.transpose(1, 2)
+            v_sdpa = v.transpose(1, 2)
 
-        # q: (B, T, num_heads, H) -> rearrange to (B, T, K, G, H)
-        # k: (B, S, num_kv_heads, H) -> stays (B, S, K, H)
-        K = self.num_kv_heads
-        G = self.num_heads // K
+            # Convert to float additive mask: 0.0 = attend, -inf = mask.
+            # Original attn_mask: non-zero = attend, 0.0 = mask (eager uses .bool())
+            # Must be (B, 1, T, S) so the head dim broadcasts for GQA in SDPA.
+            attn_mask_sdpa = torch.where(
+                attn_mask[:, 0, :, :].bool(), # (B, T, S)
+                torch.tensor(0.0, dtype=q_sdpa.dtype, device=q_sdpa.device),
+                torch.tensor(float("-inf"), dtype=q_sdpa.dtype, device=q_sdpa.device),
+            ).unsqueeze_(1)  # (B, 1, T, S)
 
-        q_r = q.reshape(q.shape[0], q.shape[1], K, G, self.head_dim)
-        k_r = k.reshape(k.shape[0], k.shape[1], K, self.head_dim)
-        v_r = v.reshape(v.shape[0], v.shape[1], K, self.head_dim)
+            encoded = F.scaled_dot_product_attention(
+                q_sdpa, k_sdpa, v_sdpa,
+                attn_mask=attn_mask_sdpa,
+                scale=self.head_dim ** -0.5,
+            )
+            encoded = encoded.transpose(1, 2)  # (B, T, num_heads, H)
+        else:
+            # Original einsum-based attention with explicit GQA reshape
+            q = q * (self.head_dim**-0.5)
 
-        # einsum "BTKGH,BSKH->BKGTS"
-        logits = torch.einsum("BTKGH,BSKH->BKGTS", q_r.float(), k_r.float())
+            # GQA einsum pattern matching JAX:
+            # q: (B, T, num_heads, H) -> rearrange to (B, T, K, G, H)
+            # k: (B, S, num_kv_heads, H) -> stays (B, S, K, H)
+            K = self.num_kv_heads
+            G = self.num_heads // K
 
-        # Align mask to logits shape: logits is (B, K, G, T, S), mask is (B, 1, T, S)
-        # We need mask to be (B, 1, 1, T, S) so it broadcasts to (B, K, G, T, S)
-        big_neg = -2.3819763e38
-        mask_for_logits = attn_mask[:, :, None, :, :].expand_as(logits).bool()
-        masked_logits = torch.where(
-            mask_for_logits,
-            logits,
-            torch.tensor(big_neg, dtype=logits.dtype, device=logits.device),
-        )
+            q_r = q.reshape(q.shape[0], q.shape[1], K, G, self.head_dim)
+            k_r = k.reshape(k.shape[0], k.shape[1], K, self.head_dim)
+            v_r = v.reshape(v.shape[0], v.shape[1], K, self.head_dim)
 
-        probs = F.softmax(masked_logits, dim=-1).to(dtype)
+            # einsum "BTKGH,BSKH->BKGTS"
+            logits = torch.einsum("BTKGH,BSKH->BKGTS", q_r.float(), k_r.float())
 
-        # einsum "BKGTS,BSKH->BTKGH"
-        encoded = torch.einsum("BKGTS,BSKH->BTKGH", probs, v_r.to(dtype))
-        encoded = encoded.reshape(
-            encoded.shape[0], encoded.shape[1], K * G, self.head_dim
-        )
-        # encoded: (B, T_total, num_heads, head_dim)
+            # Align mask to logits shape: logits is (B, K, G, T, S), mask is (B, 1, T, S)
+            # We need mask to be (B, 1, 1, T, S) so it broadcasts to (B, K, G, T, S)
+            big_neg = -2.3819763e38
+            mask_for_logits = attn_mask[:, :, None, :, :].expand_as(logits).bool()
+            masked_logits = torch.where(
+                mask_for_logits,
+                logits,
+                torch.tensor(big_neg, dtype=logits.dtype, device=logits.device),
+            )
+
+            probs = F.softmax(masked_logits, dim=-1).to(dtype)
+
+            # einsum "BKGTS,BSKH->BTKGH"
+            encoded = torch.einsum("BKGTS,BSKH->BTKGH", probs, v_r.to(dtype))
+            encoded = encoded.reshape(
+                encoded.shape[0], encoded.shape[1], K * G, self.head_dim
+            )
+            # encoded: (B, T_total, num_heads, head_dim)
 
         # Split back to per-expert outputs
         outputs = []
