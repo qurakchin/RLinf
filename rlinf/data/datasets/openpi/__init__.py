@@ -35,6 +35,12 @@ def _load_dual_franka_sft_dataloader() -> SftDataLoaderBuilder:
     return build_dual_franka_sft_dataloader
 
 
+def _load_yam_sft_dataloader() -> SftDataLoaderBuilder:
+    # Dual-YAM and dual-Franka collection datasets share the same RLinf v2.1
+    # storage keys. Robot-specific semantics remain in their DataConfig.
+    return _load_dual_franka_sft_dataloader()
+
+
 def _load_official_openpi_sft_dataloader() -> SftDataLoaderBuilder:
     from rlinf.data.datasets.openpi.official_sft_data_loader import (
         build_official_openpi_sft_dataloader,
@@ -48,6 +54,7 @@ def _load_official_openpi_sft_dataloader() -> SftDataLoaderBuilder:
 _SFT_DATALOADER_BUILDERS = {
     "behavior": _load_behavior_sft_dataloader,
     "dualfranka": _load_dual_franka_sft_dataloader,
+    "yam": _load_yam_sft_dataloader,
     "official": _load_official_openpi_sft_dataloader,
 }
 

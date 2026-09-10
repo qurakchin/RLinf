@@ -50,9 +50,13 @@ def task_factory(env_cls: type) -> Callable[..., gym.Env]:
 def register_tasks(
     module: str,
     namespace: dict[str, Any],
-    tasks: Mapping[str, type],
+    tasks: Mapping[str, type | Callable[..., gym.Env]],
 ) -> list[str]:
     """Register real-world tasks and publish their generated entry points.
+
+    A task value is either an environment class, which :func:`task_factory`
+    wraps with ``build_stack``, or an explicit entry point for a task that
+    composes its own wrappers.
 
     Gymnasium resolves an entry point by importing ``module`` and reading the
     named attribute, so each generated factory is bound into ``namespace``
@@ -61,14 +65,14 @@ def register_tasks(
     Args:
         module: Dotted path of the calling package, i.e. ``__name__``.
         namespace: The caller's ``globals()``, where entry points are bound.
-        tasks: Mapping from Gymnasium ID to environment class.
+        tasks: Mapping from Gymnasium ID to environment class or entry point.
 
     Returns:
         The entry point names bound into ``namespace``, for ``__all__``.
     """
     names = []
-    for env_id, env_cls in tasks.items():
-        entry_point = task_factory(env_cls)
+    for env_id, task in tasks.items():
+        entry_point = task_factory(task) if isinstance(task, type) else task
         namespace[entry_point.__name__] = entry_point
         register(id=env_id, entry_point=f"{module}:{entry_point.__name__}")
         names.append(entry_point.__name__)

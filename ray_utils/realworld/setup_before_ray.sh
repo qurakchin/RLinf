@@ -5,8 +5,8 @@ export REPO_PATH=$(dirname $(dirname "$CURRENT_PATH"))
 export PYTHONPATH=$REPO_PATH:$PYTHONPATH
 
 # Modify these environment variables as needed
-export RLINF_NODE_RANK=-1 # Change this to the appropriate node rank if using multiple nodes
-export RLINF_COMM_NET_DEVICES="eth0" # Change this if you use a different network interface
+export RLINF_NODE_RANK=1 # Change this to the appropriate node rank if using multiple nodes
+export RLINF_COMM_NET_DEVICES="wlp4s0" # Change this if you use a different network interface
 
 # In the Franka docker image, run source switch_env franky instead
 source <your_venv_path>/bin/activate # Source your virtual environment here

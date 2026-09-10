@@ -19,6 +19,8 @@ import copy
 import inspect
 import json
 import random
+import shutil
+import sys
 import time
 from types import SimpleNamespace
 from unittest import mock
@@ -58,6 +60,7 @@ from rlinf.data.schema.embodied_types import (
     split_episode_data,
 )
 from rlinf.data.storage.lerobot import add_frame_to_dataset, episode_boundaries
+from rlinf.data.storage.lerobot import writer as writer_module
 from rlinf.data.storage.lerobot.writer import LeRobotDatasetWriter
 from rlinf.envs.wrappers.collect_episode import CollectEpisode
 from rlinf.runners.async_embodied_runner import AsyncEmbodiedRunner
@@ -461,6 +464,279 @@ def test_empty_episode_is_skipped():
     assert dataset.frames == []
     assert dataset.saved_episodes == 0
 
+
+class _WaitingImageWriter:
+    def __init__(self):
+        self.wait_calls = 0
+
+    def wait_until_done(self):
+        self.wait_calls += 1
+
+
+class _BackpressureDataset(_LegacyDataset):
+    def __init__(self):
+        super().__init__()
+        self.image_writer = _WaitingImageWriter()
+
+
+def test_stream_add_frame_drains_image_writer_queue():
+    dataset = _BackpressureDataset()
+    writer = _make_writer(dataset)
+
+    writer.add_frame({"state": 0, "actions": 0, "task": "wipe the table"})
+    writer.add_frame({"state": 1, "actions": 1, "task": "wipe the table"})
+
+    assert len(dataset.frames) == 2
+    assert dataset.image_writer.wait_calls == 2
+
+
+def test_sync_cv2_image_writer_preserves_rgb_bytes(tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    from PIL import Image
+
+    image = np.zeros((4, 5, 3), dtype=np.uint8)
+    image[..., 0] = np.arange(5, dtype=np.uint8)
+    image[..., 1] = np.arange(4, dtype=np.uint8)[:, None] + 20
+    image[..., 2] = 200
+    path = tmp_path / "rgb.png"
+
+    writer_module._save_image(None, image, path)
+
+    read_cv2 = cv2.cvtColor(cv2.imread(str(path)), cv2.COLOR_BGR2RGB)
+    read_pil = np.asarray(Image.open(path).convert("RGB"))
+    np.testing.assert_array_equal(read_cv2, image)
+    np.testing.assert_array_equal(read_pil, image)
+
+
+def test_sync_cv2_image_writer_reports_write_failure(tmp_path, monkeypatch):
+    fake_cv2 = SimpleNamespace(
+        COLOR_RGB2BGR=4,
+        IMWRITE_PNG_COMPRESSION=16,
+        cvtColor=lambda image, code: image,
+        imwrite=lambda *args, **kwargs: False,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+
+    with pytest.raises(OSError, match="Failed to write recording image"):
+        writer_module._save_image(
+            None,
+            np.zeros((4, 5, 3), dtype=np.uint8),
+            tmp_path / "missing" / "rgb.png",
+        )
+
+
+def test_save_episode_table_removes_temporary_file_after_write_error(
+    tmp_path, monkeypatch
+):
+    datasets = pytest.importorskip("datasets")
+    pq = pytest.importorskip("pyarrow.parquet")
+
+    class _FailingParquetWriter:
+        def __init__(self, path, schema):
+            self.path = path
+            self.schema = schema
+
+        def __enter__(self):
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_bytes(b"partial parquet")
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def write_table(self, table):
+            raise RuntimeError("synthetic parquet write failure")
+
+    monkeypatch.setattr(
+        pq,
+        "ParquetWriter",
+        _FailingParquetWriter,
+    )
+    features = datasets.Features(
+        {
+            "index": datasets.Value("int64"),
+            "state": datasets.Sequence(datasets.Value("float32"), length=2),
+        }
+    )
+    dataset = SimpleNamespace(
+        root=tmp_path,
+        hf_features=features,
+        meta=SimpleNamespace(
+            get_data_file_path=lambda ep_index: (
+                f"data/chunk-000/episode_{ep_index:06d}.parquet"
+            )
+        ),
+    )
+    episode_buffer = {
+        "index": np.arange(2, dtype=np.int64),
+        "state": np.zeros((2, 2), dtype=np.float32),
+    }
+
+    with pytest.raises(RuntimeError, match="synthetic parquet write failure"):
+        writer_module._save_episode_table(dataset, episode_buffer, episode_index=0)
+
+    assert not (tmp_path / "data" / "chunk-000" / "episode_000000.parquet.tmp").exists()
+    assert not (tmp_path / "data" / "chunk-000" / "episode_000000.parquet").exists()
+
+
+def _import_real_lerobot_dataset():
+    try:
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    except ModuleNotFoundError:
+        try:
+            from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+        except ModuleNotFoundError:
+            pytest.skip("real LeRobot dataset package is not installed")
+    return LeRobotDataset
+
+
+def _real_frame(episode_index: int, frame_index: int, image_shape=(32, 32, 3)):
+    base = (episode_index * 50 + frame_index) % 255
+    color = np.array([base, (base + 17) % 255, (base + 43) % 255], dtype=np.uint8)
+    return {
+        "state": np.full((14,), frame_index, dtype=np.float32),
+        "actions": np.full((14,), episode_index, dtype=np.float32),
+        "done": np.array([False], dtype=bool),
+        "is_success": np.array([False], dtype=bool),
+        "intervene_flag": np.array([frame_index % 2 == 0], dtype=bool),
+        "segment_id": np.array([episode_index + 1], dtype=np.uint8),
+        "image": np.broadcast_to(color, image_shape).copy(),
+        "extra_view_image-0": np.broadcast_to((color + 1) % 255, image_shape).copy(),
+        "extra_view_image-1": np.broadcast_to((color + 2) % 255, image_shape).copy(),
+        "task": f"episode {episode_index} task",
+    }
+
+
+@pytest.mark.parametrize("image_writer_threads", [0, 1])
+def test_real_lerobot_v2_streaming_writer_batches_and_reads_back(
+    tmp_path, image_writer_threads
+):
+    LeRobotDataset = _import_real_lerobot_dataset()
+    if not hasattr(LeRobotDataset, "_save_episode_table"):
+        pytest.skip("This table-writing hook belongs to LeRobot v2")
+    pq = pytest.importorskip("pyarrow.parquet")
+    pytest.importorskip("datasets")
+
+    writer = LeRobotDatasetWriter()
+    dataset_root = tmp_path / "yam_stream_small"
+    image_shape = (32, 32, 3)
+    successes = [True, False, True]
+    try:
+        writer.create(
+            repo_id=str(dataset_root),
+            robot_type="dual_yam",
+            fps=30,
+            image_writer_threads=image_writer_threads,
+            image_writer_processes=0,
+            image_shape=image_shape,
+            state_dim=14,
+            action_dim=14,
+            extra_view_image_keys={
+                "extra_view_image-0": image_shape,
+                "extra_view_image-1": image_shape,
+            },
+            has_intervene_flag=True,
+            has_segment_id=True,
+        )
+        assert writer.dataset.hf_dataset is None
+
+        for episode_index, success in enumerate(successes):
+            for frame_index in range(33):
+                writer.add_frame(_real_frame(episode_index, frame_index, image_shape))
+            assert writer.save_episode(is_success=success) == 33
+            assert writer.dataset.hf_dataset is None
+            assert writer.dataset.episode_buffer["size"] == 0
+
+        assert writer.dataset.meta.total_episodes == 3
+        assert writer.dataset.meta.total_frames == 99
+        assert not (dataset_root / "images").exists()
+
+        for episode_index, success in enumerate(successes):
+            parquet_path = (
+                dataset_root
+                / "data"
+                / "chunk-000"
+                / f"episode_{episode_index:06d}.parquet"
+            )
+            parquet = pq.ParquetFile(parquet_path)
+            assert [
+                parquet.metadata.row_group(i).num_rows
+                for i in range(parquet.num_row_groups)
+            ] == [16, 16, 1]
+            table = pq.read_table(parquet_path)
+            assert table.num_rows == 33
+            assert {
+                "index",
+                "frame_index",
+                "timestamp",
+                "episode_index",
+                "image",
+                "extra_view_image-0",
+                "extra_view_image-1",
+                "state",
+                "actions",
+                "done",
+                "is_success",
+                "intervene_flag",
+                "segment_id",
+                "task_index",
+            }.issubset(set(table.column_names))
+            assert [
+                bool(np.asarray(v).reshape(-1)[0]) for v in table["done"].to_pylist()
+            ] == [False] * 32 + [True]
+            assert [
+                bool(np.asarray(v).reshape(-1)[0])
+                for v in table["is_success"].to_pylist()
+            ] == [success] * 33
+            assert [
+                bool(np.asarray(v).reshape(-1)[0])
+                for v in table["intervene_flag"].to_pylist()[:4]
+            ] == [True, False, True, False]
+            assert {
+                int(np.asarray(v).reshape(-1)[0])
+                for v in table["segment_id"].to_pylist()
+            } == {episode_index + 1}
+
+        shutil.rmtree(dataset_root / "images", ignore_errors=True)
+        train_dataset = LeRobotDataset(
+            repo_id=dataset_root.name,
+            root=dataset_root,
+            delta_timestamps={"actions": [0.0]},
+            tolerance_s=1e-4,
+        )
+        assert len(train_dataset) == 99
+        sample = train_dataset[34]
+        assert sample["task"] == "episode 1 task"
+        assert int(sample["index"].item()) == 34
+        assert int(sample["episode_index"].item()) == 1
+        assert int(sample["frame_index"].item()) == 1
+        assert torch.allclose(sample["state"], torch.full((14,), 1.0))
+        assert sample["actions"].shape == (1, 14)
+        assert torch.allclose(sample["actions"], torch.full((1, 14), 1.0))
+        assert sample["image"].shape == (3, image_shape[0], image_shape[1])
+        assert sample["extra_view_image-0"].shape == (3, image_shape[0], image_shape[1])
+        assert sample["extra_view_image-1"].shape == (3, image_shape[0], image_shape[1])
+        expected_pixels = {
+            "image": torch.tensor([51, 68, 94], dtype=torch.float32) / 255.0,
+            "extra_view_image-0": torch.tensor([52, 69, 95], dtype=torch.float32)
+            / 255.0,
+            "extra_view_image-1": torch.tensor([53, 70, 96], dtype=torch.float32)
+            / 255.0,
+        }
+        for key, value in expected_pixels.items():
+            assert torch.allclose(sample[key][:, 0, 0], value, atol=1e-6)
+        assert not torch.equal(sample["image"], sample["extra_view_image-0"])
+        assert not torch.equal(
+            sample["extra_view_image-0"], sample["extra_view_image-1"]
+        )
+    finally:
+        if writer.dataset is not None:
+            writer.finalize()
+
+
+# --------------------------------------------------------------------------
+# episode_boundaries: dataset format v2.1 vs v3.0
+# --------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------
 # episode_boundaries: dataset format v2.1 vs v3.0

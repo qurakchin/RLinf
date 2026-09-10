@@ -1,0 +1,74 @@
+env_type: realworld
+
+total_num_envs: 1
+
+auto_reset: false
+ignore_terminations: false
+reward_mode: raw
+wrap_obs_mode: simple
+seed: 0
+group_size: 1
+use_fixed_reset_state_ids: false
+max_steps_per_rollout_epoch: 1000
+max_episode_steps: 1000
+main_image_key: top_rgb
+
+video_cfg:
+  save_video: false
+  info_on_video: true
+  video_base_dir: ${runner.logger.log_path}/video/eval
+
+init_params:
+  id: "DualYamJointEnv-v1"
+  num_envs: null
+
+override_cfg:
+  is_dummy: false
+  task_description: "dual-arm YAM manipulation task"
+  step_frequency: 30.0
+  max_num_steps: 1000
+  # Absolute arm-joint slew bound in radians per control step. This is applied
+  # after hard limits and independently for both followers.
+  max_joint_delta: 0.05
+  # Nominal YAM v1 MJCF limits. i2rt expands its internal limits by 0.15 rad;
+  # keeping RLinf inside the nominal limits makes accepted_action authoritative.
+  joint_limit_min:
+    - [-2.61799, 0.0, 0.0, -1.69297, -1.5708, -2.0944]
+    - [-2.61799, 0.0, 0.0, -1.69297, -1.5708, -2.0944]
+  joint_limit_max:
+    - [3.14159, 3.66519, 3.14159, 1.5708, 1.5708, 2.0944]
+    - [3.14159, 3.66519, 3.14159, 1.5708, 1.5708, 2.0944]
+  feedback_timeout_s: 0.25
+  engage_duration_s: 2.0
+  camera_warmup_timeout_s: 10.0
+  camera_frame_timeout_s: 1.0
+  camera_stale_timeout_s: 2.0
+  image_height: 480
+  image_width: 640
+  manual_episode_control_only: false
+
+  # Optional fixed follower start pose. Each qpos is
+  # [joint_0, ..., joint_5, gripper], where gripper is 0=closed, 1=open.
+  # Keep disabled until both collision-free qpos values have been measured on
+  # the follower arms. "startup" moves only on the first env reset;
+  # "episode" moves on every reset; "manual" requires reset_qpos=true in the
+  # Gym reset options or an explicit reset_to_configured_qpos() call.
+  reset:
+    enabled: false
+    mode: startup
+    left_qpos: null
+    right_qpos: null
+    duration_s: 4.0
+    max_joint_delta: 0.05
+    tolerance: 0.03
+    timeout_s: 8.0
+
+  # Policy/evaluation mode leaves this disabled, so leader CAN devices are
+  # never opened. The collection config enables it and selects hold semantics.
+  leader_intervention:
+    enabled: false
+    wait_for_record_button: true
+    sync_on_reset: false
+    poll_frequency: 30.0
+    button_debounce_s: 0.2
+    unsynced_action_source: policy

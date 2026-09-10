@@ -1,0 +1,235 @@
+# Copyright 2026 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Regression tests for YAM's generic real-world data collector."""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import psutil
+import torch
+
+
+def _load_collector(monkeypatch):
+    # The installed i2rt SDK also ships an "examples" package. Load this
+    # repository's entrypoint by its exact path to avoid namespace shadowing.
+    monkeypatch.setattr(psutil, "process_iter", lambda: ())
+    path = (
+        Path(__file__).resolve().parents[2] / "examples/embodiment/collect_real_data.py"
+    )
+    spec = importlib.util.spec_from_file_location("_yam_collection_test", path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_yam_collector_accepts_recorded_task_descriptions(monkeypatch):
+    """The YAM recipe keeps string task metadata alongside tensor observations."""
+    # Importing RealWorldEnv has an existing process-cleanup side effect. Keep
+    # this unit test isolated from host ROS processes.
+    monkeypatch.setattr(psutil, "process_iter", lambda: ())
+
+    DataCollector = _load_collector(monkeypatch).DataCollector
+
+    collector = object.__new__(DataCollector)
+    collector.cfg = SimpleNamespace(
+        runner=SimpleNamespace(record_task_description=True)
+    )
+    states = torch.arange(14, dtype=torch.float32).reshape(1, 14)
+    descriptions = ["pick_block"]
+
+    processed = collector._process_obs(
+        {"states": states, "task_descriptions": descriptions}
+    )
+
+    assert processed["task_descriptions"] == descriptions
+    assert torch.equal(processed["states"], states)
+
+
+def test_replay_collector_skips_start_preview_and_aborted_transitions(
+    monkeypatch, tmp_path
+):
+    module = _load_collector(monkeypatch)
+
+    class Builder:
+        def __init__(self, **kwargs):
+            self.samples = []
+
+        def append_step_result(self, result):
+            pass
+
+        def append_transitions(self, curr_obs, next_obs):
+            self.samples.append((curr_obs["states"].item(), next_obs["states"].item()))
+
+        def to_trajectory(self):
+            return SimpleNamespace(
+                intervene_flags=torch.zeros(1), samples=self.samples.copy()
+            )
+
+    class Env:
+        index = 0
+
+        def reset(self, **kwargs):
+            return {"states": torch.tensor([[float(self.index)]])}, {}
+
+        def step(self, action):
+            self.index += 1
+            start = self.index in (2, 6)
+            abort = self.index == 4
+            invalid_done = self.index == 8
+            success = self.index == 10
+            done = invalid_done or success
+            pre = self.index in (1, 4, 5)
+            info = {
+                "keyboard_event": ["start" if start else "abort" if abort else None],
+                "keyboard_phase": ["pre" if pre else "rec"],
+                "record_reset": [start or abort],
+                "pre_record": [pre],
+                "manual_done": [done],
+                "recording_invalid": [invalid_done],
+            }
+            return (
+                {"states": torch.tensor([[float(self.index)]])},
+                torch.tensor([float(done)]),
+                torch.tensor([done]),
+                torch.tensor([False]),
+                info,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(module, "EmbodiedTrajectoryBuilder", Builder)
+    collector = object.__new__(module.DataCollector)
+    collector.cfg = SimpleNamespace(
+        runner=SimpleNamespace(
+            record_task_description=True, logger=SimpleNamespace(log_path=str(tmp_path))
+        ),
+        env=SimpleNamespace(eval=SimpleNamespace(max_episode_steps=100)),
+    )
+    saved = []
+    collector.buffer = SimpleNamespace(
+        add_trajectories=saved.extend, close=lambda: None
+    )
+    env = Env()
+    collector.env = env
+    collector.num_data_episodes = 1
+    collector._preexisting_success = 0
+    collector._target_step_period = None
+    collector.action_dim = 14
+    collector.total_cnt = 0
+    collector.manual_episode_control_only = True
+    logs = []
+    collector.log_info = logs.append
+    collector.run()
+    assert env.index == 10
+    assert collector.total_cnt == 2
+    assert len(saved) == 1
+    assert saved[0].samples == [(8.0, 9.0), (9.0, 10.0)]
+    assert any("Recording overflow" in message for message in logs)
+    assert sum("Total: 1/1" in message for message in logs) == 1
+
+
+def test_collector_counts_pending_review_visually_without_double_counting_keep(
+    monkeypatch,
+):
+    module = _load_collector(monkeypatch)
+
+    progress_states = []
+    progress_updates = []
+
+    class ProgressBar:
+        def __init__(self, *, total, initial, desc):
+            del total, desc
+            self.n = initial
+            progress_states.append(self.n)
+
+        def update(self, value):
+            self.n += value
+            progress_updates.append(value)
+            progress_states.append(self.n)
+
+        def refresh(self):
+            pass
+
+    class Env:
+        def __init__(self):
+            self.index = 0
+            self.reset_options = []
+
+        def reset(self, **kwargs):
+            self.reset_options.append(kwargs.get("options"))
+            return {"states": torch.tensor([[float(self.index)]])}, {}
+
+        def step(self, action):
+            del action
+            self.index += 1
+            pending = self.index in (1, 3)
+            discard = self.index == 2
+            keep = self.index == 4
+            done = discard or keep
+            info = {
+                "keyboard_event": [None],
+                "keyboard_phase": ["pre" if done else "rec"],
+                "record_reset": [False],
+                "pre_record": [done],
+                "episode_review_pending": [pending],
+                "episode_discarded": [discard],
+                "success": [keep],
+                "manual_done": [keep],
+                "recording_invalid": [False],
+            }
+            return (
+                {"states": torch.tensor([[float(self.index)]])},
+                torch.tensor([float(keep)]),
+                torch.tensor([done]),
+                torch.tensor([False]),
+                info,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(module, "tqdm", ProgressBar)
+    collector = object.__new__(module.DataCollector)
+    collector.cfg = SimpleNamespace(
+        runner=SimpleNamespace(record_task_description=True),
+        env=SimpleNamespace(eval=SimpleNamespace(max_episode_steps=100)),
+    )
+    collector.env = Env()
+    collector.num_data_episodes = 1
+    collector._preexisting_success = 0
+    collector._target_step_period = None
+    collector.action_dim = 14
+    collector.total_cnt = 0
+    collector.manual_episode_control_only = True
+    collector.save_demos = False
+    logs = []
+    collector.log_info = logs.append
+
+    collector.run()
+
+    assert progress_states == [0, 1, 0, 1]
+    assert progress_updates == [1, -1, 1]
+    assert collector.total_cnt == 2
+    assert collector.env.index == 4
+    assert collector.env.reset_options[-1] == {"skip_wait_for_start": True}
+    assert any("[不保留]" in message for message in logs)
+    assert any("[确认保留]" in message for message in logs)
+    assert sum("Total: 1/1" in message for message in logs) == 1

@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -83,6 +84,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=False,
         help="Export one .mp4 video per image field per episode (requires opencv-python). "
         "When multiple image fields exist, also exports episode_merged.mp4.",
+    )
+    parser.add_argument(
+        "--mp4-only",
+        action="store_true",
+        default=False,
+        help=(
+            "Export only per-view MP4 videos from a single episode parquet using "
+            "streaming parquet batches. This mode does not materialize all rows."
+        ),
     )
     parser.add_argument(
         "--mp4-fps",
@@ -123,6 +133,17 @@ def _require_cv2() -> Any:
             "Missing dependency: opencv-python. Run `pip install opencv-python`."
         ) from exc
     return cv2
+
+
+def _require_av() -> Any:
+    try:
+        import av
+    except ImportError as exc:
+        raise SystemExit(
+            "Missing dependency: av. Install the same environment used for "
+            "LeRobot data collection, or run `pip install av`."
+        ) from exc
+    return av
 
 
 def _image_bytes_to_array(raw_bytes: bytes, image_cls: Any) -> Any:
@@ -168,6 +189,15 @@ def _resolve_parquet_files(dataset_path: Path) -> list[Path]:
         return sorted(default_data_dir.glob("chunk-*/episode_*.parquet"))
 
     return sorted(dataset_path.glob("**/*.parquet"))
+
+
+def _resolve_dataset_root_from_parquet(parquet_path: Path) -> Path:
+    for parent in parquet_path.parents:
+        if (parent / "meta" / "info.json").is_file():
+            return parent
+    if len(parquet_path.parents) >= 3:
+        return parquet_path.parents[2]
+    raise SystemExit(f"Could not resolve dataset root for parquet: {parquet_path}")
 
 
 def _build_episode_meta_map(meta_dir: Path) -> dict[int, dict[str, Any]]:
@@ -267,6 +297,146 @@ def _extract_image_keys(
         return []
 
     return [key for key, value in rows[0].items() if _is_image_struct(value)]
+
+
+def _view_output_name(image_key: str, dataset_info: dict[str, Any]) -> str:
+    if dataset_info.get("robot_type") == "dual_yam":
+        mapping = {
+            "image": "top",
+            "extra_view_image-0": "left",
+            "extra_view_image-1": "right",
+        }
+        return mapping.get(image_key, image_key)
+    return image_key
+
+
+def _lower_cpu_priority() -> None:
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+    except AttributeError:
+        pass
+
+
+def _row_image_bytes(row: dict[str, Any], image_key: str, parquet_path: Path) -> bytes:
+    value = row.get(image_key)
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"Missing image payload for key {image_key!r} in {parquet_path.name}."
+        )
+    raw_bytes = value.get("bytes")
+    if isinstance(raw_bytes, memoryview):
+        raw_bytes = raw_bytes.tobytes()
+    if not raw_bytes:
+        raise ValueError(
+            f"Empty image bytes for key {image_key!r} in {parquet_path.name}."
+        )
+    return raw_bytes
+
+
+def _write_mp4_from_parquet_column(
+    *,
+    pq: Any,
+    av: Any,
+    parquet_path: Path,
+    image_key: str,
+    output_path: Path,
+    fps: int,
+    image_cls: Any,
+    batch_size: int = 16,
+) -> None:
+    if fps <= 0:
+        raise ValueError(f"mp4 fps must be positive, got {fps}")
+    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp.mp4")
+    tmp_path.unlink(missing_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    container = None
+    try:
+        parquet = pq.ParquetFile(parquet_path)
+        container = av.open(str(tmp_path), mode="w")
+        stream = container.add_stream("libx264", rate=fps)
+        stream.pix_fmt = "yuv420p"
+        stream.options = {"preset": "veryfast", "crf": "18"}
+        stream.thread_count = 1
+        wrote = False
+        # PyArrow retained buffers across row groups in a long 29 GB LeRobot
+        # episode when one iterator scanned the whole file. Scoping each
+        # iterator to one row group kept RSS flat while preserving bounded
+        # batches for older files whose row groups are large.
+        for row_group in range(parquet.num_row_groups):
+            for batch in parquet.iter_batches(
+                batch_size=batch_size,
+                row_groups=[row_group],
+                columns=[image_key],
+                use_threads=False,
+            ):
+                for row in batch.to_pylist():
+                    frame_array = _image_bytes_to_array(
+                        _row_image_bytes(row, image_key, parquet_path), image_cls
+                    )
+                    if not wrote:
+                        height, width = frame_array.shape[:2]
+                        stream.width = width
+                        stream.height = height
+                    video_frame = av.VideoFrame.from_ndarray(
+                        frame_array, format="rgb24"
+                    )
+                    for packet in stream.encode(video_frame):
+                        container.mux(packet)
+                    wrote = True
+        if not wrote:
+            raise ValueError(f"No frames found for key {image_key!r} in {parquet_path}")
+        for packet in stream.encode():
+            container.mux(packet)
+        container.close()
+        container = None
+        tmp_path.replace(output_path)
+    finally:
+        try:
+            if container is not None:
+                container.close()
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _write_mp4_only_episode(
+    *,
+    parquet_path: Path,
+    output_dir: Path,
+    dataset_info: dict[str, Any],
+    episode_meta_map: dict[int, dict[str, Any]],
+    pq: Any,
+    av: Any,
+    image_cls: Any,
+) -> bool:
+    episode_index = _infer_episode_index(parquet_path, [])
+    if episode_index not in episode_meta_map:
+        print(f"Skip unpublished episode {episode_index:06d}: {parquet_path}")
+        return False
+    image_keys = _extract_image_keys(dataset_info, [])
+    if not image_keys:
+        raise SystemExit(f"No image columns found in {parquet_path}")
+    fps = int(dataset_info.get("fps") or 30)
+    episode_dir = output_dir / f"episode_{episode_index:06d}"
+    episode_dir.mkdir(parents=True, exist_ok=True)
+    for image_key in image_keys:
+        view_name = _view_output_name(image_key, dataset_info)
+        output_path = episode_dir / f"{view_name}.mp4"
+        if output_path.is_file() and output_path.stat().st_size > 0:
+            print(f"Skip existing MP4: {output_path}")
+            continue
+        _write_mp4_from_parquet_column(
+            pq=pq,
+            av=av,
+            parquet_path=parquet_path,
+            image_key=image_key,
+            output_path=output_path,
+            fps=fps,
+            image_cls=image_cls,
+        )
+        print(f"Exported {image_key} -> {output_path}")
+    return True
 
 
 def _sort_image_keys_for_layout(image_keys: list[str]) -> list[str]:
@@ -583,15 +753,23 @@ def main() -> None:
     dataset_path = Path(args.dataset_path).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
 
+    if args.mp4_only:
+        _lower_cpu_priority()
+
     pq = _require_pyarrow()
     image_cls = _require_pillow()
-    cv2_module = _require_cv2() if args.export_mp4 else None
+    av_module = _require_av() if args.mp4_only else None
+    cv2_module = _require_cv2() if args.export_mp4 and not args.mp4_only else None
 
     parquet_files = _resolve_parquet_files(dataset_path)
     if not parquet_files:
         raise SystemExit(f"No parquet files found under: {dataset_path}")
 
-    dataset_root = dataset_path if dataset_path.is_dir() else dataset_path.parents[2]
+    dataset_root = (
+        dataset_path
+        if dataset_path.is_dir()
+        else _resolve_dataset_root_from_parquet(dataset_path)
+    )
     meta_dir = dataset_root / "meta"
     dataset_info = _load_json(meta_dir / "info.json")
     episode_meta_map = _build_episode_meta_map(meta_dir)
@@ -602,6 +780,26 @@ def main() -> None:
     print(f"Dataset path: {dataset_path}")
     print(f"Output dir:   {output_dir}")
     print(f"Episodes:     {len(parquet_files)}")
+    if args.mp4_only:
+        print("MP4-only:     enabled")
+        if dataset_path.is_dir():
+            raise SystemExit(
+                "--mp4-only expects --dataset-path to be a single episode parquet file."
+            )
+        exported = _write_mp4_only_episode(
+            parquet_path=parquet_files[0],
+            output_dir=output_dir,
+            dataset_info=dataset_info,
+            episode_meta_map=episode_meta_map,
+            pq=pq,
+            av=av_module,
+            image_cls=image_cls,
+        )
+        if not exported:
+            raise SystemExit("No published episode exported.")
+        print("Done.")
+        return
+
     if args.export_mp4:
         print(f"MP4 export:   enabled (fps={args.mp4_fps})")
 

@@ -30,6 +30,9 @@ from rlinf.scheduler import Cluster, ComponentPlacement, Worker
 
 
 class DataCollector(Worker):
+    # Class-level default so tests that bypass __init__ still get demos saved.
+    save_demos = True
+
     def __init__(self, cfg):
         super().__init__()
 
@@ -61,6 +64,8 @@ class DataCollector(Worker):
                 only_success=dc_cfg.get("only_success", False),
                 finalize_interval=dc_cfg.get("finalize_interval", 100),
                 resume=bool(dc_cfg.get("resume", False)),
+                streaming=bool(dc_cfg.get("streaming", False)),
+                export_mp4=bool(dc_cfg.get("export_mp4", False)),
             )
             self._preexisting_success = int(
                 getattr(self.env, "preexisting_episode_count", 0)
@@ -76,16 +81,24 @@ class DataCollector(Worker):
         # Read from the wrapped action space so GripperCloseEnv / dual-arm all just work.
         self.action_dim = int(self.env.action_space.shape[-1])
 
-        buffer_path = os.path.join(self.cfg.runner.logger.log_path, "demos")
-        self.log_info(f"Initializing ReplayBuffer at: {buffer_path}")
+        # ``save_demos: false`` skips the RLinf replay buffer entirely. The
+        # rollout builder accumulates every frame's raw images in memory until
+        # episode end, so LeRobot-only collectors (e.g. streaming YAM
+        # collection) should turn this off to keep RAM flat.
+        self.save_demos = bool(getattr(cfg.runner, "save_demos", True))
+        if self.save_demos:
+            buffer_path = os.path.join(self.cfg.runner.logger.log_path, "demos")
+            self.log_info(f"Initializing ReplayBuffer at: {buffer_path}")
 
-        self.buffer = TrajectoryReplayBuffer(
-            seed=self.cfg.seed if hasattr(self.cfg, "seed") else 1234,
-            enable_cache=False,
-            auto_save=True,
-            auto_save_path=buffer_path,
-            trajectory_format="pt",
-        )
+            self.buffer = TrajectoryReplayBuffer(
+                seed=self.cfg.seed if hasattr(self.cfg, "seed") else 1234,
+                enable_cache=False,
+                auto_save=True,
+                auto_save_path=buffer_path,
+                trajectory_format="pt",
+            )
+        else:
+            self.buffer = None
 
         # Outer rate limiter for envs that don't self-pace (e.g. direct-stream).
         fps = dc_cfg.get("fps") if dc_cfg else None
@@ -100,11 +113,14 @@ class DataCollector(Worker):
         for key, val in obs.items():
             if isinstance(val, np.ndarray):
                 val = torch.from_numpy(val)
-            val = val.cpu()
-            if key == "images":
-                ret_obs["main_images"] = val.clone()
+            if isinstance(val, torch.Tensor):
+                processed = val.detach().cpu().clone()
             else:
-                ret_obs[key] = val.clone()
+                processed = val
+            if key == "images":
+                ret_obs["main_images"] = processed
+            else:
+                ret_obs[key] = processed
         return ret_obs
 
     @staticmethod
@@ -126,12 +142,16 @@ class DataCollector(Worker):
             desc="Collecting Data Episodes:",
         )
 
-        current_rollout = TrajectoryAccumulator(
-            max_episode_length=self.cfg.env.eval.max_episode_steps,
+        current_rollout = (
+            TrajectoryAccumulator(
+                max_episode_length=self.cfg.env.eval.max_episode_steps,
+            )
+            if self.save_demos
+            else None
         )
+        current_obs_processed = self._process_obs(obs) if self.save_demos else None
 
-        current_obs_processed = self._process_obs(obs)
-
+        review_counted = False
         while success_cnt < self.num_data_episodes:
             iter_start = time.perf_counter()
             # Teleop wrapper overrides this via info["intervene_action"].
@@ -141,40 +161,58 @@ class DataCollector(Worker):
             # ``kb_phase is None`` ⇒ no keyboard wrapper attached → upstream "record every step".
             kb_event = info["keyboard_event"][0] if "keyboard_event" in info else None
             kb_phase = info["keyboard_phase"][0] if "keyboard_phase" in info else None
+            record_reset = bool(np.asarray(info.get("record_reset", False)).any())
+            pre_record = bool(np.asarray(info.get("pre_record", False)).any())
             if kb_event:
                 self.log_info(f"[keyboard] {kb_event}")
 
             if "intervene_action" in info:
                 action = info["intervene_action"]
 
-            next_obs_processed = self._process_obs(next_obs)
+            next_obs_processed = (
+                self._process_obs(next_obs) if self.save_demos else None
+            )
 
             terminated_tensor = terminated.unsqueeze(1)
             truncated_tensor = truncated.unsqueeze(1)
             done_tensor = terminated_tensor | truncated_tensor
             done = bool(done_tensor.any().item())
-
-            action_tensor = torch.as_tensor(action, dtype=torch.float32)
-            reward_tensor = reward.float().unsqueeze(1)
-
-            step_result = TrajectoryStep(
-                actions=action_tensor,
-                rewards=reward_tensor,
-                dones=done_tensor,
-                terminations=terminated_tensor,
-                truncations=truncated_tensor,
-                forward_inputs={"action": action_tensor},
-                curr_obs=self._drop_task_descriptions(current_obs_processed),
-                next_obs=self._drop_task_descriptions(next_obs_processed),
+            review_pending = bool(
+                np.asarray(info.get("episode_review_pending", False)).any()
             )
-
-            # Rebuild rollout on rec-start or abort; ``restart`` kept for older wrappers.
-            if kb_event in ("start", "restart", "abort"):
-                current_rollout = TrajectoryAccumulator(
-                    max_episode_length=self.cfg.env.eval.max_episode_steps,
+            if review_pending and not review_counted:
+                progress_bar.update(1)
+                progress_bar.refresh()
+                review_counted = True
+                self.log_info(
+                    f"[待选择] 本条暂计 {success_cnt + 1}/{self.num_data_episodes}；"
+                    f"已保留 {success_cnt} 条。左脚删除，右脚保存；中间不用。"
                 )
-            if kb_phase in (None, "rec"):
-                current_rollout.append(step_result)
+
+            if self.save_demos:
+                action_tensor = torch.as_tensor(action, dtype=torch.float32)
+                reward_tensor = reward.float().unsqueeze(1)
+
+                step_result = TrajectoryStep(
+                    actions=action_tensor,
+                    rewards=reward_tensor,
+                    dones=done_tensor,
+                    terminations=terminated_tensor,
+                    truncations=truncated_tensor,
+                    forward_inputs={"action": action_tensor},
+                    curr_obs=self._drop_task_descriptions(current_obs_processed),
+                    next_obs=self._drop_task_descriptions(next_obs_processed),
+                )
+
+                # Rebuild rollout on rec-start or abort; ``restart`` kept for older wrappers.
+                if record_reset or kb_event in ("start", "restart", "abort"):
+                    current_rollout = TrajectoryAccumulator(
+                        max_episode_length=self.cfg.env.eval.max_episode_steps,
+                    )
+                # Match CollectEpisode: the start/abort transition establishes the
+                # next observation as the new initial frame; it is not recorded.
+                if not record_reset and not pre_record and kb_phase in (None, "rec"):
+                    current_rollout.append(step_result)
 
             obs = next_obs
             current_obs_processed = next_obs_processed
@@ -202,6 +240,16 @@ class DataCollector(Worker):
                 else:
                     save_episode = bool(r_val >= 0.5 or manual_done)
 
+                if bool(np.asarray(info.get("recording_invalid", False)).any()):
+                    save_episode = False
+                    self.log_info(
+                        "Recording overflow: incomplete episode excluded from success count."
+                    )
+
+                discarded = bool(np.asarray(info.get("episode_discarded", False)).any())
+                if discarded:
+                    save_episode = False
+
                 if save_episode:
                     success_cnt += 1
 
@@ -210,27 +258,43 @@ class DataCollector(Worker):
                         f"Total: {success_cnt}/{self.num_data_episodes}"
                     )
 
-                    trajectory = current_rollout.to_trajectory()
-                    trajectory.intervene_flags = torch.ones_like(
-                        trajectory.intervene_flags
-                    )
-                    self.buffer.add_trajectories([trajectory])
+                    if self.save_demos:
+                        trajectory = current_rollout.to_trajectory()
+                        trajectory.intervene_flags = torch.ones_like(
+                            trajectory.intervene_flags
+                        )
+                        self.buffer.add_trajectories([trajectory])
 
-                    progress_bar.update(1)
+                    if not review_counted:
+                        progress_bar.update(1)
+                    else:
+                        self.log_info(
+                            f"[确认保留] {success_cnt}/{self.num_data_episodes}；"
+                            "已提交后台保存。"
+                        )
                 else:
+                    if review_counted:
+                        progress_bar.update(-1)
+                        progress_bar.refresh()
+                        self.log_info(
+                            f"[不保留] 进度回退至 {success_cnt}/{self.num_data_episodes}；"
+                            "按手柄录制键重新采集下一条。"
+                        )
                     self.log_info(
                         f"Episode ended (reward={r_val:.2f}). "
                         f"Discarded. Total success: {success_cnt}/{self.num_data_episodes}"
                     )
 
+                review_counted = False
                 reset_options = None
                 if success_cnt >= self.num_data_episodes:
                     reset_options = {"skip_wait_for_start": True}
                 obs, _ = self.env.reset(options=reset_options)
-                current_obs_processed = self._process_obs(obs)
-                current_rollout = TrajectoryAccumulator(
-                    max_episode_length=self.cfg.env.eval.max_episode_steps,
-                )
+                if self.save_demos:
+                    current_obs_processed = self._process_obs(obs)
+                    current_rollout = TrajectoryAccumulator(
+                        max_episode_length=self.cfg.env.eval.max_episode_steps,
+                    )
 
             # Pin loop period; on ``done`` env.reset usually exceeds it → sleep_for≤0 no-ops.
             if self._target_step_period is not None:
@@ -239,10 +303,11 @@ class DataCollector(Worker):
                 if sleep_for > 0:
                     time.sleep(sleep_for)
 
-        self.buffer.close()
-        self.log_info(
-            f"Finished. Demos saved in: {os.path.join(self.cfg.runner.logger.log_path, 'demos')}"
-        )
+        if self.save_demos:
+            self.buffer.close()
+            self.log_info(
+                f"Finished. Demos saved in: {os.path.join(self.cfg.runner.logger.log_path, 'demos')}"
+            )
         self.env.close()
 
 
