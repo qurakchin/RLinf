@@ -70,6 +70,9 @@ from rlinf.models.embodiment.openpi.dataconfig.realworld_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
     LeRobotRobocasaDataConfig,
 )
+from rlinf.models.embodiment.openpi.dataconfig.robodojo_dataconfig import (
+    LeRobotRoboDojoDataConfig,
+)
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
 )
@@ -580,6 +583,20 @@ _CONFIGS = [
             assets=AssetsConfig(asset_id="assets/droid"),
         ),
         pytorch_weight_path="checkpoints/torch/pi05_droid_polaris",
+    ),
+    TrainConfig(
+        name="pi05_robodojo_arx_x5",
+        model=pi0_config.Pi0Config(pi05=True, discrete_state_input=True),
+        data=LeRobotRoboDojoDataConfig(
+            repo_id="RoboDojo/arx_x5",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(
+                assets_dir="checkpoints/torch/pi05_robodojo_arx_x5/assets"
+            ),
+            extra_delta_transform=True,
+        ),
+        pytorch_weight_path="checkpoints/torch/pi05_base",
+        num_train_steps=20_000,
     ),
 ]
 
