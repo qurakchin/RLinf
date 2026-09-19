@@ -1,7 +1,7 @@
 ARG BUILD_TARGET=embodied
 ARG TARGETARCH
 # Hardware platform for the install: nvidia (default), amd (ROCm), ascend (CANN),
-# or musa (Moore Threads).
+# musa (Moore Threads) or kunlun (Kunlunxin).
 ARG PLATFORM=nvidia
 # Per-platform runtime versions. Override these for common CUDA/ROCm/CANN bumps, or
 # override the full base-image args below for a different image family/Ubuntu.
@@ -10,6 +10,7 @@ ARG ROCM_VER=7.2
 ARG ROCM_ARCHS=gfx90a;gfx942
 ARG CANN_VER=9.1.1-910b
 ARG MUSA_VER=v2.1.5-musa4.3.7
+ARG KUNLUN_VER=v1.7.2
 ARG UBUNTU_VER=22.04
 # Registry prefix for the Docker Hub base images, with a trailing slash.
 # Empty pulls from Docker Hub; set e.g. REGISTRY_MIRROR=m.daocloud.io/docker.io/ when it is unreachable.
@@ -20,6 +21,8 @@ ARG AMD_BASE_IMAGE=${REGISTRY_MIRROR}rocm/dev-ubuntu-${UBUNTU_VER}:${ROCM_VER}-c
 ARG ASCEND_BASE_IMAGE=swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:${CANN_VER}-ubuntu${UBUNTU_VER}-py3.11
 # MUSA lives on the Moore Threads registry, not Docker Hub.
 ARG MUSA_BASE_IMAGE=registry.mthreads.com/mcctest/ai/training-suite:${MUSA_VER}
+# KUNLUN lives on the Kunlunxin registry, not Docker Hub.
+ARG KUNLUN_BASE_IMAGE=hub.kunlunxin.com/public/kunlita/xav-rlinf:${KUNLUN_VER}
 
 
 ##################################################################################################
@@ -36,6 +39,7 @@ ENV AMD_VISIBLE_DEVICES=all
 FROM ${ASCEND_BASE_IMAGE} AS base-image-platform-ascend
 ENV ASCEND_VISIBLE_DEVICES=all
 FROM ${MUSA_BASE_IMAGE} AS base-image-platform-musa
+FROM ${KUNLUN_BASE_IMAGE} AS base-image-platform-kunlun
 ENV MTHREADS_VISIBLE_DEVICES=all
 ENV MTHREADS_DRIVER_CAPABILITIES=all
 
