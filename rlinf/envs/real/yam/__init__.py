@@ -14,21 +14,30 @@
 
 """RLinf-native YAM environment without a yam-abc-reproduce dependency."""
 
-from rlinf.envs.real.yam import tasks as tasks
+from rlinf.envs.real.registry import register_tasks
 from rlinf.envs.real.yam.config import (
     DualYamJointEnvConfig,
     YamLeaderInterventionConfig,
+    YamPicoConfig,
     YamResetConfig,
 )
 from rlinf.envs.real.yam.control_runtime import YamControlRuntime
 from rlinf.envs.real.yam.dual_yam_joint_env import DualYamJointEnv
 from rlinf.envs.real.yam.leader_intervention import DualYamLeaderIntervention
+from rlinf.envs.real.yam.pico_episode import YamPicoEpisode
 from rlinf.envs.real.yam.types import (
     DualYamState,
     YamArmState,
     YamCommandResult,
     YamLeaderState,
 )
+
+#: Gymnasium IDs mapped to the YAM environments that build them. Registering
+#: the class, rather than an entry point of its own, is what lets the shared
+#: wrapper stack apply the teleop device and its episode control.
+TASKS: dict[str, type] = {"DualYamJointEnv-v1": DualYamJointEnv}
+
+_ENTRY_POINTS = register_tasks(__name__, globals(), TASKS)
 
 __all__ = [
     "DualYamJointEnv",
@@ -40,6 +49,8 @@ __all__ = [
     "YamControlRuntime",
     "YamLeaderInterventionConfig",
     "YamLeaderState",
+    "YamPicoConfig",
+    "YamPicoEpisode",
     "YamResetConfig",
-    "tasks",
+    *_ENTRY_POINTS,
 ]

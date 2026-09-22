@@ -134,8 +134,9 @@ Explicit ``controller_local`` restores the original Franka convention, which
 remains the Franka default. Rotation holds the ``grasp_site`` position fixed;
 it is not a command to rotate only the last joint and can be unreachable.
 
-YAM composes the target with ``_delta_to_tcp_pose`` in
-``rlinf/envs/real/yam/pico_intervention.py``: ``p_target = p_current + delta_p``
+YAM composes the target in the ``yam_pico`` device
+(``rlinf/robotics/parts/teleop/yam_pico.py``, via ``_YamPicoArm`` and
+``_delta_to_tcp_pose``): ``p_target = p_current + delta_p``
 and ``R_target = delta_R @ R_current``, anchored at the measured TCP pose of the
 grip edge. YAM disables motion clipping in both encoding and decoding. After IK
 converges, joints interpolate from measured positions toward the validated
@@ -231,6 +232,7 @@ RLinf keeps resource scheduling separate from device control:
      -> RealWorldEnv._create_env()
      -> create_dual_yam_joint_env()
      -> optional DualYamLeaderIntervention
+     -> optional YamPico device + YamPicoEpisode    # VR collection
      -> DualYamJointEnv
      -> YamControlRuntime                    # only follower-command writer
      -> lazy i2rt backend
@@ -681,10 +683,12 @@ Implementation Map
      - Implements the Gym action/observation spaces, lazy startup, camera processing, step pacing, and resource cleanup.
    * - ``rlinf/envs/real/yam/leader_intervention.py``
      - Implements dual-leader synchronization, buttons, episode control, policy/hold ownership, and ``intervene_action`` reporting.
-   * - ``rlinf/envs/real/yam/tasks/__init__.py``
-     - Registers ``DualYamJointEnv-v1``, validates ``main_image_key``, and installs the optional intervention wrapper.
    * - ``rlinf/envs/real/yam/__init__.py``
-     - Exposes the public YAM API and imports the task registration.
+     - Exposes the public YAM API and registers ``DualYamJointEnv-v1`` with the task registry.
+   * - ``rlinf/envs/real/yam/pico_episode.py``
+     - Record, discard, and keyboard episode control for VR collection: ``YamPicoEpisode``.
+   * - ``rlinf/robotics/parts/teleop/yam_pico.py``
+     - The ``yam_pico`` teleop device: PICO readings mapped to the 14-value joint target, IK, and fault holds.
    * - ``examples/embodiment/config/env/realworld_dual_yam_joint.yaml``
      - Reusable real-world Gym/task defaults and explicit RLinf safety limits.
    * - ``examples/embodiment/config/realworld_dual_yam_collect_data.yaml``

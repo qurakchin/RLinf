@@ -226,6 +226,10 @@ class LeRobotDatasetWriter:
             # LeRobot v2 normally concatenates all embedded episodes in RAM.
             # This instance only records; keep upstream metadata/stats handling
             # but replace its table writer. Other dataset instances are untouched.
+            #
+            # These are LeRobot-internal hooks, pinned by LEROBOT_COMMIT in
+            # requirements/install.sh. Re-verify them (and the guards below)
+            # whenever that pin moves.
             self.dataset._save_episode_table = MethodType(
                 _save_episode_table, self.dataset
             )

@@ -9,10 +9,11 @@
 
 RLinf 已经具备 PICO 数据接收、坐标转换、接管判断和 Franka 动作适配。YAM 接入的主要缺口是把 VR 末端运动转换为 YAM 关节目标，并处理夹爪、控制权和录制状态。网络 VR 消息、机器人控制 action、训练数据是三个不同层次，不能仅按向量维数判断是否兼容。
 
-> 后续实现更新：当前工作区已新增 `yam/kinematics.py` 和 `yam/pico_intervention.py`，
-> 并在 YAM 工厂处理 `use_pico`。采用两个独立 PicoExpert 和 i2rt FK/IK，保留 14D
-> 数据契约。下文第 8 节的“缺口”描述的是 `3554fd2c` 分析基准；实现进度与未完成的
-> 真机验收见 [plan.md](plan.md)。
+> 后续实现更新：当前工作区已新增 `yam/kinematics.py`，VR 控制则在
+> `rlinf/robotics/parts/teleop/yam_pico.py` 的 `yam_pico` 设备中，录制/丢弃状态在
+> `yam/pico_episode.py`；配置用 `teleop: yam_pico`（`use_pico` 已退役）。采用两个
+> 独立 PicoExpert 和 i2rt FK/IK，保留 14D 数据契约。下文第 8 节的“缺口”描述的是
+> `3554fd2c` 分析基准；实现进度与未完成的真机验收见 [plan.md](plan.md)。
 
 ## 1. 完整数据流与进程边界
 
@@ -235,7 +236,9 @@ rotation_error = target_rotation × inverse(current_rotation)
 
 相关实现：
 
-- [pico_intervention.py](../rlinf/envs/real/wrappers/teleop/intervention.py)
+- [intervention.py](../rlinf/envs/real/wrappers/teleop/intervention.py)
+- [yam_pico.py](../rlinf/robotics/parts/teleop/yam_pico.py)
+- [pico_episode.py](../rlinf/envs/real/yam/pico_episode.py)
 - [franka_env.py](../rlinf/envs/real/franka/franka_env.py)
 - [dual_franka_tcp_env.py](../rlinf/envs/real/franka/tasks/dual_franka_tcp_env.py)
 - [rot6d.py](../rlinf/utils/rot6d.py)
@@ -333,7 +336,9 @@ segment_id             uint8[1]
 
 ## 8. YAM 接入的可复用部分与缺口
 
-当前 [YAM 工厂](../rlinf/envs/real/yam/tasks/__init__.py) 只装配 `DualYamJointEnv` 和可选的 `DualYamLeaderIntervention`，没有处理 `use_pico`。仅在 YAM YAML 中添加 `use_pico: true` 不会自动获得 VR 控制。
+当前 YAM 环境在 [episode_wrappers](../rlinf/envs/real/yam/dual_yam_joint_env.py) 中装配 `DualYamJointEnv`、可选的 `DualYamLeaderIntervention`，
+以及 VR 采集用的 `YamPico` 设备与 `YamPicoEpisode`。VR 由 `teleop: yam_pico` 选择；
+已退役的 `use_pico: true` 不会自动获得 VR 控制。
 
 [YAM 后端](../rlinf/envs/real/yam/i2rt_backend.py) 用 `get_joint_pos()` 读取关节状态，用 `command_joint_pos()` 下发目标。当前 RLinf YAM 接口尚未提供 VR 所需的 TCP 查询与末端目标求解适配。
 

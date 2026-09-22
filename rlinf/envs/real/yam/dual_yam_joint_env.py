@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,6 +26,7 @@ import gymnasium as gym
 import numpy as np
 
 from rlinf.robotics import DualYamConfig, RobotInfo
+from rlinf.robotics.actions import ActionKind, ActionPart
 from rlinf.robotics.parts.cameras import BaseCamera, Camera, CameraInfo
 from rlinf.utils.logging import get_logger
 
@@ -46,6 +48,15 @@ class DualYamJointEnv(gym.Env):
     """
 
     metadata = {"render_modes": []}
+
+    #: Teleop devices the shared stack may drive this environment with. The
+    #: device fills joint slots, so the shared ``pico`` device is not one of
+    #: them: there the arm slot means a Cartesian pose or delta. A device whose
+    #: action kind disagrees with :meth:`action_parts` is rejected when the
+    #: group is built, so this list only needs to name devices that fit.
+    TELEOP: tuple[str, ...] = ("yam_pico",)
+    TELEOP_DEFAULT = "none"
+    TELEOP_MARK_FLAG = True
 
     def __init__(
         self,
@@ -170,6 +181,57 @@ class DualYamJointEnv(gym.Env):
         """Natural-language task prompt exposed to ``RealWorldEnv``."""
         return self.config.task_description
 
+    def action_parts(self) -> tuple[ActionPart, ...]:
+        """Return the named layout of the 14-D action vector.
+
+        The order matches :meth:`step`: each arm's six absolute joint angles
+        followed by its gripper, left arm first.
+        """
+        from rlinf.envs.real.wrappers.teleop.layout import mirrored
+
+        return mirrored(
+            (
+                ActionPart("arm", 6, ActionKind.JOINT_POSITION),
+                ActionPart("end_effector", 1, ActionKind.GRIPPER),
+            ),
+            ("left", "right"),
+        )
+
+    def episode_wrappers(self, cfg: Mapping[str, Any]) -> list[Any]:
+        """Return the episode control the configured teleoperation needs.
+
+        The motorized teaching handles own the whole episode, so they replace
+        the PICO episode wrapper rather than sitting alongside it. The shared
+        stack already skips teleoperation on a dummy environment, and so does
+        this: a dummy station has no controllers to record from.
+        """
+        if self.config.leader_intervention.enabled:
+            from .leader_intervention import DualYamLeaderIntervention
+
+            return [
+                partial(
+                    DualYamLeaderIntervention,
+                    config=self.config.leader_intervention,
+                )
+            ]
+        if self.config.is_dummy:
+            return []
+        from rlinf.envs.real.wrappers.teleop.config import resolve_teleop_devices
+
+        if not resolve_teleop_devices(
+            cfg, supported=self.TELEOP, default=self.TELEOP_DEFAULT
+        ):
+            return []
+        from .config import YamPicoConfig
+        from .pico_episode import YamPicoEpisode
+
+        return [
+            partial(
+                YamPicoEpisode,
+                config=YamPicoConfig(**dict(cfg.get("pico", {}))),
+            )
+        ]
+
     @property
     def runtime(self) -> YamControlRuntime:
         """The single owner of follower and optional leader transports."""
@@ -292,6 +354,15 @@ class DualYamJointEnv(gym.Env):
     def get_hold_action(self, fallback_action: Any = None) -> np.ndarray:
         """Return current measured positions, never an all-zero fallback."""
         del fallback_action
+        return self.get_joint_positions()
+
+    def get_joint_positions(self) -> np.ndarray:
+        """Return the measured joints and grippers in action order.
+
+        Shape ``(14,)``: each arm's six joint angles followed by its gripper,
+        left arm first. Teleoperation devices read this to seed inverse
+        kinematics and to hold an arm where it stands.
+        """
         self._ensure_started()
         return self._runtime.read_state().as_vector().astype(np.float32)
 

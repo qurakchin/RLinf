@@ -25,7 +25,7 @@ import gymnasium as gym
 import numpy as np
 from tqdm import tqdm
 
-from rlinf.envs.real.utils.foot_switch import FootSwitch
+from rlinf.envs.real.wrappers.episode.foot_switch import FootSwitch
 
 from .config import YamLeaderInterventionConfig
 from .dual_yam_joint_env import DualYamJointEnv
@@ -42,10 +42,14 @@ class DualYamLeaderIntervention(gym.Wrapper):
     def __init__(
         self,
         env: DualYamJointEnv,
-        config: dict[str, Any] | None = None,
+        config: "YamLeaderInterventionConfig | dict[str, Any] | None" = None,
     ) -> None:
         super().__init__(env)
-        self.config = YamLeaderInterventionConfig(**dict(config or {}))
+        self.config = (
+            config
+            if isinstance(config, YamLeaderInterventionConfig)
+            else YamLeaderInterventionConfig(**dict(config or {}))
+        )
         self._recording = False
         self._sync_enabled = False
         self._review_pending = False

@@ -104,7 +104,8 @@ YAM 默认 ``rotation_delta_frame: operator``，让旋转和平移使用相同�
 ``controller_local`` 可显式恢复旧 Franka 的局部增量规则；Franka 默认仍为该规则。
 旋转围绕 ``grasp_site`` 保持 TCP 位置，并非单独转动最后一个关节；部分姿态可能无解。
 
-YAM 用 ``rlinf/envs/real/yam/pico_intervention.py`` 中的 ``_delta_to_tcp_pose``
+YAM 用 ``rlinf/robotics/parts/teleop/yam_pico.py`` 中的 ``yam_pico`` 设备
+（内部为 ``_YamPicoArm`` 与 ``_delta_to_tcp_pose``）
 按 ``p_target = p_current + delta_p``、``R_target = delta_R @ R_current`` 构造
 目标，参考位姿是接管瞬间实测的 TCP 位姿；YAM 在编码和解码时均关闭运动裁剪。
 IK 收敛后，相对实测关节角向通过校验的目标解按统一比例插值。示例通过
@@ -186,6 +187,7 @@ RLinf 把“资源调度”和“设备控制”明确分开：
      -> RealWorldEnv._create_env()
      -> create_dual_yam_joint_env()
      -> 可选 DualYamLeaderIntervention
+     -> 可选 YamPico 设备 + YamPicoEpisode    # VR 采集封装
      -> DualYamJointEnv
      -> YamControlRuntime                    # 从臂命令的唯一写入者
      -> 延迟加载 i2rt backend
@@ -591,10 +593,12 @@ YAM 文件职责总览
      - 实现 Gym action/observation space、延迟启动、相机处理、step 节拍和资源关闭。
    * - ``rlinf/envs/real/yam/leader_intervention.py``
      - 实现双主臂同步、按钮回合控制、policy/hold/leader 命令所有权和 ``intervene_action`` 上报。
-   * - ``rlinf/envs/real/yam/tasks/__init__.py``
-     - 注册 ``DualYamJointEnv-v1``、校验 ``main_image_key``，并按配置装配主臂干预 wrapper。
    * - ``rlinf/envs/real/yam/__init__.py``
-     - 汇总公开 YAM API，并触发任务注册。
+     - 汇总公开 YAM API，并向任务注册表登记 ``DualYamJointEnv-v1``。
+   * - ``rlinf/envs/real/yam/pico_episode.py``
+     - VR 采集的录制、丢弃与键盘回合控制，即 ``YamPicoEpisode``。
+   * - ``rlinf/robotics/parts/teleop/yam_pico.py``
+     - ``yam_pico`` 遥操作设备：PICO 读数到 14 维关节目标的映射、IK 与故障保持。
    * - ``examples/embodiment/config/env/realworld_dual_yam_joint.yaml``
      - 可复用的 Gym/任务默认值及显式 RLinf 安全限制。
    * - ``examples/embodiment/config/realworld_dual_yam_collect_data.yaml``

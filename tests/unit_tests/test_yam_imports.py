@@ -56,7 +56,7 @@ def test_scheduler_and_dummy_gym_env_do_not_import_i2rt():
         assert NodeHardwareConfig.config_class("DualYam") is DualYamConfig
         spec = gym.spec("DualYamJointEnv-v1")
         assert spec.entry_point == (
-            "rlinf.envs.real.yam.tasks:create_dual_yam_joint_env"
+            "rlinf.envs.real.yam:create_DualYamJointEnv"
         )
         assert not any(
             name == "i2rt" or name.startswith("i2rt.") for name in sys.modules

@@ -147,10 +147,12 @@ def test_yam_install_target_bundles_the_pinned_i2rt_sdk():
 
 
 def test_pico_example_composes_into_a_valid_lazy_yam_station(monkeypatch):
+    import gymnasium as gym
     from hydra import compose, initialize_config_dir
     from omegaconf import OmegaConf
 
-    from rlinf.envs.real.yam.tasks import create_dual_yam_joint_env
+    import rlinf.envs.real.yam  # noqa: F401 - registers the Gymnasium ID
+    from rlinf.envs.real.yam import DualYamJointEnv, YamPicoConfig, YamPicoEpisode
     from rlinf.robotics import RobotInfo
     from rlinf.robotics.robots.dual_yam import DualYamConfig
 
@@ -172,6 +174,11 @@ def test_pico_example_composes_into_a_valid_lazy_yam_station(monkeypatch):
     override["is_dummy"] = True
     assert override["enforce_runtime_joint_limits"]
     assert not override["leader_intervention"]["enabled"]
+    # The VR recipe selects the paired device through the shared key, and the
+    # device-specific options the wrapper reads live under 'pico'.
+    assert eval_cfg["teleop"] == "yam_pico"
+    assert "use_pico" not in eval_cfg
+    assert eval_cfg["pico"]["hand"] == "dual"
     assert eval_cfg["data_collection"]["export_format"] == "lerobot"
     # Same streaming/park contract as the leader-arm collection recipe.
     assert eval_cfg["data_collection"]["streaming"] is True
@@ -181,12 +188,31 @@ def test_pico_example_composes_into_a_valid_lazy_yam_station(monkeypatch):
     park = override["park_on_close"]
     assert park["enabled"] is True
     assert len(park["left_qpos"]) == 7 and len(park["right_qpos"]) == 7
-    env = create_dual_yam_joint_env(
-        override,
+    env = gym.make(
+        "DualYamJointEnv-v1",
+        override_cfg=override,
         worker_info=None,
         robot_info=hardware,
         env_idx=0,
         env_cfg=eval_cfg,
     )
-    assert env.experts == {}  # Construction must not subscribe or open CAN.
+    # A dummy station composes without opening ZMQ, CAN, or cameras.
+    assert env.action_space.shape == (14,)
     env.close()
+
+    # The recipe reaches the PICO controller: on a station that does own
+    # hardware, the episode control it installs carries the same 'pico' options
+    # the device does, so both halves read one block of the YAML.
+    station_env = DualYamJointEnv(
+        {**override, "is_dummy": False},
+        worker_info=None,
+        robot_info=hardware,
+        env_idx=0,
+    )
+    (episode_control,) = station_env.episode_wrappers(eval_cfg)
+    assert episode_control.func is YamPicoEpisode
+    pico_config = episode_control.keywords["config"]
+    assert isinstance(pico_config, YamPicoConfig)
+    assert pico_config.zmq_addr == eval_cfg["pico"]["zmq_addr"]
+    assert pico_config.record_button == eval_cfg["pico"]["record_button"]
+    assert pico_config.wait_for_record_button is True

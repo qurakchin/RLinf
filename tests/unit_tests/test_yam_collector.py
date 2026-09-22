@@ -67,15 +67,14 @@ def test_replay_collector_skips_start_preview_and_aborted_transitions(
 ):
     module = _load_collector(monkeypatch)
 
-    class Builder:
+    class Accumulator:
         def __init__(self, **kwargs):
             self.samples = []
 
-        def append_step_result(self, result):
-            pass
-
-        def append_transitions(self, curr_obs, next_obs):
-            self.samples.append((curr_obs["states"].item(), next_obs["states"].item()))
+        def append(self, step):
+            self.samples.append(
+                (step.curr_obs["states"].item(), step.next_obs["states"].item())
+            )
 
         def to_trajectory(self):
             return SimpleNamespace(
@@ -115,7 +114,7 @@ def test_replay_collector_skips_start_preview_and_aborted_transitions(
         def close(self):
             pass
 
-    monkeypatch.setattr(module, "EmbodiedTrajectoryBuilder", Builder)
+    monkeypatch.setattr(module, "TrajectoryAccumulator", Accumulator)
     collector = object.__new__(module.DataCollector)
     collector.cfg = SimpleNamespace(
         runner=SimpleNamespace(

@@ -674,9 +674,6 @@ class CollectEpisode(gym.Wrapper):
             self._extract_success_from_info(env_info)
         )
 
-        image, wrist_image, extra_view_image, state = self._extract_obs_image_state(
-            prev_obs
-        )
         np_action = self._to_numpy(self._slice_data(action, env_idx))
         if (
             isinstance(env_info, dict)
@@ -685,33 +682,22 @@ class CollectEpisode(gym.Wrapper):
             and np.asarray(env_info["intervene_flag"]).all()
         ):
             np_action = self._to_numpy(env_info["intervene_action"])
-        if state is None or np_action is None:
+
+        frame = LeRobotFrame.from_values(
+            observation=prev_obs,
+            action=np_action,
+            task=self._stream_task[env_idx] or "unknown task",
+            intervene_flag=self._intervene_flag_from_info(env_info),
+            segment_id=int(self._segment_ids[env_idx]),
+        )
+        if frame is None:
             return
 
-        frame: dict[str, Any] = {
-            "state": np.asarray(state).astype(np.float32),
-            "actions": np.asarray(np_action).astype(np.float32).flatten(),
-            "task": self._stream_task[env_idx] or "unknown task",
-            # Stamped episode-level by ``save_episode`` once the outcome is known.
-            "is_success": np.array([False], dtype=bool),
-            "done": np.array([False], dtype=bool),
-            "intervene_flag": np.array(
-                [self._intervene_flag_from_info(env_info)], dtype=bool
-            ),
-            "segment_id": np.array([int(self._segment_ids[env_idx])], dtype=np.uint8),
-        }
-        if image is not None:
-            frame["image"] = self._to_uint8(np.asarray(image))
-        for key, img in self._expand_multi_view_images(
-            "wrist_image", wrist_image
-        ).items():
-            frame[key] = self._to_uint8(np.asarray(img))
-        for key, img in self._expand_multi_view_images(
-            "extra_view_image", extra_view_image
-        ).items():
-            frame[key] = self._to_uint8(np.asarray(img))
-
-        self._submit(self._stream_add_frame, frame)
+        # ``is_success``/``done`` are stamped episode-level by ``save_episode``
+        # once the outcome is known.
+        self._submit(
+            self._stream_add_frame, frame.to_dict(episode_success=False, done=False)
+        )
         self._stream_frames[env_idx] += 1
 
     def _stream_episode_success(self, env_idx: int) -> bool:

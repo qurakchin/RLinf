@@ -25,7 +25,8 @@ FK/IK、VR wrapper、夹爪与录制状态、工厂互斥检查、配置和离�
 
 > rebase 到 PR #1481 之后，接收层已上移到 `rlinf/robotics/parts/transports/pico.py`，
 > 该模块只提供 `get_reading()` / `get_buttons()`。YAM 侧由
-> `rlinf/envs/real/yam/pico_intervention.py` 的 `_YamPicoArm` 承担原先
+> `rlinf/robotics/parts/teleop/yam_pico.py` 的 `yam_pico` 设备
+> （内部 `_YamPicoArm`）承担原先
 > `PicoExpert.get_action()` 的职责。本文其余部分（以及 `yam_vr_data_flow.md`）中
 > 关于“接收与映射未拆分”“`pico_delta_to_tcp_pose`”“scheduler 硬件类型”的描述
 > 属于重构前的设计基准，不再逐条对应现有代码。
@@ -72,7 +73,7 @@ flowchart TD
     D["YAM 实测关节状态"] --> E["YamKinematicsAdapter<br/>FK"]
     E --> C
     C --> F["YamKinematicsAdapter<br/>IK + 解有效性检查"]
-    F --> G["DualYamPicoIntervention<br/>夹爪、保持、录制状态"]
+    F --> G["YamPico 设备（夹爪、保持）<br/>YamPicoEpisode（录制状态）"]
     G --> H["DualYamJointEnv → YamControlRuntime"]
     H --> I["i2rt → 两只 YAM follower"]
     H -->|"accepted_action + 相机/状态"| J["RealWorldEnv → CollectEpisode → LeRobot"]
@@ -203,7 +204,8 @@ VR 示例独立于现有主臂采集配置，强制 `enforce_runtime_joint_limit
 | 文件 | 工作内容 |
 | --- | --- |
 | `rlinf/envs/real/yam/kinematics.py` | SDK 运动学适配、模型映射、IK 结果检查 |
-| `rlinf/envs/real/yam/pico_intervention.py` | 双臂 VR 控制、夹爪、故障与录制状态 |
+| `rlinf/robotics/parts/teleop/yam_pico.py` | 双臂 VR 控制、夹爪、故障状态（`yam_pico` 设备） |
+| `rlinf/envs/real/yam/pico_episode.py` | 录制/丢弃/键盘与等待开始（`YamPicoEpisode`） |
 | `rlinf/envs/real/yam/config.py` | YAM VR/IK 配置与数值校验 |
 | `rlinf/envs/real/yam/tasks/__init__.py` | VR 装配、遥操作互斥、启动前校验 |
 | `rlinf/robotics/parts/transports/pico.py` | 复用现有双实例结构；仅在必要时补充公开接管生命周期接口 |

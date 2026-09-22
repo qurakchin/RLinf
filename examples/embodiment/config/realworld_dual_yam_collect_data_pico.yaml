@@ -93,7 +93,7 @@ env:
     max_steps_per_rollout_epoch: 10000
     auto_reset: false
     ignore_terminations: false
-    use_pico: true
+    teleop: yam_pico
     pico:
       hand: dual
       zmq_addr: ${oc.env:YAM_PICO_ZMQ_ADDR,ipc:///tmp/vr_data.ipc}

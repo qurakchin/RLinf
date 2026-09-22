@@ -60,7 +60,6 @@ _LAUNCHER_CASES = (
         "[入袋规则] 左袋：可口可乐；右袋：百事可乐",
         "[初始勺子] 左碗后：粉勺；右碗后：白勺",
     ),
-
 )
 
 
@@ -118,7 +117,7 @@ def _run_launcher(
         "FAKE_PYTHON_ARGV": str(argv_path),
     }
     if log_dir is not None:
-        env["LOG_DIR"] = str(log_dir)
+        env["RLINF_LOG_DIR"] = str(log_dir)
 
     result = subprocess.run(
         ["bash", str(script_path), *args],

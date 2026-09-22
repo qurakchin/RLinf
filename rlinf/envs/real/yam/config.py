@@ -281,6 +281,11 @@ class DualYamJointEnvConfig:
         default_factory=lambda: ["top_rgb", "left_rgb", "right_rgb"]
     )
     manual_episode_control_only: bool = False
+    # Motorized teaching handles, which drive the followers directly and are
+    # mutually exclusive with any shared teleop device.
+    leader_intervention: YamLeaderInterventionConfig | Mapping[str, Any] = field(
+        default_factory=lambda: YamLeaderInterventionConfig()
+    )
     reset: YamResetConfig | Mapping[str, Any] = field(default_factory=YamResetConfig)
     # Park the arms at a configured safe pose before releasing torque on
     # close(); the mode field is ignored (only the pose/timing fields apply).
@@ -360,6 +365,16 @@ class DualYamJointEnvConfig:
             np.isfinite(self.joint_limit_max)
         ):
             raise ValueError("YAM joint limits must be finite")
+        if self.leader_intervention is None:
+            self.leader_intervention = YamLeaderInterventionConfig()
+        elif isinstance(self.leader_intervention, Mapping):
+            self.leader_intervention = YamLeaderInterventionConfig(
+                **dict(self.leader_intervention)
+            )
+        elif not isinstance(self.leader_intervention, YamLeaderInterventionConfig):
+            raise TypeError(
+                "leader_intervention must be a mapping or YamLeaderInterventionConfig"
+            )
         if isinstance(self.reset, Mapping):
             self.reset = YamResetConfig(**dict(self.reset))
         elif not isinstance(self.reset, YamResetConfig):
@@ -403,6 +418,8 @@ class DualYamJointEnvConfig:
 class YamLeaderInterventionConfig:
     """Teaching-handle button and episode-control behavior."""
 
+    #: Whether the teaching handles drive the followers at all.
+    enabled: bool = False
     wait_for_record_button: bool = True
     sync_on_reset: bool = False
     preserve_sync_between_episodes: bool = False
@@ -415,6 +432,8 @@ class YamLeaderInterventionConfig:
     foot_switch_reset_key: int | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise TypeError("leader_intervention.enabled must be a bool")
         if not isinstance(self.wait_for_record_button, bool):
             raise TypeError("wait_for_record_button must be a bool")
         if not isinstance(self.sync_on_reset, bool):

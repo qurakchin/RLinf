@@ -336,7 +336,7 @@ def test_early_reset_still_releases_sync_in_continuous_mode(monkeypatch):
 
 @pytest.mark.parametrize("choice", ["keep", "discard"])
 def test_foot_review_keeps_teleop_live_without_recording(monkeypatch, choice):
-    from rlinf.envs.real.utils import foot_switch
+    from rlinf.envs.real.wrappers.episode import foot_switch
 
     class Pedal:
         choice = None

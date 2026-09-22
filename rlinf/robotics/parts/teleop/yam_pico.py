@@ -12,24 +12,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Two independent PICO controllers driving YAM joints through checked IK."""
+"""PICO VR controllers driving a dual YAM in joint space.
+
+One handheld controller per arm. Each accumulates the operator's motion from
+the pose the arm stood at when the grip engaged, solves IK against the YAM
+model, and reports an absolute joint target. Both arms are always commanded:
+one the operator is not holding is commanded to the pose it stood at when
+control was lost, which keeps the vector complete for collection without
+handing the arm back to the policy.
+
+This device fills joint-position slots, so it is not the shared Cartesian
+``pico`` device: there the arm slot means a pose or delta, here it means six
+absolute joint angles.
+"""
 
 from __future__ import annotations
 
-import os
-import select
 import time
-from dataclasses import replace
-from typing import Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
-import gymnasium as gym
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 from rlinf.utils.logging import get_logger
 
-from .config import YamPicoConfig
-from .kinematics import YamIKResult, YamKinematicsAdapter
+from ...actions import ActionKind
+from ..base import Features, Observation
+from .base import TeleopAction, TeleopDevice
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from rlinf.envs.real.yam.config import YamPicoConfig
+
+    from .group import TeleopEntry
+
+#: The two arms a dual YAM station drives, in action-vector order.
+SIDES = ("left", "right")
 
 
 def _delta_to_tcp_pose(
@@ -73,17 +91,21 @@ class _YamPicoArm:
     """
 
     def __init__(self, **expert_kwargs: Any) -> None:
-        from rlinf.robotics.parts.transports.pico import PicoExpert
+        from ..transports.pico import PicoExpert
 
         self.hand = str(expert_kwargs["hand"])
         self._expert = PicoExpert(**expert_kwargs)
-        self._ref_tcp_pos: np.ndarray | None = None
-        self._ref_tcp_rot: Rotation | None = None
+        self._ref_tcp_pos: Optional[np.ndarray] = None
+        self._ref_tcp_rot: Optional[Rotation] = None
 
     @property
     def ready(self) -> bool:
         """Whether the controller stream is fresh enough to command from."""
         return self._expert.ready
+
+    def read(self) -> dict[str, Any]:
+        """Return what the operator is doing with this controller."""
+        return self._expert.get_reading()
 
     def read_buttons(self) -> dict[str, bool]:
         """Return raw controller buttons, for record and discard edges."""
@@ -95,10 +117,12 @@ class _YamPicoArm:
         self._ref_tcp_rot = None
 
     def stop(self) -> None:
+        """Close this controller's subscription."""
         self._expert.stop()
 
-    def get_action(
+    def command(
         self,
+        reading: Mapping[str, Any],
         tcp_pose: np.ndarray,
         action_scale: np.ndarray,
         *,
@@ -111,7 +135,6 @@ class _YamPicoArm:
         compose them with :func:`_delta_to_tcp_pose` using the same flag to
         recover the full target and let the robot controller limit motion.
         """
-        reading = self._expert.get_reading()
         info = self._describe(reading)
         if not reading.get("held", False):
             # The transport reports a missing calibration, a stale stream, and
@@ -159,7 +182,7 @@ class _YamPicoArm:
             action = np.concatenate((action, np.array([grip], dtype=np.float64)))
         return action.astype(np.float32), True, info
 
-    def _describe(self, reading: dict[str, Any]) -> dict[str, Any]:
+    def _describe(self, reading: Mapping[str, Any]) -> dict[str, Any]:
         """Report controller state under the collector's field names."""
         info: dict[str, Any] = {
             "pico_active": bool(reading.get("held", False)),
@@ -183,158 +206,273 @@ class _YamPicoArm:
         return info
 
 
-class _RecordingKeyboard:
-    """Poll an explicitly selected Linux keyboard without another daemon."""
+@TeleopDevice.register("yam_pico")
+class YamPico(TeleopDevice):
+    """A pair of PICO controllers driving both YAM arms in joint space.
 
-    def __init__(self) -> None:
-        from evdev import InputDevice, ecodes
+    Every reading yields a complete fourteen-value target, so the environment
+    never falls back to the policy. An arm the operator is not holding is held
+    where it stands; the whole rig holds after a fault until both grips are
+    released and re-engaged, which is why ``ready`` tracks the connection
+    rather than the controller stream.
 
-        path = os.environ.get("RLINF_KEYBOARD_DEVICE")
-        if not path:
-            raise ValueError(
-                "pico.keyboard_enabled requires RLINF_KEYBOARD_DEVICE=/dev/input/by-id/..."
-            )
-        self.device = InputDevice(path)
-        self.keys = {ecodes.KEY_R: "record", ecodes.KEY_X: "discard"}
-        self.key_type = ecodes.EV_KEY
-
-    def poll(self) -> set[str]:
-        """Read R/X press edges, ignoring key repeats."""
-        if not select.select([self.device], [], [], 0)[0]:
-            return set()
-        return {
-            self.keys[e.code]
-            for e in self.device.read()
-            if e.type == self.key_type and e.value == 1 and e.code in self.keys
-        }
-
-    def close(self) -> None:
-        """Release the input device."""
-        self.device.close()
-
-
-class DualYamPicoIntervention(gym.Wrapper):
-    """Collection-only VR wrapper: inactive arms hold, never follow policy zeros.
-
-    Initialization is lazy. Models/experts are prepared before base reset opens
-    cameras and followers. Explicitly injected experts/kinematics support tests.
+    Args:
+        config: Controller, IK, and episode-control settings.
+        joint_lower: Per-arm lower joint limits that narrow the model's own.
+        joint_upper: Per-arm upper joint limits.
+        joint_step_limits: Largest movement one control tick may command per
+            joint. A target further away is interpolated toward, so the runtime
+            accepts it instead of clipping the command away as a rejection.
+        experts: Controller bindings to use instead of opening real ones.
+        kinematics: IK adapters to use instead of loading the YAM model.
     """
+
+    PRODUCES = {
+        "left.arm": ActionKind.JOINT_POSITION,
+        "left.end_effector": ActionKind.GRIPPER,
+        "right.arm": ActionKind.JOINT_POSITION,
+        "right.end_effector": ActionKind.GRIPPER,
+    }
+
+    NEEDS = ("joint_positions",)
+
+    #: An arm the operator let go is still commanded, to the pose it holds.
+    APPLIES_WHILE_IDLE = True
+
+    #: The controllers report an explicit held state, so no hold window is needed.
+    HOLD_WINDOW = 0.0
 
     def __init__(
         self,
-        env: gym.Env,
-        config: dict[str, Any] | YamPicoConfig | None = None,
+        config: Mapping[str, Any] | "YamPicoConfig" | None = None,
         *,
-        experts: dict[str, Any] | None = None,
-        kinematics: dict[str, Any] | None = None,
-        keyboard: Any | None = None,
+        joint_step_limits: Sequence[float],
+        joint_lower: Optional[Sequence[Sequence[float]]] = None,
+        joint_upper: Optional[Sequence[Sequence[float]]] = None,
+        experts: Optional[Mapping[str, Any]] = None,
+        kinematics: Optional[Mapping[str, Any]] = None,
     ) -> None:
-        super().__init__(env)
-        self.config = (
+        from rlinf.envs.real.yam.config import YamPicoConfig
+
+        self._config = (
             config
             if isinstance(config, YamPicoConfig)
             else YamPicoConfig(**dict(config or {}))
         )
-        if not env.unwrapped.config.enforce_runtime_joint_limits:
-            raise ValueError("YAM VR requires enforce_runtime_joint_limits=true")
-        self.experts = dict(experts or {})
-        self.kinematics = dict(kinematics or {})
-        for collection in (self.experts, self.kinematics):
-            if collection and set(collection) != {"left", "right"}:
+        self._joint_lower = joint_lower
+        self._joint_upper = joint_upper
+        self._joint_step_limits = np.asarray(joint_step_limits, dtype=np.float64)
+        self._experts = dict(experts or {})
+        self._kinematics = dict(kinematics or {})
+        for collection in (self._experts, self._kinematics):
+            if collection and set(collection) != set(SIDES):
                 raise ValueError("YAM PICO requires both left and right instances")
-        self._keyboard = keyboard
-        self._recording = False
+        self._fault: Optional[str] = "release_grips"
         self._preserve_reference = False
-        self._fault = "release_grips"
-        self._last_ik_warning = -float("inf")
-        self._last_step_log = dict.fromkeys(("left", "right"), -float("inf"))
-        self._timing_started: float | None = None
-        self._timing_peaks: dict[str, float] = {}
-        self._timing_count = 0
-        self._timing_faults = 0
-        self._last_tick_return_s: float | None = None
-        self._grippers: np.ndarray | None = None
+        self._grippers: Optional[np.ndarray] = None
         self._idle_joint_targets: dict[str, np.ndarray] = {}
-        self._previous_buttons: tuple[bool, bool] | None = None
-        self._last_edges = [-float("inf"), -float("inf")]
-        self._closed = False
-        self._initialized = False
+        self._last_ik_warning = -float("inf")
+        self._last_step_log = dict.fromkeys(SIDES, -float("inf"))
         self._logger = get_logger()
 
-    def _initialize(self) -> None:
-        if self._closed:
-            raise RuntimeError("YAM PICO wrapper is closed")
-        if self._initialized:
-            return
-        if not self.kinematics:
-            base = self.env.unwrapped
-            for index, side in enumerate(("left", "right")):
-                device = getattr(base.hardware_config, f"{side}_follower")
-                self.kinematics[side] = YamKinematicsAdapter(
-                    arm_type=getattr(device, "arm_type", "yam"),
-                    gripper_type=getattr(device, "gripper_type", "flexible_4310"),
-                    config=self.config.ik,
-                    joint_lower=base.config.joint_limit_min[index],
-                    joint_upper=base.config.joint_limit_max[index],
-                )
-        if not self.experts:
-            for side in ("left", "right"):
-                self.experts[side] = _YamPicoArm(**self.config.expert_kwargs(side))
-        if self.config.keyboard_enabled and self._keyboard is None:
-            self._keyboard = _RecordingKeyboard()
-        self._initialized = True
+    # Hardware.
 
-    def _latch(self, reason: str) -> None:
+    def _open(self) -> None:
+        """Load both IK models and open both controller subscriptions."""
+        try:
+            self._build_kinematics()
+            self._build_experts()
+        except BaseException:
+            # Half a rig is worse than none: the connections already opened
+            # would otherwise outlive the failure that stopped the rest.
+            self.stop()
+            raise
+
+    def _build_kinematics(self) -> None:
+        if self._kinematics:
+            return
+        from rlinf.envs.real.yam.kinematics import YamKinematicsAdapter
+
+        self._kinematics = {
+            side: YamKinematicsAdapter(
+                config=self._config.ik,
+                joint_lower=None if self._joint_lower is None else self._joint_lower[i],
+                joint_upper=None if self._joint_upper is None else self._joint_upper[i],
+            )
+            for i, side in enumerate(SIDES)
+        }
+
+    def _build_experts(self) -> None:
+        if self._experts:
+            return
+        self._experts = {
+            side: _YamPicoArm(**self._config.expert_kwargs(side)) for side in SIDES
+        }
+
+    def stop(self) -> None:
+        """Close both controller subscriptions."""
+        for arm in self._experts.values():
+            arm.stop()
+        self._experts = {}
+
+    @property
+    def ready(self) -> bool:
+        """Whether both controllers are open and can report an idle state.
+
+        Tied to the connection, not to the stream: a controller that went
+        silent must still be driven, so its arms hold rather than hand the
+        robot back to the policy.
+        """
+        return self.is_connected
+
+    # What the operator is doing, and what the robot should do about it.
+
+    @property
+    def observation_features(self) -> Features:
+        """What each controller reports, per arm."""
+        return {
+            side: {
+                "held": {"dtype": "bool", "shape": ()},
+                "position_delta": {"dtype": "float64", "shape": (3,)},
+                "rotation_delta": {"dtype": "float64", "shape": (3,)},
+                "grip_close": {"dtype": "bool", "shape": ()},
+                "grip_open": {"dtype": "bool", "shape": ()},
+            }
+            for side in SIDES
+        }
+
+    def get_observation(self) -> Observation:
+        """Poll both controllers."""
+        return {side: arm.read() for side, arm in self._experts.items()}
+
+    @classmethod
+    def from_config(
+        cls,
+        cfg: Mapping[str, Any],
+        options: Mapping[str, Any],
+        facts: Any,
+    ) -> "TeleopEntry":
+        """Build the paired device, refusing combinations its runtime cannot honor.
+
+        The guards live here rather than in a task factory because the device
+        is built, and refuses, before any hardware is opened.
+        """
+        from rlinf.envs.real.yam.config import YamPicoConfig
+
+        from .group import TeleopEntry
+
+        if options.get("drives") is not None:
+            raise ValueError(
+                "yam_pico already names both arms' action parts; remove 'drives'."
+            )
+        override = cfg.get("override_cfg", {}) or {}
+        if bool((override.get("leader_intervention") or {}).get("enabled", False)):
+            raise ValueError(
+                "YAM PICO and motorized leader intervention are mutually exclusive"
+            )
+        if not bool(override.get("enforce_runtime_joint_limits", True)):
+            raise ValueError("YAM VR requires enforce_runtime_joint_limits=true")
+
+        settings = dict(cfg.get("pico", {}))
+        settings.update({k: v for k, v in options.items() if k != "drives"})
+        return TeleopEntry(
+            cls(
+                YamPicoConfig(**settings),
+                joint_step_limits=facts.joint_step_limits,
+                joint_lower=facts.joint_limit_min,
+                joint_upper=facts.joint_limit_max,
+            )
+        )
+
+    def action(
+        self, reading: Mapping[str, Any], context: Mapping[str, Any]
+    ) -> TeleopAction:
+        """Return an absolute joint target for both arms."""
+        measured = np.asarray(context["joint_positions"], dtype=np.float64).reshape(-1)
+        if measured.shape != (len(SIDES) * 7,):
+            raise ValueError(
+                "yam_pico needs the env's 14-value joint_positions vector, got "
+                f"{measured.shape}."
+            )
+        target, info = self._joint_targets(measured, reading)
+        return TeleopAction(
+            parts={
+                "left.arm": target[:6].astype(np.float32),
+                "left.end_effector": target[6:7].astype(np.float32),
+                "right.arm": target[7:13].astype(np.float32),
+                "right.end_effector": target[13:14].astype(np.float32),
+            },
+            driving=True,
+            info=info,
+        )
+
+    def on_reset(self, context: Mapping[str, Any] = MappingProxyType({})) -> None:
+        """Re-anchor the grips after an episode reset.
+
+        A manual episode boundary that kept the arms where they were asks for
+        the anchors to survive, so the operator can continue from the same
+        pose without re-gripping.
+        """
+        if self._preserve_reference:
+            self._preserve_reference = False
+            return
+        self.hold_until_released("release_grips")
+
+    # Episode control hands its own transitions back through these.
+
+    def hold_until_released(self, reason: str) -> None:
+        """Hold both arms until the operator releases and re-engages both grips."""
         if self._fault != reason:
             self._logger.warning("YAM VR holding both arms: %s", reason)
         self._fault = reason
         self._preserve_reference = False
         self._grippers = None
         self._idle_joint_targets.clear()
-        for expert in self.experts.values():
-            expert.reset_reference()
+        for arm in self._experts.values():
+            arm.reset_reference()
 
-    def reset(
-        self, *, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[Any, dict[str, Any]]:
-        """Keep teleoperation ticking while waiting for a fresh recording start."""
-        try:
-            self._initialize()
-            preserve = (
-                self._preserve_reference
-                and not self.env.unwrapped.will_reset_to_configured_qpos(options)
-            )
-            if not preserve:
-                self._latch("release_grips")
-                self._previous_buttons = None
-            self._preserve_reference = False
-            self._recording = False
-            obs, info = self.env.reset(seed=seed, options=options)
-            if self.config.wait_for_record_button and not (options or {}).get(
-                "skip_wait_for_start", False
-            ):
-                while not self._recording:
-                    obs, _, _, _, info = self._tick(preview=True)
-            return obs, self._decorate(info, None, False)
-        except BaseException:
-            self.close()
-            raise
+    def preserve_reference(self) -> None:
+        """Keep each grip anchor across the next reset."""
+        self._preserve_reference = True
 
-    def _compute_action(self) -> tuple[np.ndarray, dict[str, Any]]:
+    @property
+    def fault(self) -> Optional[str]:
+        """Why both arms are currently held, or ``None`` while driving."""
+        return self._fault
+
+    # Mapping one reading onto joint targets.
+
+    def _pressed_buttons(self) -> tuple[bool, bool]:
+        """Return whether either controller reports each episode button."""
+        pressed = {side: arm.read_buttons() for side, arm in self._experts.items()}
+        return tuple(  # type: ignore[return-value]
+            any(bool(pressed[side].get(button, False)) for side in SIDES)
+            for button in (self._config.record_button, self._config.discard_button)
+        )
+
+    def _joint_targets(
+        self, measured: np.ndarray, readings: Mapping[str, Any]
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Solve both arms toward their controller targets.
+
+        Returns the fourteen-value target and per-arm diagnostics. The target
+        is the measured vector whenever anything is held, so a fault never
+        leaves a half-solved pose behind.
+        """
         started = time.monotonic()
-        measured = self.env.unwrapped.get_hold_action().astype(np.float64)
+        record, discard = self._pressed_buttons()
+        infos: dict[str, Any] = {"pico_record": record, "pico_discard": discard}
         if self._grippers is None:
             self._grippers = measured[[6, 13]].copy()
         target = measured.copy()
         scale = np.array(
-            [self.config.max_position_delta, self.config.max_rotation_delta, 1.0]
+            [self._config.max_position_delta, self._config.max_rotation_delta, 1.0]
         )
-        infos: dict[str, Any] = {}
         results = {}
         poses = {}
         reason = None
         ik_fault = None
-        for i, side in enumerate(("left", "right")):
+        for i, side in enumerate(SIDES):
             arm = measured[i * 7 : i * 7 + 7]
             infos[f"{side}_joint_step_fraction"] = 1.0
             infos[f"{side}_limiting_joint"] = 0
@@ -342,13 +480,13 @@ class DualYamPicoIntervention(gym.Wrapper):
             infos[f"{side}_ik_attempts"] = 0
             infos[f"{side}_ik_target_fraction"] = 0.0
             infos[f"{side}_ik_initial_fault"] = None
-            pose = self.kinematics[side].fk(arm[:6], arm[6])
+            pose = self._kinematics[side].fk(arm[:6], arm[6])
             poses[side] = pose
             tcp = np.concatenate(
                 [pose[:3, 3], Rotation.from_matrix(pose[:3, :3]).as_quat()]
             )
-            action, replaced, info = self.experts[side].get_action(
-                tcp, scale, gripper_enabled=True, clip_motion=False
+            action, replaced, info = self._experts[side].command(
+                readings[side], tcp, scale, gripper_enabled=True, clip_motion=False
             )
             results[side] = (action, replaced, info)
             infos.update({f"{side}_{key}": value for key, value in info.items()})
@@ -359,27 +497,27 @@ class DualYamPicoIntervention(gym.Wrapper):
             ):
                 reason = f"{side}:unavailable"
         if reason:
-            self._latch(reason)
+            self.hold_until_released(reason)
         elif self._fault is not None:
             # Never re-engage a still-held grip after data loss or reset.
             released = all(
                 info.get("pico_control_value", float("inf"))
-                < self.config.control_threshold
+                < self._config.control_threshold
                 for _, _, info in results.values()
             )
-            for expert in self.experts.values():
-                expert.reset_reference()
+            for arm in self._experts.values():
+                arm.reset_reference()
             if released:
                 self._fault = None
                 self._idle_joint_targets = {
                     side: measured[i * 7 : i * 7 + 6].copy()
-                    for i, side in enumerate(("left", "right"))
+                    for i, side in enumerate(SIDES)
                 }
             infos["yam_pico_fault"] = self._fault
             return measured, infos
 
         if self._fault is None:
-            for i, side in enumerate(("left", "right")):
+            for i, side in enumerate(SIDES):
                 action, replaced, _ = results[side]
                 if not replaced:
                     # Latch the release pose once so feedback drift does not
@@ -394,7 +532,7 @@ class DualYamPicoIntervention(gym.Wrapper):
                 self._idle_joint_targets.pop(side, None)
                 action = np.asarray(action, dtype=np.float64)
                 if action.shape != (7,) or not np.all(np.isfinite(action)):
-                    self._latch(f"{side}:invalid_action")
+                    self.hold_until_released(f"{side}:invalid_action")
                     break
                 current = poses[side]
                 tcp = np.r_[
@@ -434,7 +572,7 @@ class DualYamPicoIntervention(gym.Wrapper):
                 # Interpolate toward the full or successfully reduced IK target.
                 # A tiny TCP target ahead of lagging feedback can stall motion.
                 difference = result.q_target - arm[:6]
-                limits = self.env.unwrapped.config.joint_step_limits
+                limits = self._joint_step_limits
                 demand = np.abs(difference) / limits
                 limiting_joint = int(np.argmax(demand))
                 fraction = min(1.0, 1.0 / max(float(demand[limiting_joint]), 1e-12))
@@ -463,36 +601,38 @@ class DualYamPicoIntervention(gym.Wrapper):
                 target[i * 7 + 6] = self._grippers[i]
         # Reject solutions computed from a now-stale stream or a slow solve.
         if self._fault is None and (
-            time.monotonic() - started > self.config.max_tick_s
-            or not all(e.ready for e in self.experts.values())
+            time.monotonic() - started > self._config.max_tick_s
+            or not all(arm.ready for arm in self._experts.values())
         ):
-            self._latch("stale_after_ik")
+            self.hold_until_released("stale_after_ik")
         infos["yam_pico_fault"] = self._fault or ik_fault
         return (measured if self._fault else target), infos
 
     def _solve_with_backtracking(
         self, side: str, target: np.ndarray, current: np.ndarray, arm: np.ndarray
-    ) -> tuple[YamIKResult, int, float, str | None]:
+    ) -> tuple[Any, int, float, Optional[str]]:
         """Retry geometric IK failures toward the same measured TCP reference.
 
         Attempts share max_solve_s; timing is checked between synchronous SDK
         calls and on return, rather than preempting a call. Each retry halves
         both translation and the shortest spatial rotation from current.
         """
+        from dataclasses import replace
+
         started = time.monotonic()
-        result = self.kinematics[side].solve(target, arm[:6].copy(), arm[6])
+        result = self._kinematics[side].solve(target, arm[:6].copy(), arm[6])
         first_reason = result.reason
         attempts, fraction = 1, 1.0
         delta_rotation = None
         while True:
             elapsed = time.monotonic() - started
-            if elapsed > self.config.ik.max_solve_s:
+            if elapsed > self._config.ik.max_solve_s:
                 result = replace(result, success=False, reason="solve_timeout")
                 break
             if (
                 result.success
                 or result.reason not in {"not_converged", "residual", "joint_limits"}
-                or attempts > self.config.ik_backtrack_attempts
+                or attempts > self._config.ik_backtrack_attempts
             ):
                 break
             if delta_rotation is None:
@@ -506,188 +646,6 @@ class DualYamPicoIntervention(gym.Wrapper):
                 Rotation.from_rotvec(fraction * delta_rotation).as_matrix()
                 @ current[:3, :3]
             )
-            result = self.kinematics[side].solve(intermediate, arm[:6].copy(), arm[6])
+            result = self._kinematics[side].solve(intermediate, arm[:6].copy(), arm[6])
             attempts += 1
         return replace(result, elapsed_s=elapsed), attempts, fraction, first_reason
-
-    def _events(self) -> tuple[bool, bool]:
-        left = self.experts["left"].read_buttons()
-        right = self.experts["right"].read_buttons()
-        buttons = tuple(
-            bool(left.get(key, False) or right.get(key, False))
-            for key in (self.config.record_button, self.config.discard_button)
-        )
-        keyboard = self._keyboard.poll() if self._keyboard else set()
-        now = time.monotonic()
-        previous = self._previous_buttons or buttons
-        edges = []
-        for i, key in enumerate(("record", "discard")):
-            edge = (
-                (buttons[i] and not previous[i]) or key in keyboard
-            ) and now - self._last_edges[i] >= self.config.button_debounce_s
-            if edge:
-                self._last_edges[i] = now
-            edges.append(edge)
-        self._previous_buttons = buttons
-        return tuple(edges)
-
-    def _decorate(
-        self, info: dict[str, Any], event: str | None, record_reset: bool
-    ) -> dict[str, Any]:
-        phase = "rec" if self._recording else "pre"
-        info.update(
-            {
-                "pre_record": not self._recording,
-                "record_reset": record_reset,
-                "keyboard_phase": phase,
-                "keyboard_event": event,
-                "episode_control_phase": phase,
-                "episode_control_event": event,
-                "segment_advance": False,
-            }
-        )
-        return info
-
-    def _report_timing(
-        self, info: dict[str, Any], started: float, computed: float
-    ) -> None:
-        """Report one-second peak timings; these do not change control targets."""
-        finished = time.monotonic()
-        info["yam_pico_compute_s"] = computed - started
-        info["yam_between_ticks_s"] = (
-            started - self._last_tick_return_s
-            if self._last_tick_return_s is not None
-            else 0.0
-        )
-        info["yam_tick_s"] = finished - started
-        if self._timing_started is None:
-            self._timing_started = started
-        self._timing_count += 1
-        self._timing_faults += int(info.get("yam_pico_fault") is not None)
-        metrics = {
-            "gap": info.get("yam_command_interval_s", 0.0),
-            "compute": info["yam_pico_compute_s"],
-            "ik": sum(
-                info.get(f"{side}_ik_elapsed_s", 0.0) for side in ("left", "right")
-            ),
-            "pace": info.get("yam_pace_s", 0.0),
-            "send": info.get("yam_command_s", 0.0),
-            "state": info.get("yam_state_read_s", 0.0),
-            "cameras": info.get("yam_camera_read_s", 0.0),
-            "outside": info["yam_between_ticks_s"],
-        }
-        for name, value in metrics.items():
-            self._timing_peaks[name] = max(self._timing_peaks.get(name, 0.0), value)
-        elapsed = finished - self._timing_started
-        if elapsed >= 1.0:
-            self._logger.info(
-                "YAM VR timing: ticks=%d, rate=%.1f Hz, fault_ticks=%d; peak_ms %s",
-                self._timing_count,
-                self._timing_count / elapsed,
-                self._timing_faults,
-                " ".join(
-                    f"{key}={value * 1000:.1f}"
-                    for key, value in self._timing_peaks.items()
-                ),
-            )
-            self._timing_started = finished
-            self._timing_count = self._timing_faults = 0
-            self._timing_peaks.clear()
-        self._last_tick_return_s = finished
-
-    def _tick(self, *, preview: bool) -> tuple[Any, float, bool, bool, dict[str, Any]]:
-        try:
-            started = time.monotonic()
-            target, pico_info = self._compute_action()
-            computed = time.monotonic()
-            record, discard = self._events()
-            if preview:
-                obs, info = self.env.unwrapped.teleop_tick(target)
-                reward, terminated, truncated = 0.0, False, False
-            else:
-                obs, reward, terminated, truncated, info = self.env.step(target)
-            if info.get("action_rejected") is not None:
-                self._latch(f"runtime:{info['action_rejected']}")
-            frame_fault = self._fault or pico_info.get("yam_pico_fault")
-            event = None
-            reset_record = False
-            manual_done = False
-            if frame_fault is not None or discard or truncated:
-                reset_record = self._recording
-                self._recording = False
-                event = "abort" if reset_record else None
-                reward = 0.0
-            elif record:
-                if self._recording:
-                    event = "end_success"
-                    reward, terminated, manual_done = 1.0, True, True
-                    self._preserve_reference = True
-                else:
-                    self._recording = True
-                    reset_record = True
-                    event = "start"
-            info.update(pico_info)
-            info["yam_pico_fault"] = frame_fault
-            info["intervene_action"] = np.asarray(
-                info["accepted_action"], dtype=np.float32
-            ).copy()
-            info["intervene_flag"] = np.ones(1, dtype=bool)
-            info["intervened"] = True
-            info["manual_done"] = manual_done
-            info["success"] = manual_done
-            for side in ("left", "right"):
-                info[side] = (
-                    self._fault is None
-                    and pico_info.get(f"{side}_ik_fault") is None
-                    and bool(pico_info.get(f"{side}_pico_active", False))
-                )
-            info["pico_active"] = info["left"] or info["right"]
-            if (terminated or truncated) and not manual_done:
-                self._latch("episode_ended")
-                self.env.unwrapped.runtime.emergency_hold()
-            if self.config.log_control_timing:
-                self._report_timing(info, started, computed)
-            return (
-                obs,
-                reward,
-                terminated,
-                truncated,
-                self._decorate(info, event, reset_record),
-            )
-        except BaseException:
-            self._latch("control_error")
-            try:
-                self.env.unwrapped.runtime.emergency_hold()
-            except Exception:
-                self._logger.exception("YAM VR emergency hold failed")
-            try:
-                self.close()
-            except Exception:
-                self._logger.exception("YAM VR cleanup failed after control error")
-            raise
-
-    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
-        """Execute a VR/hold step and expose accepted joint targets to collection."""
-        del action
-        if not self._initialized or self._closed:
-            raise RuntimeError("reset YAM PICO before stepping")
-        return self._tick(preview=False)
-
-    def close(self) -> None:
-        """Hold/close the base env and stop both independent subscriptions."""
-        if self._closed:
-            return
-        errors = []
-        for resource in [self.env, *self.experts.values(), self._keyboard]:
-            if resource is None:
-                continue
-            try:
-                if resource in self.experts.values():
-                    resource.stop()
-                else:
-                    resource.close()
-            except Exception as exc:
-                errors.append(exc)
-        self._closed = not errors
-        if errors:
-            raise RuntimeError("YAM PICO cleanup failed") from errors[0]

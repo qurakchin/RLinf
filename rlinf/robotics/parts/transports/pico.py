@@ -226,13 +226,16 @@ class PicoExpert:
 
     def stop(self) -> None:
         self._running = False
+        # The receive thread is the only one inside ``recv``, so it has to leave
+        # before the socket it is blocked on is destroyed. It returns within one
+        # receive timeout, and only then is closing the socket safe.
+        if self._thread is not None:
+            self._thread.join(timeout=self.timeout_ms / 1000.0 + 0.5)
+            self._thread = None
+
         if self._socket is not None:
             self._socket.close(linger=0)
             self._socket = None
-
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=2.0)
-        self._thread = None
 
         if self._context is not None:
             self._context.term()

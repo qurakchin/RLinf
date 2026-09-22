@@ -26,10 +26,16 @@ import time
 
 import numpy as np
 
+from rlinf.envs.real.wrappers.teleop.composed import ComposedTeleop
+from rlinf.envs.real.wrappers.teleop.facts import EnvFacts
+from rlinf.envs.real.wrappers.teleop.intervention import TeleopIntervention
+from rlinf.envs.real.wrappers.teleop.layout import action_spec
 from rlinf.envs.real.yam.config import YamPicoConfig
 from rlinf.envs.real.yam.dual_yam_joint_env import DualYamJointEnv
 from rlinf.envs.real.yam.mock_backend import MockYamBackendFactory
-from rlinf.envs.real.yam.pico_intervention import DualYamPicoIntervention
+from rlinf.envs.real.yam.pico_episode import YamPicoEpisode
+from rlinf.robotics.parts.teleop.group import TeleopEntry, TeleopGroup
+from rlinf.robotics.parts.teleop.yam_pico import YamPico
 from rlinf.robotics.parts.transports.pico import PicoExpert
 from rlinf.utils.logging import get_logger
 
@@ -91,7 +97,25 @@ def main() -> int:
         for side in ("left", "right"):
             cls = PicoExpert if args.zmq_addr else SyntheticExpert
             experts[side] = cls(**config.expert_kwargs(side))
-        wrapper = DualYamPicoIntervention(base, config, experts=experts)
+        spec = action_spec(base)
+        facts = EnvFacts.about(base, spec.layout, spec.kinds)
+        device = YamPico(
+            config,
+            joint_step_limits=facts.joint_step_limits,
+            joint_lower=facts.joint_limit_min,
+            joint_upper=facts.joint_limit_max,
+            experts=experts,
+        )
+        device.connect()
+        group = TeleopGroup([TeleopEntry(device)], available=facts.kinds)
+        wrapper = YamPicoEpisode(
+            TeleopIntervention(
+                base,
+                ComposedTeleop(group, facts.layout, timeout=group.hold_window),
+                mark_flag=base.TELEOP_MARK_FLAG,
+            ),
+            config,
+        )
         wrapper.reset()
         # Directly seed only our explicitly created in-memory follower objects.
         for follower in factory.followers:

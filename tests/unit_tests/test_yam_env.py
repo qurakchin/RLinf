@@ -125,6 +125,7 @@ def test_dummy_reset_is_lazy_and_returns_the_canonical_observation():
         for frame in observation["frames"].values()
     )
     assert env.observation_space.contains(observation)
+    np.testing.assert_allclose(env.get_joint_positions(), initial)
     np.testing.assert_allclose(env.get_hold_action(), initial)
 
 
@@ -273,3 +274,62 @@ def test_park_on_close_disabled_by_default():
     env.close()
     assert runtime.moves == []
     assert runtime.close_calls == 1
+
+
+def test_action_parts_describe_the_14d_vector_in_step_order():
+    from rlinf.envs.real.wrappers.teleop.layout import action_spec
+    from rlinf.robotics.actions import ActionKind
+
+    runtime = _Runtime(np.zeros(14))
+    env = DualYamJointEnv(
+        override_cfg={"is_dummy": True, "dummy_camera_names": ["top_rgb"]},
+        runtime=runtime,
+        camera_factory=_camera_must_not_be_created,
+    )
+
+    spec = action_spec(env)
+
+    assert spec.kinds == {
+        "left.arm": ActionKind.JOINT_POSITION,
+        "left.end_effector": ActionKind.GRIPPER,
+        "right.arm": ActionKind.JOINT_POSITION,
+        "right.end_effector": ActionKind.GRIPPER,
+    }
+    assert spec.layout == {
+        "left.arm": slice(0, 6),
+        "left.end_effector": slice(6, 7),
+        "right.arm": slice(7, 13),
+        "right.end_effector": slice(13, 14),
+    }
+
+
+def test_the_shared_teleop_stack_takes_only_yam_picos_own_mapping():
+    from rlinf.envs.real.wrappers.teleop.config import resolve_teleop_devices
+
+    # ``pico`` produces Cartesian deltas or poses, while YAM's arm slot means
+    # absolute joint angles. Accepting the shared name would write motion into
+    # the wrong slot, so YAM reaches the controllers through ``yam_pico``.
+    with pytest.raises(ValueError, match="Unsupported teleop device"):
+        resolve_teleop_devices({"teleop": ["pico"]}, supported=DualYamJointEnv.TELEOP)
+    assert resolve_teleop_devices(
+        {"teleop": "yam_pico"}, supported=DualYamJointEnv.TELEOP
+    ) == ["yam_pico"]
+
+
+def test_episode_control_follows_the_selection_the_station_can_honor():
+    from rlinf.envs.real.yam.leader_intervention import DualYamLeaderIntervention
+
+    def dummy(**overrides):
+        return DualYamJointEnv(
+            override_cfg={"is_dummy": True, **overrides},
+            runtime=_Runtime(np.zeros(14)),
+            camera_factory=_camera_must_not_be_created,
+        )
+
+    # A dummy station owns no controllers, so the PICO recipe installs nothing
+    # rather than a wrapper that would read hardware that is not there.
+    assert dummy().episode_wrappers({"teleop": "yam_pico"}) == []
+
+    # Teaching handles own the whole episode, so they replace it instead.
+    (leader,) = dummy(leader_intervention={"enabled": True}).episode_wrappers({})
+    assert leader.func is DualYamLeaderIntervention
