@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import dataclasses
+import errno
 import importlib
 import importlib.util
 import io
@@ -31,10 +32,12 @@ import time
 import types
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import Mock
+from urllib.request import urlopen
 
 import gymnasium as gym
 import numpy as np
@@ -4427,3 +4430,339 @@ def test_robotwin_eval_success_seed_order_is_controlled_by_base_seed():
 
     assert selected_seed_0 == selected_seed_0_again
     assert selected_seed_0 != selected_seed_1
+
+
+# ---------------------------------------------------------------------------
+# FootSwitch review input (evdev)
+# ---------------------------------------------------------------------------
+
+EV_KEY = 1
+DISCARD_KEY = 30
+KEEP_KEY = 46
+OTHER_KEY = 48
+RESET_KEY = 99
+
+
+@dataclass
+class Event:
+    type: int
+    code: int
+    value: int
+
+
+class FakeDevice:
+    instances = []
+    grab_error = None
+    active_error = None
+    read_error = None
+    initial_active = set()
+
+    def __init__(self, path):
+        self.path = path
+        self.events = []
+        self.active = set(FakeDevice.initial_active)
+        self.grabbed = False
+        self.closed = False
+        self.ungrab_calls = 0
+        self.close_calls = 0
+        FakeDevice.instances.append(self)
+
+    def grab(self):
+        if FakeDevice.grab_error is not None:
+            raise FakeDevice.grab_error
+        self.grabbed = True
+
+    def ungrab(self):
+        self.ungrab_calls += 1
+        self.grabbed = False
+
+    def close(self):
+        self.close_calls += 1
+        self.closed = True
+
+    def active_keys(self):
+        if FakeDevice.active_error is not None:
+            raise FakeDevice.active_error
+        return list(self.active)
+
+    def read(self):
+        if FakeDevice.read_error is not None:
+            raise FakeDevice.read_error
+        if not self.events:
+            raise BlockingIOError()
+        events = self.events
+        self.events = []
+        return events
+
+
+def _reset_fake_device():
+    FakeDevice.instances = []
+    FakeDevice.grab_error = None
+    FakeDevice.active_error = None
+    FakeDevice.read_error = None
+    FakeDevice.initial_active = set()
+
+
+@pytest.fixture
+def foot_switch(monkeypatch):
+    _reset_fake_device()
+    monkeypatch.setitem(
+        sys.modules,
+        "evdev",
+        SimpleNamespace(
+            InputDevice=FakeDevice,
+            ecodes=SimpleNamespace(EV_KEY=EV_KEY),
+        ),
+    )
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "rlinf/envs/real/wrappers/episode/foot_switch.py"
+    )
+    spec = importlib.util.spec_from_file_location("_foot_switch_test", source)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.FootSwitch
+
+
+def make_switch(foot_switch):
+    return foot_switch("/dev/input/by-id/fake", DISCARD_KEY, KEEP_KEY)
+
+
+def make_reset_switch(foot_switch):
+    return foot_switch("/dev/input/by-id/fake", DISCARD_KEY, KEEP_KEY, RESET_KEY)
+
+
+def test_grab_error_closes_opened_device(foot_switch):
+    FakeDevice.grab_error = OSError(errno.EBUSY, "busy")
+
+    with pytest.raises(RuntimeError, match="failed to grab.*busy"):
+        make_switch(foot_switch)
+
+    assert FakeDevice.instances[-1].close_calls == 1
+    assert FakeDevice.instances[-1].ungrab_calls == 0
+
+
+def test_active_key_error_ungrabs_and_closes_device(foot_switch):
+    FakeDevice.active_error = OSError(errno.ENODEV, "gone")
+
+    with pytest.raises(RuntimeError, match="disconnected.*active keys"):
+        make_switch(foot_switch)
+
+    assert FakeDevice.instances[-1].ungrab_calls == 1
+    assert FakeDevice.instances[-1].close_calls == 1
+
+
+def test_reset_key_must_be_distinct_from_choice_keys(foot_switch):
+    with pytest.raises(ValueError, match="reset_key must be different"):
+        foot_switch("/dev/input/by-id/fake", DISCARD_KEY, KEEP_KEY, DISCARD_KEY)
+
+
+def test_reset_press_reports_once_outside_review_until_release(foot_switch):
+    switch = make_reset_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+
+    device.events = [Event(EV_KEY, RESET_KEY, 1)]
+    assert switch.poll() == "reset"
+
+    device.events = [Event(EV_KEY, RESET_KEY, 2)]
+    assert switch.poll() is None
+    assert switch.poll() is None
+
+    device.events = [
+        Event(EV_KEY, RESET_KEY, 0),
+        Event(EV_KEY, RESET_KEY, 1),
+    ]
+    assert switch.poll() == "reset"
+
+
+def test_reset_held_at_construction_is_blocked_until_release(foot_switch):
+    FakeDevice.initial_active = {RESET_KEY}
+    switch = make_reset_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+
+    device.events = [Event(EV_KEY, RESET_KEY, 1)]
+    assert switch.poll() is None
+
+    device.events = [
+        Event(EV_KEY, RESET_KEY, 0),
+        Event(EV_KEY, RESET_KEY, 1),
+    ]
+    assert switch.poll() == "reset"
+
+
+def test_repeat_and_stale_held_press_are_ignored_until_release(foot_switch):
+    switch = make_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+    device.active = {KEEP_KEY}
+
+    switch.begin_review()
+    device.events = [
+        Event(EV_KEY, KEEP_KEY, 2),
+        Event(EV_KEY, KEEP_KEY, 1),
+    ]
+    assert switch.poll() is None
+
+    device.events = [
+        Event(EV_KEY, KEEP_KEY, 0),
+        Event(EV_KEY, KEEP_KEY, 1),
+    ]
+    assert switch.poll() == "keep"
+
+
+def test_unrelated_middle_key_and_old_buffered_press_do_not_choose(foot_switch):
+    switch = make_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+    device.events = [
+        Event(EV_KEY, KEEP_KEY, 1),
+        Event(EV_KEY, OTHER_KEY, 1),
+    ]
+
+    switch.begin_review()
+    assert switch.poll() is None
+
+    device.events = [Event(EV_KEY, DISCARD_KEY, 1)]
+    assert switch.poll() == "discard"
+    device.events = [Event(EV_KEY, KEEP_KEY, 1)]
+    assert switch.poll() is None
+
+
+def test_both_choice_keys_are_rejected_until_both_are_released(foot_switch):
+    switch = make_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+
+    switch.begin_review()
+    device.events = [
+        Event(EV_KEY, DISCARD_KEY, 1),
+        Event(EV_KEY, KEEP_KEY, 1),
+    ]
+    assert switch.poll() is None
+
+    device.events = [Event(EV_KEY, DISCARD_KEY, 0)]
+    assert switch.poll() is None
+    device.events = [
+        Event(EV_KEY, KEEP_KEY, 0),
+        Event(EV_KEY, DISCARD_KEY, 1),
+    ]
+    assert switch.poll() == "discard"
+
+
+def test_reset_key_does_not_trigger_when_pressed_with_choice(foot_switch):
+    switch = make_reset_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+
+    device.events = [
+        Event(EV_KEY, RESET_KEY, 1),
+        Event(EV_KEY, KEEP_KEY, 1),
+    ]
+    assert switch.poll() is None
+
+    device.events = [
+        Event(EV_KEY, RESET_KEY, 0),
+        Event(EV_KEY, KEEP_KEY, 0),
+        Event(EV_KEY, RESET_KEY, 1),
+    ]
+    assert switch.poll() == "reset"
+
+
+def test_reset_key_does_not_trigger_when_choice_overlap_ends_in_same_poll(
+    foot_switch,
+):
+    switch = make_reset_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+
+    device.events = [
+        Event(EV_KEY, RESET_KEY, 1),
+        Event(EV_KEY, KEEP_KEY, 1),
+        Event(EV_KEY, RESET_KEY, 0),
+        Event(EV_KEY, KEEP_KEY, 0),
+    ]
+    assert switch.poll() is None
+
+    device.events = [Event(EV_KEY, RESET_KEY, 1)]
+    assert switch.poll() == "reset"
+
+
+def test_reset_during_review_does_not_consume_keep_or_discard(foot_switch):
+    switch = make_reset_switch(foot_switch)
+    device = FakeDevice.instances[-1]
+
+    switch.begin_review()
+    device.events = [Event(EV_KEY, RESET_KEY, 1)]
+    assert switch.poll() == "reset"
+
+    device.events = [
+        Event(EV_KEY, RESET_KEY, 0),
+        Event(EV_KEY, KEEP_KEY, 1),
+    ]
+    assert switch.poll() == "keep"
+
+
+def test_poll_raises_clear_error_on_disconnect(foot_switch):
+    switch = make_switch(foot_switch)
+    switch.begin_review()
+    FakeDevice.read_error = OSError(errno.ENODEV, "gone")
+
+    with pytest.raises(RuntimeError, match="disconnected.*reading"):
+        switch.poll()
+
+
+# ---------------------------------------------------------------------------
+# CameraPreview localhost frame preview
+# ---------------------------------------------------------------------------
+
+
+def test_preview_latest_rgb_frames_and_stop():
+    cv2 = pytest.importorskip("cv2")
+    from rlinf.envs.real.utils.camera_preview import CameraPreview
+
+    preview = CameraPreview(0)
+    # Test against the actual ephemeral listener, without cameras or CAN.
+    port = preview._server.server_address[1]
+    url = f"http://127.0.0.1:{port}"
+    try:
+        with urlopen(url, timeout=2) as response:
+            assert b"frame.jpg" in response.read()
+        old = {"top_rgb": np.zeros((48, 64, 3), dtype=np.uint8)}
+        preview.put_frame(old)
+        frames = {
+            name: np.full((48, 64, 3), color, dtype=np.uint8)
+            for name, color in zip(
+                ("top_rgb", "left_rgb", "right_rgb"),
+                ((255, 0, 0), (0, 255, 0), (0, 0, 255)),
+            )
+        }
+        for _ in range(100):
+            preview.put_frame(frames)
+        with urlopen(url + "/frame.jpg", timeout=2) as response:
+            decoded = cv2.imdecode(np.frombuffer(response.read(), np.uint8), 1)
+        assert decoded.shape[1] == 960
+        # OpenCV decodes BGR: confirm RGB source colors and view ordering.
+        for i, expected_channel in enumerate((2, 1, 0)):
+            pixel = decoded[decoded.shape[0] // 2, 160 + i * 320]
+            assert pixel[expected_channel] > 240
+            assert np.count_nonzero(pixel > 20) == 1
+        assert (frames["top_rgb"] == [255, 0, 0]).all()
+    finally:
+        preview.stop()
+        preview.stop()
+    assert not preview._thread.is_alive()
+
+
+def test_yam_preview_receives_observations_and_releases_port():
+    pytest.importorskip("cv2")
+    from rlinf.envs.real.yam.dual_yam_joint_env import DualYamJointEnv
+
+    env = DualYamJointEnv({"is_dummy": True, "camera_preview_port": 0})
+    assert env._camera_player is None
+    try:
+        obs, _ = env.reset()
+        player = env._camera_player
+        url = f"http://127.0.0.1:{player._server.server_address[1]}/frame.jpg"
+        with urlopen(url, timeout=2) as response:
+            assert response.headers["Content-Type"] == "image/jpeg"
+        assert list(obs["frames"]) == ["top_rgb", "left_rgb", "right_rgb"]
+        assert all(not frame.any() for frame in obs["frames"].values())
+    finally:
+        env.close()
+    assert not player._thread.is_alive()

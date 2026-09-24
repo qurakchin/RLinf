@@ -364,6 +364,8 @@ class EnvWorker(Worker):
                     finalize_interval=getattr(
                         env_cfg.data_collection, "finalize_interval", 100
                     ),
+                    streaming=getattr(env_cfg.data_collection, "streaming", False),
+                    export_mp4=getattr(env_cfg.data_collection, "export_mp4", False),
                 )
             env_list.append(env)
         return env_list

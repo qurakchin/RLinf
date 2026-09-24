@@ -1,7 +1,7 @@
 RL with Real-World Robots
 =========================
 
-Use this section when your starting point is physical robot hardware. Start with Franka if you use a Franka arm or a Franka-based rig; use the other robot pages for GimArm, XSquare Turtle2, Dexmal DOS-W1, AgileX Piper, and SO101.
+Use this section when your starting point is physical robot hardware. Start with Franka if you use a Franka arm or a Franka-based rig; use the other robot pages for YAM, GimArm, XSquare Turtle2, Dexmal DOS-W1, AgileX Piper, and SO101.
 
 Choose a guide for hardware checks, teleoperation, data collection, sim-to-real transfer, deployment, or online RL.
 
@@ -17,6 +17,17 @@ Choose a guide for hardware checks, teleoperation, data collection, sim-to-real 
            <b>Single-Arm Franka</b>
          </a><br>
          Use the single-arm Franka section for real-world RL, reward models, data collection, dexterous hands, SFT, and deployment
+       </p>
+     </div>
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <a href="embodied/yam.html" style="display: block; text-decoration: none;">
+         <div style="width: 100%; height: 200px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); background: linear-gradient(135deg, #173a5e, #45a4a0); color: white; display: flex; align-items: center; justify-content: center; font-size: 42px; font-weight: 700; letter-spacing: 4px;">YAM</div>
+       </a>
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="embodied/yam.html" style="text-decoration: underline; color: blue;">
+           <b>Dual-Arm YAM</b>
+         </a><br>
+         Configure one native RLinf station and collect 14-D leader-follower demonstrations directly in LeRobot format
        </p>
      </div>
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
@@ -88,6 +99,7 @@ Use these guides to connect an arm and run its hardware test script. Piper and S
 
    Single-Arm Franka <embodied/franka_index>
    Dual-Arm Franka <embodied/dual_franka_index>
+   Dual-Arm YAM <embodied/yam>
    GimArm <embodied/gim_arm>
    XSquare Turtle2 <embodied/xsquare_turtle2>
    DOS-W1 <embodied/dosw1>

@@ -73,6 +73,9 @@ from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
 )
+from rlinf.models.embodiment.openpi.dataconfig.yam_dataconfig import (
+    LeRobotYamDataConfig,
+)
 
 _CONFIGS = [
     TrainConfig(
@@ -551,6 +554,24 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi05_base/assets"),
             extra_delta_transform=True,
+        ),
+        pytorch_weight_path="checkpoints/torch/pi05_base",
+    ),
+    TrainConfig(
+        name="pi05_yam_joint",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=30,
+            discrete_state_input=True,
+        ),
+        data=LeRobotYamDataConfig(
+            repo_id="",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(
+                assets_dir="checkpoints/torch/pi05_base/assets",
+                asset_id="yam",
+            ),
+            use_delta_joint_actions=True,
         ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
     ),

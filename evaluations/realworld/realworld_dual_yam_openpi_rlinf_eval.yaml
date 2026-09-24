@@ -1,0 +1,190 @@
+defaults:
+  - env/realworld_dual_yam_joint@env.eval
+  - model/pi0_5_rlinf@rollout.model
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+    - file://${oc.env:REPO_PATH}/examples/sft/config/
+
+# Run the policy on GPU node rank 0 and the physical dual-YAM environment on
+# robot node rank 1. Both nodes must join the same Ray cluster before launch.
+cluster:
+  num_nodes: 2
+  component_placement:
+    rollout:
+      node_group: gpu
+      placement: 0
+    env:
+      node_group: yam
+      placement: 0
+  node_groups:
+    - label: gpu
+      node_ranks: 0
+    - label: yam
+      node_ranks: 1
+      hardware:
+        type: DualYam
+        configs:
+          - node_rank: 1
+            left_follower:
+              channel: ${oc.env:YAM_LEFT_FOLLOWER_CAN,can_left}
+              arm_type: yam
+              gripper_type: flexible_4310
+              ee_mass: null
+              gripper_limits: null
+              gravity_comp_factor: null
+              grav_comp_kd: null
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: false
+            right_follower:
+              channel: ${oc.env:YAM_RIGHT_FOLLOWER_CAN,can_right}
+              arm_type: yam
+              gripper_type: flexible_4310
+              ee_mass: null
+              gripper_limits: null
+              gravity_comp_factor: null
+              grav_comp_kd: null
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: false
+            # Leaders are structurally present in the hardware schema but are
+            # never connected because leader_intervention.enabled is false.
+            left_leader:
+              channel: ${oc.env:YAM_LEFT_LEADER_CAN,can_lead_l}
+              arm_type: yam
+              gripper_type: yam_teaching_handle
+              ee_mass: null
+              gripper_limits: [0.0, 1.0]
+              gravity_comp_factor: null
+              grav_comp_kd: null
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: false
+            right_leader:
+              channel: ${oc.env:YAM_RIGHT_LEADER_CAN,can_lead_r}
+              arm_type: yam
+              gripper_type: yam_teaching_handle
+              ee_mass: null
+              gripper_limits: [0.0, 1.0]
+              gravity_comp_factor: null
+              grav_comp_kd: null
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: false
+            cameras:
+              - name: top_rgb
+                serial: "260322277483"
+                camera_type: realsense
+                resolution: [640, 480]
+                fps: 30
+                enable_depth: false
+              - name: left_rgb
+                serial: "260322272602"
+                camera_type: realsense
+                resolution: [640, 480]
+                fps: 30
+                enable_depth: false
+              - name: right_rgb
+                serial: "260422273719"
+                camera_type: realsense
+                resolution: [640, 480]
+                fps: 30
+                enable_depth: false
+
+runner:
+  task_type: embodied_eval
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "dual_yam_joint_pi05_eval"
+    logger_backends: ["tensorboard"]
+  max_epochs: 100
+  max_steps: 1
+  only_eval: true
+  val_check_interval: -1
+  save_interval: -1
+  # The openpi_rlinf model factory loads full_weights.pt from model_path.
+  ckpt_path: null
+
+env:
+  group_name: "EnvGroup"
+  enable_offload: false
+  eval:
+    rollout_epoch: 1
+    total_num_envs: 1
+    auto_reset: true
+    ignore_terminations: false
+    max_steps_per_rollout_epoch: 900
+    max_episode_steps: 900
+    group_size: 1
+    is_eval: true
+    video_cfg:
+      save_video: false
+      video_base_dir: ${runner.logger.log_path}/video/eval
+    override_cfg:
+      task_description: >-
+        Use the left arm to hold the white base in place, then use the right
+        hand to pick up the screwdriver, move it to the partially tightened
+        screw, and tighten it fully.
+      step_frequency: 30.0
+      max_num_steps: 900
+      manual_episode_control_only: false
+      # Deployment starts every episode from the same configured follower pose.
+      # Fill left_qpos/right_qpos and enable the inherited reset block first.
+      reset:
+        enabled: true
+        mode: episode
+
+        left_qpos:
+          [-0.358396, 2.216945, 1.226253, 0.286679, 1.127069, 0.684558, 0.726509]
+
+        right_qpos:
+          [-0.032998, 0.013542, 0.007057, -0.063516, -0.144007, 0.027657, 0.976932]
+
+        duration_s: 10.0
+        max_joint_delta: 1.0
+        tolerance: 0.05
+        timeout_s: 40.0
+      leader_intervention:
+        enabled: false
+
+rollout:
+  group_name: "RolloutGroup"
+  rollout_backend: "huggingface"
+  recompute_logprobs: false
+  enable_offload: false
+  pipeline_stage_num: 1
+  collect_transitions: false
+  collect_prev_infos: false
+  model:
+    model_path: /home/user/xty-RLinf/yam/ckpt
+    precision: "bf16"
+    num_action_chunks: 30
+    action_dim: 14
+    openpi_data:
+      norm_stats_path: /home/user/xty-RLinf/yam/ckpt/yam/norm_stats.json
+    openpi:
+      task: "eval"
+      config_name: "pi05_yam_joint"
+      discrete_state_input: true
+
+reward:
+  use_reward_model: false
+
+critic:
+  use_critic_model: false

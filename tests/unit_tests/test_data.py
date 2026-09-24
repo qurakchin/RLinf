@@ -18,17 +18,25 @@ import asyncio
 import copy
 import inspect
 import json
+import pickle
 import random
+import shutil
+import sys
+import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import AsyncMock, Mock, patch
 
+import gymnasium as gym
 import numpy as np
 import pytest
 import torch
+from gymnasium import spaces
 from omegaconf import DictConfig, OmegaConf
 
+import rlinf.envs.wrappers.collect_episode as collect_episode_module
 import rlinf.utils.obs_compression as obs_compression
 from rlinf.data.datasets.reasoning.dataset import ReasoningDataset
 from rlinf.data.schema.embodied_trajectory import (
@@ -58,6 +66,7 @@ from rlinf.data.schema.embodied_types import (
     split_episode_data,
 )
 from rlinf.data.storage.lerobot import add_frame_to_dataset, episode_boundaries
+from rlinf.data.storage.lerobot import writer as writer_module
 from rlinf.data.storage.lerobot.writer import LeRobotDatasetWriter
 from rlinf.envs.wrappers.collect_episode import CollectEpisode
 from rlinf.runners.async_embodied_runner import AsyncEmbodiedRunner
@@ -461,6 +470,279 @@ def test_empty_episode_is_skipped():
     assert dataset.frames == []
     assert dataset.saved_episodes == 0
 
+
+class _WaitingImageWriter:
+    def __init__(self):
+        self.wait_calls = 0
+
+    def wait_until_done(self):
+        self.wait_calls += 1
+
+
+class _BackpressureDataset(_LegacyDataset):
+    def __init__(self):
+        super().__init__()
+        self.image_writer = _WaitingImageWriter()
+
+
+def test_stream_add_frame_drains_image_writer_queue():
+    dataset = _BackpressureDataset()
+    writer = _make_writer(dataset)
+
+    writer.add_frame({"state": 0, "actions": 0, "task": "wipe the table"})
+    writer.add_frame({"state": 1, "actions": 1, "task": "wipe the table"})
+
+    assert len(dataset.frames) == 2
+    assert dataset.image_writer.wait_calls == 2
+
+
+def test_sync_cv2_image_writer_preserves_rgb_bytes(tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    from PIL import Image
+
+    image = np.zeros((4, 5, 3), dtype=np.uint8)
+    image[..., 0] = np.arange(5, dtype=np.uint8)
+    image[..., 1] = np.arange(4, dtype=np.uint8)[:, None] + 20
+    image[..., 2] = 200
+    path = tmp_path / "rgb.png"
+
+    writer_module._save_image(None, image, path)
+
+    read_cv2 = cv2.cvtColor(cv2.imread(str(path)), cv2.COLOR_BGR2RGB)
+    read_pil = np.asarray(Image.open(path).convert("RGB"))
+    np.testing.assert_array_equal(read_cv2, image)
+    np.testing.assert_array_equal(read_pil, image)
+
+
+def test_sync_cv2_image_writer_reports_write_failure(tmp_path, monkeypatch):
+    fake_cv2 = SimpleNamespace(
+        COLOR_RGB2BGR=4,
+        IMWRITE_PNG_COMPRESSION=16,
+        cvtColor=lambda image, code: image,
+        imwrite=lambda *args, **kwargs: False,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+
+    with pytest.raises(OSError, match="Failed to write recording image"):
+        writer_module._save_image(
+            None,
+            np.zeros((4, 5, 3), dtype=np.uint8),
+            tmp_path / "missing" / "rgb.png",
+        )
+
+
+def test_save_episode_table_removes_temporary_file_after_write_error(
+    tmp_path, monkeypatch
+):
+    datasets = pytest.importorskip("datasets")
+    pq = pytest.importorskip("pyarrow.parquet")
+
+    class _FailingParquetWriter:
+        def __init__(self, path, schema):
+            self.path = path
+            self.schema = schema
+
+        def __enter__(self):
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_bytes(b"partial parquet")
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def write_table(self, table):
+            raise RuntimeError("synthetic parquet write failure")
+
+    monkeypatch.setattr(
+        pq,
+        "ParquetWriter",
+        _FailingParquetWriter,
+    )
+    features = datasets.Features(
+        {
+            "index": datasets.Value("int64"),
+            "state": datasets.Sequence(datasets.Value("float32"), length=2),
+        }
+    )
+    dataset = SimpleNamespace(
+        root=tmp_path,
+        hf_features=features,
+        meta=SimpleNamespace(
+            get_data_file_path=lambda ep_index: (
+                f"data/chunk-000/episode_{ep_index:06d}.parquet"
+            )
+        ),
+    )
+    episode_buffer = {
+        "index": np.arange(2, dtype=np.int64),
+        "state": np.zeros((2, 2), dtype=np.float32),
+    }
+
+    with pytest.raises(RuntimeError, match="synthetic parquet write failure"):
+        writer_module._save_episode_table(dataset, episode_buffer, episode_index=0)
+
+    assert not (tmp_path / "data" / "chunk-000" / "episode_000000.parquet.tmp").exists()
+    assert not (tmp_path / "data" / "chunk-000" / "episode_000000.parquet").exists()
+
+
+def _import_real_lerobot_dataset():
+    try:
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    except ModuleNotFoundError:
+        try:
+            from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+        except ModuleNotFoundError:
+            pytest.skip("real LeRobot dataset package is not installed")
+    return LeRobotDataset
+
+
+def _real_frame(episode_index: int, frame_index: int, image_shape=(32, 32, 3)):
+    base = (episode_index * 50 + frame_index) % 255
+    color = np.array([base, (base + 17) % 255, (base + 43) % 255], dtype=np.uint8)
+    return {
+        "state": np.full((14,), frame_index, dtype=np.float32),
+        "actions": np.full((14,), episode_index, dtype=np.float32),
+        "done": np.array([False], dtype=bool),
+        "is_success": np.array([False], dtype=bool),
+        "intervene_flag": np.array([frame_index % 2 == 0], dtype=bool),
+        "segment_id": np.array([episode_index + 1], dtype=np.uint8),
+        "image": np.broadcast_to(color, image_shape).copy(),
+        "extra_view_image-0": np.broadcast_to((color + 1) % 255, image_shape).copy(),
+        "extra_view_image-1": np.broadcast_to((color + 2) % 255, image_shape).copy(),
+        "task": f"episode {episode_index} task",
+    }
+
+
+@pytest.mark.parametrize("image_writer_threads", [0, 1])
+def test_real_lerobot_v2_streaming_writer_batches_and_reads_back(
+    tmp_path, image_writer_threads
+):
+    LeRobotDataset = _import_real_lerobot_dataset()
+    if not hasattr(LeRobotDataset, "_save_episode_table"):
+        pytest.skip("This table-writing hook belongs to LeRobot v2")
+    pq = pytest.importorskip("pyarrow.parquet")
+    pytest.importorskip("datasets")
+
+    writer = LeRobotDatasetWriter()
+    dataset_root = tmp_path / "yam_stream_small"
+    image_shape = (32, 32, 3)
+    successes = [True, False, True]
+    try:
+        writer.create(
+            repo_id=str(dataset_root),
+            robot_type="dual_yam",
+            fps=30,
+            image_writer_threads=image_writer_threads,
+            image_writer_processes=0,
+            image_shape=image_shape,
+            state_dim=14,
+            action_dim=14,
+            extra_view_image_keys={
+                "extra_view_image-0": image_shape,
+                "extra_view_image-1": image_shape,
+            },
+            has_intervene_flag=True,
+            has_segment_id=True,
+        )
+        assert writer.dataset.hf_dataset is None
+
+        for episode_index, success in enumerate(successes):
+            for frame_index in range(33):
+                writer.add_frame(_real_frame(episode_index, frame_index, image_shape))
+            assert writer.save_episode(is_success=success) == 33
+            assert writer.dataset.hf_dataset is None
+            assert writer.dataset.episode_buffer["size"] == 0
+
+        assert writer.dataset.meta.total_episodes == 3
+        assert writer.dataset.meta.total_frames == 99
+        assert not (dataset_root / "images").exists()
+
+        for episode_index, success in enumerate(successes):
+            parquet_path = (
+                dataset_root
+                / "data"
+                / "chunk-000"
+                / f"episode_{episode_index:06d}.parquet"
+            )
+            parquet = pq.ParquetFile(parquet_path)
+            assert [
+                parquet.metadata.row_group(i).num_rows
+                for i in range(parquet.num_row_groups)
+            ] == [16, 16, 1]
+            table = pq.read_table(parquet_path)
+            assert table.num_rows == 33
+            assert {
+                "index",
+                "frame_index",
+                "timestamp",
+                "episode_index",
+                "image",
+                "extra_view_image-0",
+                "extra_view_image-1",
+                "state",
+                "actions",
+                "done",
+                "is_success",
+                "intervene_flag",
+                "segment_id",
+                "task_index",
+            }.issubset(set(table.column_names))
+            assert [
+                bool(np.asarray(v).reshape(-1)[0]) for v in table["done"].to_pylist()
+            ] == [False] * 32 + [True]
+            assert [
+                bool(np.asarray(v).reshape(-1)[0])
+                for v in table["is_success"].to_pylist()
+            ] == [success] * 33
+            assert [
+                bool(np.asarray(v).reshape(-1)[0])
+                for v in table["intervene_flag"].to_pylist()[:4]
+            ] == [True, False, True, False]
+            assert {
+                int(np.asarray(v).reshape(-1)[0])
+                for v in table["segment_id"].to_pylist()
+            } == {episode_index + 1}
+
+        shutil.rmtree(dataset_root / "images", ignore_errors=True)
+        train_dataset = LeRobotDataset(
+            repo_id=dataset_root.name,
+            root=dataset_root,
+            delta_timestamps={"actions": [0.0]},
+            tolerance_s=1e-4,
+        )
+        assert len(train_dataset) == 99
+        sample = train_dataset[34]
+        assert sample["task"] == "episode 1 task"
+        assert int(sample["index"].item()) == 34
+        assert int(sample["episode_index"].item()) == 1
+        assert int(sample["frame_index"].item()) == 1
+        assert torch.allclose(sample["state"], torch.full((14,), 1.0))
+        assert sample["actions"].shape == (1, 14)
+        assert torch.allclose(sample["actions"], torch.full((1, 14), 1.0))
+        assert sample["image"].shape == (3, image_shape[0], image_shape[1])
+        assert sample["extra_view_image-0"].shape == (3, image_shape[0], image_shape[1])
+        assert sample["extra_view_image-1"].shape == (3, image_shape[0], image_shape[1])
+        expected_pixels = {
+            "image": torch.tensor([51, 68, 94], dtype=torch.float32) / 255.0,
+            "extra_view_image-0": torch.tensor([52, 69, 95], dtype=torch.float32)
+            / 255.0,
+            "extra_view_image-1": torch.tensor([53, 70, 96], dtype=torch.float32)
+            / 255.0,
+        }
+        for key, value in expected_pixels.items():
+            assert torch.allclose(sample[key][:, 0, 0], value, atol=1e-6)
+        assert not torch.equal(sample["image"], sample["extra_view_image-0"])
+        assert not torch.equal(
+            sample["extra_view_image-0"], sample["extra_view_image-1"]
+        )
+    finally:
+        if writer.dataset is not None:
+            writer.finalize()
+
+
+# --------------------------------------------------------------------------
+# episode_boundaries: dataset format v2.1 vs v3.0
+# --------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------
 # episode_boundaries: dataset format v2.1 vs v3.0
@@ -2744,3 +3026,813 @@ def test_vlm_trend_batch_video_metadata_stays_nested_per_sample():
     assert metadata[0][0].total_num_frames == 5
     assert metadata[0][0].frames_indices == [0, 1, 2, 3, 4]
     assert metadata[1][1].total_num_frames == 5
+
+
+# ---------------------------------------------------------------------------
+# CollectEpisode streaming LeRobot write path
+# ---------------------------------------------------------------------------
+
+_STREAM_IMAGE_SHAPE = (64, 64, 3)
+_STREAM_STATE_DIM = 14
+
+
+class _StreamScriptedEnv(gym.Env):
+    """Single-env fake whose step outcomes come from a script."""
+
+    def __init__(self, script):
+        super().__init__()
+        self.closed = False
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(_STREAM_STATE_DIM,))
+        self.observation_space = spaces.Dict(
+            {
+                "main_images": spaces.Box(
+                    0, 255, shape=(1, *_STREAM_IMAGE_SHAPE), dtype=np.uint8
+                ),
+                "states": spaces.Box(-10.0, 10.0, shape=(1, _STREAM_STATE_DIM)),
+            }
+        )
+        self._script = list(script)
+        self._step_count = 0
+
+    def _obs(self):
+        image = np.full(
+            (1, *_STREAM_IMAGE_SHAPE), self._step_count % 255, dtype=np.uint8
+        )
+        states = np.full(
+            (1, _STREAM_STATE_DIM), float(self._step_count), dtype=np.float32
+        )
+        return {
+            "main_images": image,
+            "states": states,
+            "task_descriptions": ["stream_task"],
+        }
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        self._step_count = 0
+        return self._obs(), {}
+
+    def step(self, action):
+        self._step_count += 1
+        terminated, truncated, info = (
+            self._script.pop(0)
+            if self._script
+            else (np.array([False]), np.array([False]), {})
+        )
+        reward = np.array([1.0 if terminated.any() else 0.0], dtype=np.float32)
+        return self._obs(), reward, terminated, truncated, info
+
+    def close(self):
+        self.closed = True
+
+
+class _StreamThreeViewScriptedEnv(_StreamScriptedEnv):
+    """Single-env fake with one top and two extra-view RGB cameras."""
+
+    def __init__(self, script):
+        super().__init__(script)
+        self.observation_space = spaces.Dict(
+            {
+                "main_images": spaces.Box(
+                    0, 255, shape=(1, *_STREAM_IMAGE_SHAPE), dtype=np.uint8
+                ),
+                "extra_view_images": spaces.Box(
+                    0, 255, shape=(1, 2, *_STREAM_IMAGE_SHAPE), dtype=np.uint8
+                ),
+                "states": spaces.Box(-10.0, 10.0, shape=(1, _STREAM_STATE_DIM)),
+            }
+        )
+
+    def _obs(self):
+        top = np.full((1, *_STREAM_IMAGE_SHAPE), self._step_count % 255, dtype=np.uint8)
+        left = np.full(
+            _STREAM_IMAGE_SHAPE, (self._step_count * 3 + 11) % 255, dtype=np.uint8
+        )
+        right = np.full(
+            _STREAM_IMAGE_SHAPE, (self._step_count * 5 + 23) % 255, dtype=np.uint8
+        )
+        states = np.full(
+            (1, _STREAM_STATE_DIM), float(self._step_count), dtype=np.float32
+        )
+        return {
+            "main_images": top,
+            "extra_view_images": np.stack([left, right], axis=0)[None, ...],
+            "states": states,
+            "task_descriptions": ["stream_task"],
+        }
+
+
+def _collect_streaming(tmp_path: Path, script) -> Path:
+    save_dir = tmp_path / "collected"
+    env = CollectEpisode(
+        _StreamScriptedEnv(script),
+        save_dir=str(save_dir),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+    )
+    env.reset()
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+    while env.unwrapped._script:
+        env.step(action)
+    env.close()
+    return save_dir
+
+
+def _episode_frame_table(shard: Path, episode_index: int):
+    pq = pytest.importorskip("pyarrow.parquet")
+    table = pq.read_table(
+        shard / "data" / "chunk-000" / f"episode_{episode_index:06d}.parquet"
+    )
+    return table
+
+
+def _no_published_episodes(shard: Path) -> bool:
+    return not list(shard.glob("data/**/*.parquet"))
+
+
+def _sidecar_rows(shard: Path) -> list[dict]:
+    sidecar = shard / "stream_frames.jsonl"
+    if not sidecar.exists() or not sidecar.read_text().strip():
+        return []
+    return [json.loads(line) for line in sidecar.read_text().splitlines()]
+
+
+def _drain_frame_executor(env: CollectEpisode) -> None:
+    assert env._executor is not None
+    env._executor.submit(lambda: None).result(timeout=2)
+
+
+def _mp4_frame_count(path: Path, av_module) -> int:
+    with av_module.open(str(path)) as container:
+        stream = container.streams.video[0]
+        return sum(1 for _ in container.decode(stream))
+
+
+def test_streaming_mp4_export_uses_review_dir_outside_lerobot_root(tmp_path):
+    _import_real_lerobot_dataset()
+    pytest.importorskip("cv2")
+    pytest.importorskip("PIL.Image")
+    pytest.importorskip("pyarrow.parquet")
+    av_module = pytest.importorskip("av")
+
+    save_dir = tmp_path / "collected"
+    script = [
+        (np.array([False]), np.array([False]), {}),
+        (np.array([True]), np.array([False]), {"success": np.array([True])}),
+        (np.array([False]), np.array([False]), {}),
+        (np.array([True]), np.array([False]), {"success": np.array([True])}),
+    ]
+    env = CollectEpisode(
+        _StreamThreeViewScriptedEnv(script),
+        save_dir=str(save_dir),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+        export_mp4=True,
+    )
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+    primary_error = None
+
+    try:
+        env.reset()
+        env.step(action)
+        env.step(action)
+        env._wait_futures()
+        env._wait_save_futures()
+        assert env._video_executor is not None
+        env._video_executor.submit(lambda: None).result(timeout=30)
+
+        assert len(list(save_dir.rglob("*.mp4"))) == 3
+
+        env.reset()
+        env.step(action)
+        env.step(action)
+        env._wait_futures()
+        env._wait_save_futures()
+        assert env._video_executor is not None
+        env._video_executor.submit(lambda: None).result(timeout=30)
+    except BaseException as exc:
+        primary_error = exc
+        raise
+    finally:
+        try:
+            env.close()
+        except BaseException:
+            if primary_error is None:
+                raise
+
+    for shard_id in range(2):
+        shard = save_dir / "rank_0" / f"id_{shard_id}"
+        info = json.loads((shard / "meta" / "info.json").read_text())
+        assert info["total_episodes"] == 1
+        assert _episode_frame_table(shard, 0).num_rows == 2
+        assert not list(shard.rglob("*.mp4"))
+
+        episode_dir = (
+            save_dir / "rank_0" / "review_videos" / f"id_{shard_id}" / "episode_000000"
+        )
+        for view_name in ("top", "left", "right"):
+            mp4_path = episode_dir / f"{view_name}.mp4"
+            assert mp4_path.is_file()
+            assert _mp4_frame_count(mp4_path, av_module) == 2
+    assert len(list((save_dir / "rank_0" / "review_videos").rglob("*.mp4"))) == 6
+
+
+def test_streaming_writes_successful_episode(tmp_path):
+    _import_real_lerobot_dataset()
+    script = [
+        (np.array([False]), np.array([False]), {}),
+        (np.array([True]), np.array([False]), {"success": np.array([True])}),
+    ]
+    save_dir = _collect_streaming(tmp_path, script)
+
+    shard = save_dir / "rank_0" / "id_0"
+    info = json.loads((shard / "meta" / "info.json").read_text())
+    assert info["total_episodes"] == 1
+
+    table = _episode_frame_table(shard, 0)
+    assert table.num_rows == 2
+    assert all(bool(v) for v in table["is_success"].to_pylist()), (
+        "episode-level success must be stamped on every frame"
+    )
+    done = [bool(v) for v in table["done"].to_pylist()]
+    assert done == [False, True]
+    tasks = (shard / "meta" / "tasks.jsonl").read_text()
+    assert "stream_task" in tasks
+
+    # The per-frame state/actions sidecar is written per frame, so it survives
+    # even if a later parquet write is interrupted.
+    sidecar = (shard / "stream_frames.jsonl").read_text().strip().splitlines()
+    assert len(sidecar) == 2
+    first = json.loads(sidecar[0])
+    assert first["episode"] == 0 and first["frame"] == 0
+    assert len(first["state"]) == _STREAM_STATE_DIM
+    assert len(first["actions"]) == _STREAM_STATE_DIM
+
+
+def test_streaming_writes_aborted_episode_anyway(tmp_path):
+    _import_real_lerobot_dataset()
+    script = [
+        (np.array([False]), np.array([False]), {}),
+        # record_reset discards the in-progress recording; write-all keeps it.
+        (np.array([False]), np.array([False]), {"record_reset": np.array([True])}),
+        (np.array([True]), np.array([False]), {"success": np.array([True])}),
+    ]
+    save_dir = _collect_streaming(tmp_path, script)
+
+    aborted_shard = save_dir / "rank_0" / "id_0"
+    aborted_info = json.loads((aborted_shard / "meta" / "info.json").read_text())
+    assert aborted_info["total_episodes"] == 1
+
+    aborted = _episode_frame_table(aborted_shard, 0)
+    assert aborted.num_rows == 1
+    assert not any(bool(v) for v in aborted["is_success"].to_pylist())
+
+    succeeded_shard = save_dir / "rank_0" / "id_1"
+    succeeded_info = json.loads((succeeded_shard / "meta" / "info.json").read_text())
+    assert succeeded_info["total_episodes"] == 1
+
+    succeeded = _episode_frame_table(succeeded_shard, 0)
+    assert succeeded.num_rows == 1
+    assert all(bool(v) for v in succeeded["is_success"].to_pylist())
+
+
+def test_streaming_review_discard_then_keep_reuses_episode_zero_and_exports_only_keep(
+    tmp_path, monkeypatch
+):
+    _import_real_lerobot_dataset()
+    export_calls = []
+
+    def record_export(parquet_path, output_dir):
+        export_calls.append((parquet_path, output_dir))
+
+    monkeypatch.setattr(
+        CollectEpisode, "_export_episode_mp4", staticmethod(record_export)
+    )
+    script = [
+        (np.array([False]), np.array([False]), {}),
+        (np.array([False]), np.array([False]), {}),
+        (
+            np.array([False]),
+            np.array([False]),
+            {
+                "episode_review_pending": np.array([True]),
+                "pre_record": np.array([False]),
+            },
+        ),
+        (
+            np.array([False]),
+            np.array([False]),
+            {
+                "episode_review_pending": np.array([True]),
+                "pre_record": np.array([True]),
+            },
+        ),
+        (
+            np.array([True]),
+            np.array([False]),
+            {
+                "episode_review_pending": np.array([False]),
+                "episode_discarded": np.array([True]),
+                "success": np.array([False]),
+                "manual_done": np.array([False]),
+                "pre_record": np.array([True]),
+            },
+        ),
+        (np.array([False]), np.array([False]), {}),
+        (
+            np.array([False]),
+            np.array([False]),
+            {
+                "episode_review_pending": np.array([True]),
+                "pre_record": np.array([False]),
+            },
+        ),
+        (
+            np.array([True]),
+            np.array([False]),
+            {
+                "episode_review_pending": np.array([False]),
+                "episode_discarded": np.array([False]),
+                "success": np.array([True]),
+                "manual_done": np.array([True]),
+                "pre_record": np.array([True]),
+            },
+        ),
+    ]
+    save_dir = tmp_path / "collected"
+    env = CollectEpisode(
+        _StreamScriptedEnv(script),
+        save_dir=str(save_dir),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+        export_mp4=True,
+    )
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+
+    try:
+        env.reset()
+        for _ in range(3):
+            env.step(action)
+        env._wait_futures()
+        shard = save_dir / "rank_0" / "id_0"
+        assert _no_published_episodes(shard)
+        assert [row["frame"] for row in _sidecar_rows(shard)] == [0, 1, 2]
+
+        env.step(action)
+        env.step(action)
+        env.reset()
+        env.step(action)
+        env.step(action)
+        env.step(action)
+    finally:
+        env.close()
+
+    info = json.loads((shard / "meta" / "info.json").read_text())
+    assert info["total_episodes"] == 1
+    assert not list(shard.glob("images/**/*.png"))
+    assert len(export_calls) == 1
+    assert export_calls[0][0].name == "episode_000000.parquet"
+
+    table = _episode_frame_table(shard, 0)
+    assert table.num_rows == 2
+    assert all(bool(v) for v in table["is_success"].to_pylist())
+    assert [row["frame"] for row in _sidecar_rows(shard)] == [0, 1]
+
+
+@pytest.mark.parametrize("finish_with", ["reset", "close"])
+def test_streaming_review_pending_is_discarded_on_reset_or_close(tmp_path, finish_with):
+    _import_real_lerobot_dataset()
+    script = [
+        (np.array([False]), np.array([False]), {}),
+        (
+            np.array([False]),
+            np.array([False]),
+            {
+                "episode_review_pending": np.array([True]),
+                "pre_record": np.array([False]),
+            },
+        ),
+    ]
+    save_dir = tmp_path / "collected"
+    env = CollectEpisode(
+        _StreamScriptedEnv(script),
+        save_dir=str(save_dir),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+    )
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+
+    env.reset()
+    env.step(action)
+    env.step(action)
+    if finish_with == "reset":
+        env.reset()
+    env.close()
+
+    shard = save_dir / "rank_0" / "id_0"
+    assert _no_published_episodes(shard)
+    assert _sidecar_rows(shard) == []
+    assert not list(shard.glob("images/**/*.png"))
+    assert not list(shard.glob("images/**/episode_*"))
+    info_path = shard / "meta" / "info.json"
+    if info_path.exists():
+        assert json.loads(info_path.read_text())["total_episodes"] == 0
+
+
+def test_streaming_queue_overflow_invalidates_episode_without_blocking(
+    tmp_path, monkeypatch
+):
+    _import_real_lerobot_dataset()
+    release_writer = threading.Event()
+    writer_entered = threading.Event()
+    submitted_frames = []
+    original_add_frame = CollectEpisode._stream_add_frame
+
+    def blocked_add_frame(self, frame):
+        submitted_frames.append(frame)
+        writer_entered.set()
+        release_writer.wait(timeout=1.0)
+        return original_add_frame(self, frame)
+
+    monkeypatch.setattr(collect_episode_module, "_MAX_PENDING_FUTURES", 2)
+    monkeypatch.setattr(CollectEpisode, "_stream_add_frame", blocked_add_frame)
+
+    save_dir = tmp_path / "collected"
+    env = CollectEpisode(
+        _StreamScriptedEnv(
+            [
+                (np.array([False]), np.array([False]), {}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([True]), np.array([False]), {"success": np.array([True])}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([True]), np.array([False]), {"success": np.array([True])}),
+            ]
+        ),
+        save_dir=str(save_dir),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+    )
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+
+    try:
+        env.reset()
+        env.step(action)
+        assert writer_entered.wait(timeout=1.0), "writer thread did not block"
+        env.step(action)
+
+        started = time.perf_counter()
+        _, _, _, _, overflow_info = env.step(action)
+        overflow_elapsed = time.perf_counter() - started
+
+        assert overflow_elapsed < 0.2
+        assert bool(np.asarray(overflow_info["recording_invalid"]).any())
+        assert len(submitted_frames) <= 2
+
+        _, _, _, _, still_invalid_info = env.step(action)
+        assert bool(np.asarray(still_invalid_info["recording_invalid"]).any())
+
+        _, _, terminated, truncated, done_info = env.step(action)
+        assert bool(np.asarray(terminated).any()) and not bool(
+            np.asarray(truncated).any()
+        )
+        assert bool(np.asarray(done_info["recording_invalid"]).any())
+
+        release_writer.set()
+        env._wait_futures()
+        env.reset()
+        _, _, _, _, fresh_info = env.step(action)
+        assert not bool(np.asarray(fresh_info["recording_invalid"]).any())
+        _, _, _, _, success_info = env.step(action)
+        assert not bool(np.asarray(success_info["recording_invalid"]).any())
+    finally:
+        release_writer.set()
+        env.close()
+
+    shard = save_dir / "rank_0" / "id_0"
+    info = json.loads((shard / "meta" / "info.json").read_text())
+    assert info["total_episodes"] == 1
+
+    errors_path = shard / "recording_errors.jsonl"
+    errors = [json.loads(line) for line in errors_path.read_text().splitlines()]
+    assert errors
+    assert errors[0]["episode_index"] == 0
+    assert errors[0]["reason"] == "recording_queue_overflow"
+    assert 0 < errors[0]["saved_frames"] <= 2
+
+    archive = Path(errors[0]["archive"])
+    assert archive.is_dir()
+    assert archive.parent == shard / "invalid_episodes"
+    with (archive / "frames.pkl").open("rb") as frames_file:
+        invalid_prefix = pickle.load(frames_file)
+    assert invalid_prefix["size"] == errors[0]["saved_frames"]
+    assert 0 < invalid_prefix["size"] <= 2
+    assert all(str(path).startswith(str(archive)) for path in invalid_prefix["image"])
+    assert all(Path(path).is_file() for path in invalid_prefix["image"])
+
+    sidecar = [
+        json.loads(line)
+        for line in (shard / "stream_frames.jsonl").read_text().splitlines()
+    ]
+    assert len(sidecar) == 2
+    assert [row["frame"] for row in sidecar] == [0, 1]
+
+    recovered_episode = _episode_frame_table(shard, 0)
+    assert recovered_episode.num_rows == 2
+    assert all(bool(v) for v in recovered_episode["is_success"].to_pylist())
+
+
+def test_streaming_blocked_save_does_not_fill_frame_queue(tmp_path, monkeypatch):
+    _import_real_lerobot_dataset()
+    from rlinf.data.storage.lerobot.writer import LeRobotDatasetWriter
+
+    release_save = threading.Event()
+    first_save_started = threading.Event()
+    save_calls = 0
+    original_save_episode = LeRobotDatasetWriter.save_episode
+
+    def blocked_first_save(self, is_success=None):
+        nonlocal save_calls
+        save_calls += 1
+        if save_calls == 1:
+            first_save_started.set()
+            release_save.wait(timeout=5.0)
+        return original_save_episode(self, is_success=is_success)
+
+    monkeypatch.setattr(collect_episode_module, "_MAX_PENDING_FUTURES", 2)
+    monkeypatch.setattr(LeRobotDatasetWriter, "save_episode", blocked_first_save)
+
+    save_dir = tmp_path / "collected"
+    env = CollectEpisode(
+        _StreamScriptedEnv(
+            [
+                (np.array([False]), np.array([False]), {}),
+                (np.array([True]), np.array([False]), {"success": np.array([True])}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([False]), np.array([False]), {}),
+                (np.array([True]), np.array([False]), {"success": np.array([True])}),
+            ]
+        ),
+        save_dir=str(save_dir),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+    )
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+
+    try:
+        env.reset()
+        env.step(action)
+        env.step(action)
+        env._wait_futures()
+        assert first_save_started.wait(timeout=1.0)
+
+        env.reset()
+        for _ in range(4):
+            _, _, _, _, info = env.step(action)
+            _drain_frame_executor(env)
+            assert not bool(np.asarray(info["recording_invalid"]).any())
+        _, _, terminated, truncated, info = env.step(action)
+        _drain_frame_executor(env)
+        assert bool(np.asarray(terminated).any()) and not bool(
+            np.asarray(truncated).any()
+        )
+        assert not bool(np.asarray(info["recording_invalid"]).any())
+        env._wait_futures()
+
+        second_shard = save_dir / "rank_0" / "id_1"
+        assert [row["frame"] for row in _sidecar_rows(second_shard)] == [
+            0,
+            1,
+            2,
+            3,
+            4,
+        ]
+    finally:
+        release_save.set()
+        env.close()
+
+    first_shard = save_dir / "rank_0" / "id_0"
+    second_shard = save_dir / "rank_0" / "id_1"
+    assert (
+        json.loads((first_shard / "meta" / "info.json").read_text())["total_episodes"]
+        == 1
+    )
+    assert (
+        json.loads((second_shard / "meta" / "info.json").read_text())["total_episodes"]
+        == 1
+    )
+    assert _episode_frame_table(first_shard, 0).num_rows == 2
+    assert _episode_frame_table(second_shard, 0).num_rows == 5
+
+
+def test_streaming_background_save_error_surfaces_and_finalizes(tmp_path, monkeypatch):
+    _import_real_lerobot_dataset()
+    from rlinf.data.storage.lerobot.writer import LeRobotDatasetWriter
+
+    finalize_called = threading.Event()
+    original_finalize = LeRobotDatasetWriter.finalize
+
+    def fail_save(self, is_success=None):
+        raise RuntimeError("synthetic save failure")
+
+    def record_finalize(self):
+        finalize_called.set()
+        return original_finalize(self)
+
+    monkeypatch.setattr(LeRobotDatasetWriter, "save_episode", fail_save)
+    monkeypatch.setattr(LeRobotDatasetWriter, "finalize", record_finalize)
+
+    env = CollectEpisode(
+        _StreamScriptedEnv(
+            [
+                (np.array([False]), np.array([False]), {}),
+                (np.array([True]), np.array([False]), {"success": np.array([True])}),
+            ]
+        ),
+        save_dir=str(tmp_path / "collected"),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+    )
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+
+    try:
+        env.reset()
+        env.step(action)
+        env.step(action)
+        env._wait_futures()
+        assert finalize_called.wait(timeout=2.0)
+        assert env._save_executor is not None
+        # The finalize hook is set before the save future returns. Queue a direct
+        # FIFO sentinel behind that save task so the future is done, while leaving
+        # CollectEpisode's tracked future list intact for reset() to surface it.
+        env._save_executor.submit(lambda: None).result(timeout=2.0)
+        with pytest.raises(RuntimeError, match="synthetic save failure"):
+            env.reset()
+    finally:
+        env.close()
+
+
+def test_streaming_close_settles_frame_error_and_later_save_cleanup(
+    tmp_path, monkeypatch
+):
+    _import_real_lerobot_dataset()
+    from rlinf.data.storage.lerobot.writer import LeRobotDatasetWriter
+
+    sidecar_calls = 0
+    finalize_called = threading.Event()
+    original_sidecar = CollectEpisode._write_stream_sidecar
+    original_finalize = LeRobotDatasetWriter.finalize
+
+    def fail_second_sidecar_write(self, writer, frame):
+        nonlocal sidecar_calls
+        sidecar_calls += 1
+        if sidecar_calls == 2:
+            raise RuntimeError("synthetic frame failure")
+        return original_sidecar(self, writer, frame)
+
+    def record_finalize(self):
+        finalize_called.set()
+        return original_finalize(self)
+
+    monkeypatch.setattr(
+        CollectEpisode, "_write_stream_sidecar", fail_second_sidecar_write
+    )
+    monkeypatch.setattr(LeRobotDatasetWriter, "finalize", record_finalize)
+
+    save_dir = tmp_path / "collected"
+    base_env = _StreamScriptedEnv(
+        [
+            (np.array([False]), np.array([False]), {}),
+            (np.array([False]), np.array([False]), {}),
+            (np.array([True]), np.array([False]), {"success": np.array([True])}),
+        ]
+    )
+    env = CollectEpisode(
+        base_env,
+        save_dir=str(save_dir),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+    )
+    action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+
+    env.reset()
+    env.step(action)
+    env.step(action)
+    env.step(action)
+    with pytest.raises(RuntimeError, match="synthetic frame failure"):
+        env.close()
+
+    assert base_env.closed
+    assert finalize_called.wait(timeout=1.0)
+
+    shard = save_dir / "rank_0" / "id_0"
+    info = json.loads((shard / "meta" / "info.json").read_text())
+    assert info["total_episodes"] == 1
+    assert _episode_frame_table(shard, 0).num_rows == 3
+
+
+def test_streaming_mp4_export_does_not_block_recording_or_env_close(
+    tmp_path, monkeypatch
+):
+    _import_real_lerobot_dataset()
+    export_started = threading.Event()
+    release_export = threading.Event()
+    env_closed = threading.Event()
+    export_released = threading.Event()
+    export_calls = []
+
+    def blocked_export(parquet_path, output_dir):
+        export_calls.append((parquet_path, output_dir))
+        export_started.set()
+        release_export.wait(timeout=5.0)
+        export_released.set()
+
+    class CloseAwareEnv(_StreamScriptedEnv):
+        def close(self):
+            self.closed = True
+            env_closed.set()
+
+    monkeypatch.setattr(
+        CollectEpisode, "_export_episode_mp4", staticmethod(blocked_export)
+    )
+    base_env = CloseAwareEnv(
+        [
+            (np.array([False]), np.array([False]), {}),
+            (np.array([True]), np.array([False]), {"success": np.array([True])}),
+            (np.array([False]), np.array([False]), {}),
+        ]
+    )
+    env = CollectEpisode(
+        base_env,
+        save_dir=str(tmp_path / "collected"),
+        num_envs=1,
+        export_format="lerobot",
+        robot_type="dual_yam",
+        fps=30,
+        streaming=True,
+        export_mp4=True,
+    )
+    close_thread = None
+    try:
+        env.reset()
+        action = np.zeros((1, _STREAM_STATE_DIM), dtype=np.float32)
+        env.step(action)
+        env.step(action)
+        assert export_started.wait(timeout=2.0), "MP4 export task was not submitted"
+        assert len(export_calls) == 1
+
+        _, _, _, _, info = env.step(action)
+        assert not export_released.is_set()
+        assert not bool(np.asarray(info["recording_invalid"]).any())
+
+        close_thread = threading.Thread(target=env.close)
+        close_thread.start()
+        assert env_closed.wait(timeout=2.0), "env.close waited for MP4 export first"
+        close_thread.join(timeout=0.2)
+        assert close_thread.is_alive(), "close should wait for blocked MP4 export"
+    finally:
+        release_export.set()
+        if close_thread is not None:
+            close_thread.join(timeout=2.0)
+        if close_thread is None or close_thread.is_alive():
+            env.close()
+    assert not (close_thread and close_thread.is_alive())
+    assert base_env.closed
+
+
+def test_streaming_requires_lerobot_format(tmp_path):
+    _import_real_lerobot_dataset()
+    with pytest.raises(ValueError, match="streaming"):
+        CollectEpisode(
+            _StreamScriptedEnv([]),
+            save_dir=str(tmp_path / "x"),
+            export_format="pickle",
+            streaming=True,
+        )

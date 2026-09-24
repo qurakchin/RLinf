@@ -32,6 +32,8 @@ RLinf 是一个灵活且可扩展的开源框架，专为具身智能和智能�
 
 - [2026/09] 🔥 RLinf 支持基于 ApxInf 加速的 π₀.₅ LIBERO 评测：resize、tokenize、归一化等仍由 RLinf 原生 OpenPI transforms 负责，仅经由 ApxInf 的 L1 推理接口接入引擎。文档：[ApxInf LIBERO 评测](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/evaluations/guides/libero.html#apxinf-backend)。
 - [2026/09] 🔥 RLinf 支持 [FastWAM](https://github.com/yuantianyuan01/FastWAM) 的 FSDP 监督微调与 LIBERO 批量评测。文档：[FastWAM 评测与监督微调](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/sft_fastwam.html)。
+- [2026/09] 新增 YAM PICO VR 采集初版，接入 i2rt FK/IK 并提供离线检查，实际站点真机验收仍待完成。[使用说明](docs/source-zh/rst_source/examples/embodied/yam.rst#pico-vr-数据采集)。
+- [2026/08] 🔥 RLinf 新增原生双臂 YAM 遥操作与 LeRobot 直接数据采集，不再依赖单独的 YAM 应用仓库。文档：[双臂 YAM](docs/source-zh/rst_source/examples/embodied/yam.rst)。
 - [2026/08] 🔥 RLinf 支持对英伟达全模态世界模型 Cosmos3 做 SFT 及基于 SGLang 的评测。文档：[Cosmos3 SFT](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/sft_cosmos3.html)、[SGLang 评测](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/evaluations/guides/cosmos3_sglang.html)。
 - [2026/08] 🎉 RLinf 正式入选 **PyTorch 生态**！我们将继续把可扩展的具身与智能体强化学习带给 PyTorch 用户，推动模型智能走进真实世界。博客：[PyTorch Ecosystem Landscape Q3 Update](https://pytorch.org/blog/pytorch-ecosystem-landscape-q3-update/)。
 - [2026/08] 🎉 Isaac Lab v3.0.0 正式采用 RLinf 作为其强化学习（RL）训练基础设施。文档：[Isaac Lab 中的 RLinf](https://isaac-sim.github.io/IsaacLab/v3.0.0-beta2/source/overview/reinforcement-learning/rl_existing_scripts.html#rlinf)。
@@ -267,6 +269,7 @@ RLinf 支持 World Action Model（WAM）和 Vision-Language-Action Model（VLA�
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/gim_arm.html">GimArm</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/piper.html">AgileX Piper</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/so101.html">SO101</a> ✅</li>
+          <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/yam.html">双臂 YAM 数据采集</a> ✅</li>
           <li>More...</li>
         </ul>
       </td>
@@ -286,7 +289,12 @@ RLinf 支持 World Action Model（WAM）和 Vision-Language-Action Model（VLA�
             <a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/franka_vr.html">
               PICO VR
             </a> ✅
-          </li>          
+          </li>
+          <li>
+            <a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/yam.html">
+              YAM 主臂示教
+            </a> ✅
+          </li>
         </ul>
       </td>
     </tr>

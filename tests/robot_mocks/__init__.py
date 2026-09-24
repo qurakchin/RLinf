@@ -47,6 +47,10 @@ __all__ = ["Recorder", "mocked_sdks", "module", "sdk_modules"]
 #: Keys are dotted module names.
 _PATCHES: dict[str, dict[str, Any]] = {}
 
+#: Marks an attribute that did not exist, so a patch can tell it apart from one
+#: that exists and holds ``None`` -- a module-scope ``try/except`` sets both.
+_ABSENT = object()
+
 
 def _no_processes() -> Any:
     """Return a ``psutil`` proxy whose ``Popen`` starts no processes."""
@@ -165,24 +169,29 @@ def mocked_sdks(*, extra: dict[str, Any] | None = None) -> Iterator[dict[str, An
         if airbot is not None and airbot_config is not None
         else {}
     )
+    # The PICO transport binds ``zmq`` the same way, so any test that imported
+    # it before the fake was installed must be handed the fake explicitly.
+    pico_zmq = made.get("zmq")
+    pico_patch = {"zmq": pico_zmq} if pico_zmq is not None else {}
     for dotted, attributes in {
         "rlinf.robotics.parts.arms.franka_ros": {"psutil": processes},
         "rlinf.robotics.parts.transports.ros.ros_controller": {"psutil": processes},
         "rlinf.robotics.parts.arms.dosw1": dosw1_patch,
+        "rlinf.robotics.parts.transports.pico": pico_patch,
         **_PATCHES,
     }.items():
         target = sys.modules.get(dotted)
         if target is None:
             continue
         for name, value in attributes.items():
-            patches.append((target, name, getattr(target, name, None)))
+            patches.append((target, name, getattr(target, name, _ABSENT)))
             setattr(target, name, value)
 
     try:
         yield made
     finally:
         for target, name, original in reversed(patches):
-            if original is None:
+            if original is _ABSENT:
                 delattr(target, name)
             else:
                 setattr(target, name, original)

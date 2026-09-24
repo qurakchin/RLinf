@@ -1,0 +1,202 @@
+defaults:
+  - env/realworld_dual_yam_joint@env.eval
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    env:
+      node_group: yam
+      placement: 0
+  node_groups:
+    - label: yam
+      node_ranks: 0
+      hardware:
+        type: DualYam
+        configs:
+          - node_rank: 0
+            # Conventional SocketCAN names can be overridden without editing
+            # this file. All four resolved channel names must remain unique.
+            left_follower:
+              channel: ${oc.env:YAM_LEFT_FOLLOWER_CAN,can_left}
+              arm_type: yam
+              gripper_type: flexible_4310
+              # null preserves the mass in the pinned i2rt model. Replace with
+              # a measured per-device value only after calibration.
+              ee_mass: null
+              # Let i2rt detect [closed, open] in the current encoder revolution.
+              # Calibration moves the gripper to both stops on every startup;
+              # keep the jaws completely unobstructed while connecting.
+              gripper_limits: null
+              # Technician-tuned gains for this station's arms. This i2rt build
+              # only accepts gravity_comp_factor per device; grav_comp_kd and
+              # coulomb_friction come from the SDK's config/yam_v1.yml, which
+              # has been patched on this station to coulomb_friction
+              # [0.25, 0.6, 0.6, 0.06, 0.06, 0.06] so the elbow pushes through
+              # static friction.
+              gravity_comp_factor: [1.0, 1.1, 1.1, 1.2, 1.0, 1.0]
+              grav_comp_kd: null
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: true
+            right_follower:
+              channel: ${oc.env:YAM_RIGHT_FOLLOWER_CAN,can_right}
+              arm_type: yam
+              gripper_type: flexible_4310
+              ee_mass: null
+              # Use the same official i2rt auto-calibration path as the left side.
+              gripper_limits: null
+              gravity_comp_factor: [1.0, 1.1, 1.1, 1.2, 1.0, 1.0]
+              grav_comp_kd: null
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: true
+            left_leader:
+              channel: ${oc.env:YAM_LEFT_LEADER_CAN,can_lead_l}
+              arm_type: yam
+              gripper_type: yam_teaching_handle
+              # Set this to the measured teaching-handle mass when tuning
+              # gravity compensation; it is intentionally independent from
+              # the follower end-effector mass.
+              ee_mass: null
+              # Teaching handles do not use motorized gripper limits; the
+              # structural value is ignored by i2rt for this gripper type.
+              gripper_limits: [0.0, 1.0]
+              gravity_comp_factor: [1.0, 1.0, 1.0, 1.2, 1.0, 1.0]
+              grav_comp_kd: [0.05, 0.06, 0.01, 0.20, 0.05, 0.05]
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: true
+            right_leader:
+              channel: ${oc.env:YAM_RIGHT_LEADER_CAN,can_lead_r}
+              arm_type: yam
+              gripper_type: yam_teaching_handle
+              ee_mass: null
+              gripper_limits: [0.0, 1.0]
+              gravity_comp_factor: [1.1, 1.0, 1.1, 1.2, 1.0, 1.0]
+              grav_comp_kd: [0.1, 0.06, 0.03, 0.20, 0.05, 0.05]
+              coulomb_friction: null
+              use_coulomb_friction: false
+              bilateral_kp: 0.0
+              gripper_invert: false
+              enable_auto_recovery: true
+            cameras:
+              - name: top_rgb
+                serial: "260322277483"
+                camera_type: realsense
+                resolution: [640, 480]
+                fps: 30
+                enable_depth: false
+              - name: left_rgb
+                serial: "260322272602"
+                camera_type: realsense
+                resolution: [640, 480]
+                fps: 30
+                enable_depth: false
+              - name: right_rgb
+                serial: "260422273719"
+                camera_type: realsense
+                resolution: [640, 480]
+                fps: 30
+                enable_depth: false
+
+runner:
+  task_type: embodied
+  logger:
+    log_path: null
+    project_name: rlinf
+    experiment_name: "dual-yam-collect-data"
+    logger_backends: ["tensorboard"]
+  num_data_episodes: 50
+  record_task_description: true
+  # LeRobot streaming collection below already persists every frame; skip the
+  # RLinf demo replay buffer, which would hold each episode's raw images in
+  # memory a second time.
+  save_demos: false
+
+seed: 1234
+
+env:
+  group_name: "EnvGroup"
+  eval:
+    # The teaching-handle record button owns episode completion. Keeping this
+    # large finite value keeps trajectory metadata valid; manual control below
+    # prevents this value from ending an episode before the record button.
+    max_episode_steps: 10000
+    max_steps_per_rollout_epoch: 10000
+    auto_reset: false
+    ignore_terminations: false
+    override_cfg:
+      # Processed RGB observations; open this port in the local browser.
+      camera_preview_port: 8080
+      # Match the legacy yam-abc teleop path: after the smooth engage ramp,
+      # forward leader joints directly and rely on i2rt's hardware limits.
+      enforce_runtime_joint_limits: false
+      task_description: "Tidy up the table. Left and right refer to the top camera view. Place all Pepsi bottles in the bag on the left and all Coca-Cola bottles in the bag on the right. Move the bowls to uncover the spoons, place the white spoon in the white bowl and the pink spoon in the pink bowl, and return both bowls to their original marked positions: white bowl on the left and pink bowl on the right."
+      manual_episode_control_only: true
+      # Confirm the synchronized teaching-arm pose before enabling pedal return.
+      # This is an absolute collection home, not a motor encoder zero.
+      reset:
+        enabled: true
+        mode: manual
+        left_qpos: [-0.2370871, 0.994316, 1.3670176, -1.4570459, -0.0795377, -0.1081483, 0.9934258]
+        right_qpos: [0.0925078, 0.885977, 1.3624399, -1.3704509, 0.058938, 0.1115816, 0.9956172]
+        duration_s: 6.0
+        max_joint_delta: 0.01
+        tolerance: 0.04
+        timeout_s: 40.0
+      # Drive both arms to the folded resting pose before torque-off so
+      # closing the session never drops them.
+      park_on_close:
+        enabled: true
+        left_qpos: [-0.0032, 0.0063, 0.0055, -0.0685, 0.0086, -0.0147, 1.0]
+        right_qpos: [0.0216, 0.0071, 0.0078, -0.0795, -0.0261, 0.0971, 1.0]
+        duration_s: 6.0
+        max_joint_delta: 0.02
+        tolerance: 0.05
+        timeout_s: 40.0
+      leader_intervention:
+        enabled: true
+        wait_for_record_button: true
+        sync_on_reset: false
+        # The record button only splits episodes; the top button exclusively
+        # owns teleop synchronization, matching the legacy collector.
+        preserve_sync_between_episodes: true
+        poll_frequency: 30.0
+        button_debounce_s: 0.2
+        # Outside synchronized teleoperation, command measured-pose hold rather
+        # than forwarding the collector's placeholder zero action.
+        unsynced_action_source: hold
+        # Finish with the handle button, then choose left=discard/right=keep.
+        foot_switch_device: /dev/input/by-id/usb-PCsensor_FootSwitch-event-kbd
+        foot_switch_discard_key: 30  # KEY_A: physical left pedal
+        foot_switch_keep_key: 46    # KEY_C: physical right pedal
+        foot_switch_reset_key: 48    # KEY_B: physical middle pedal (measured).
+
+    data_collection:
+      enabled: true
+      save_dir: ${runner.logger.log_path}/collected_data
+      export_format: "lerobot"
+      # Stream images to disk; retain only small fields for the current episode.
+      # Save successful and failed episodes, stamping is_success at episode end.
+      streaming: true
+      # Export review videos after each saved episode in a separate process.
+      export_mp4: true
+      only_success: false
+      robot_type: "dual_yam"
+      fps: 30
+      # Each streaming episode has its own shard; saving and MP4 export
+      # run in the background while the next episode records.
