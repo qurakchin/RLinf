@@ -48,8 +48,20 @@ from rlinf.envs.real.yam.i2rt_backend import I2RTYamBackendFactory  # noqa: E402
 # Folded resting pose measured on this station (calib_data/smoke sample 0),
 # grippers overridden to open.
 FOLDED_POSE = [
-    -0.0032, 0.0063, 0.0055, -0.0685, 0.0086, -0.0147, 1.0,
-    0.0216, 0.0071, 0.0078, -0.0795, -0.0261, 0.0971, 1.0,
+    -0.0032,
+    0.0063,
+    0.0055,
+    -0.0685,
+    0.0086,
+    -0.0147,
+    1.0,
+    0.0216,
+    0.0071,
+    0.0078,
+    -0.0795,
+    -0.0261,
+    0.0971,
+    1.0,
 ]
 
 _JOINT_LIMIT_MIN = [-2.61799, 0.0, 0.0, -1.69297, -1.5708, -2.0944]
@@ -80,10 +92,15 @@ def _runtime() -> YamControlRuntime:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target-json", type=Path, default=None,
-                        help="JSON file with a 14-D target state.")
-    parser.add_argument("--hold", action="store_true",
-                        help="Hold the pose until Ctrl-C, then re-park.")
+    parser.add_argument(
+        "--target-json",
+        type=Path,
+        default=None,
+        help="JSON file with a 14-D target state.",
+    )
+    parser.add_argument(
+        "--hold", action="store_true", help="Hold the pose until Ctrl-C, then re-park."
+    )
     args = parser.parse_args()
 
     target = np.asarray(
@@ -101,8 +118,11 @@ def main() -> None:
         start = runtime.read_state().as_vector()
         print("moving to target pose ...")
         runtime.move_to(
-            target, duration_s=6.0, max_joint_delta=0.02,
-            tolerance=0.05, timeout_s=40.0,
+            target,
+            duration_s=6.0,
+            max_joint_delta=0.02,
+            tolerance=0.05,
+            timeout_s=40.0,
         )
         print("target reached")
         if args.hold:
@@ -111,8 +131,11 @@ def main() -> None:
             except KeyboardInterrupt:
                 pass
             runtime.move_to(
-                start, duration_s=6.0, max_joint_delta=0.02,
-                tolerance=0.05, timeout_s=40.0,
+                start,
+                duration_s=6.0,
+                max_joint_delta=0.02,
+                tolerance=0.05,
+                timeout_s=40.0,
             )
             print("returned to startup pose")
     finally:

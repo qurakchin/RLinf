@@ -86,7 +86,9 @@ def _deproject(u: float, v: float, depth: np.ndarray, intr: dict) -> np.ndarray:
     if valid.size == 0:
         raise ValueError(f"no valid depth near pixel ({u}, {v})")
     z = float(np.median(valid))
-    return np.array([(u - intr["cx"]) * z / intr["fx"], (v - intr["cy"]) * z / intr["fy"], z])
+    return np.array(
+        [(u - intr["cx"]) * z / intr["fx"], (v - intr["cy"]) * z / intr["fy"], z]
+    )
 
 
 def _fit_table_plane(
@@ -171,7 +173,9 @@ def _ik_multi_seed(kin: YamKinematicsAdapter, target: np.ndarray, q_measured):
     return best, None, None
 
 
-def _hover_target(p_base: np.ndarray, axis_base: np.ndarray, hover_m: float) -> np.ndarray:
+def _hover_target(
+    p_base: np.ndarray, axis_base: np.ndarray, hover_m: float
+) -> np.ndarray:
     """Build the 4x4 grasp_site target for the flexible_4310 scoop grasp.
 
     Verified against the MuJoCo model and real working poses: the jaws slide
@@ -243,8 +247,11 @@ def _safe_move_to(
                 f"threshold at max waypoint depth; proceeding with caution"
             )
         runtime.move_to(
-            goal, duration_s=8.0, max_joint_delta=0.02,
-            tolerance=0.05, timeout_s=40.0,
+            goal,
+            duration_s=8.0,
+            max_joint_delta=0.02,
+            tolerance=0.05,
+            timeout_s=40.0,
         )
         return
 
@@ -266,7 +273,9 @@ def _safe_move_to(
         seed = runtime.read_state().as_vector()[lo : lo + 6]
         result, target_used, _ = _ik_multi_seed(kin, waypoint, seed)
         if not result.success:
-            raise RuntimeError(f"IK failed for {side} {label} waypoint: {result.reason}")
+            raise RuntimeError(
+                f"IK failed for {side} {label} waypoint: {result.reason}"
+            )
         step_goal = runtime.read_state().as_vector()
         step_goal[lo:hi] = np.concatenate([result.q_target, [goal[hi - 1]]])
         _safe_move_to(
@@ -307,11 +316,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--targets", type=Path, required=True)
     parser.add_argument("--extrinsics", type=Path, required=True)
     parser.add_argument("--image", type=Path, required=True, help="top RGB png")
-    parser.add_argument("--depth", type=Path, required=True, help="aligned depth npy (meters)")
+    parser.add_argument(
+        "--depth", type=Path, required=True, help="aligned depth npy (meters)"
+    )
     parser.add_argument("--intrinsics", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--execute", action="store_true",
-                        help="Move the arms; without it only plan + IK-check.")
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Move the arms; without it only plan + IK-check.",
+    )
     parser.add_argument("--yes", action="store_true", help="Skip confirmations.")
     return parser.parse_args()
 
@@ -347,15 +361,32 @@ def main() -> None:
             t_base_top @ np.append(a_cam[0], 1.0)
         )[:3]
         target = _hover_target(p_base, axis_base, hover_m)
-        plan[side] = {"p_base": p_base.tolist(), "target": target.tolist(),
-                      "table_plane": plane.tolist(),
-                      "table_plane_inliers": n_inliers}
+        plan[side] = {
+            "p_base": p_base.tolist(),
+            "target": target.tolist(),
+            "table_plane": plane.tolist(),
+            "table_plane_inliers": n_inliers,
+        }
         color = (0, 255, 0) if side == "left" else (0, 0, 255)
-        cv2.drawMarker(annotated, (int(u), int(v)), color, cv2.MARKER_TILTED_CROSS, 24, 2)
-        cv2.line(annotated, tuple(map(int, spec["axis"][0])),
-                 tuple(map(int, spec["axis"][1])), color, 1)
-        cv2.putText(annotated, side, (int(u) + 8, int(v) - 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        cv2.drawMarker(
+            annotated, (int(u), int(v)), color, cv2.MARKER_TILTED_CROSS, 24, 2
+        )
+        cv2.line(
+            annotated,
+            tuple(map(int, spec["axis"][0])),
+            tuple(map(int, spec["axis"][1])),
+            color,
+            1,
+        )
+        cv2.putText(
+            annotated,
+            side,
+            (int(u) + 8, int(v) - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            2,
+        )
         print(
             f"{side}: pixel ({u},{v}) -> base {np.round(p_base[:3], 3).tolist()}, "
             f"hover target {np.round(target[:3, 3], 3).tolist()}"
@@ -429,7 +460,10 @@ def main() -> None:
             goals[side] = goal.copy()
             print(f"moving {side} arm ...")
             _safe_move_to(
-                runtime, kin, goal, side,
+                runtime,
+                kin,
+                goal,
+                side,
                 table_plane=np.asarray(plan[side]["table_plane"]),
                 clearance_m=0.03,
             )
@@ -448,16 +482,21 @@ def main() -> None:
                 lo, _ = ARM_SLICE[side]
                 # Arm joints only: the gripper's normalized rest reading drifts
                 # by a few percent and would false-trigger the check.
-                dev = float(np.max(np.abs(state[lo : lo + 6] - goals[side][lo : lo + 6])))
+                dev = float(
+                    np.max(np.abs(state[lo : lo + 6] - goals[side][lo : lo + 6]))
+                )
                 if dev > 0.08:
                     print(
                         f"{side} arm drooped {dev:.3f} rad mid-run; "
                         f"re-hovering (attempt {attempt + 1})\n"
-                        f"  state: {np.round(state[lo:lo + 6], 3).tolist()}\n"
-                        f"  goal : {np.round(goals[side][lo:lo + 6], 3).tolist()}"
+                        f"  state: {np.round(state[lo : lo + 6], 3).tolist()}\n"
+                        f"  goal : {np.round(goals[side][lo : lo + 6], 3).tolist()}"
                     )
                     _safe_move_to(
-                        runtime, kin, goals[side], side,
+                        runtime,
+                        kin,
+                        goals[side],
+                        side,
                         table_plane=np.asarray(plan[side]["table_plane"]),
                         clearance_m=0.03,
                     )
@@ -478,8 +517,12 @@ def main() -> None:
             uv = K @ p_cam[:3] / p_cam[2]
             color = (0, 255, 0) if side == "left" else (0, 0, 255)
             cv2.drawMarker(
-                verify_img, (int(uv[0]), int(uv[1])), color,
-                cv2.MARKER_TILTED_CROSS, 24, 2,
+                verify_img,
+                (int(uv[0]), int(uv[1])),
+                color,
+                cv2.MARKER_TILTED_CROSS,
+                24,
+                2,
             )
         cv2.imwrite(str(args.out / "verify_hover.png"), verify_img)
         print(f"verification saved -> {args.out / 'verify_hover.png'}")
@@ -490,8 +533,11 @@ def main() -> None:
         print("Parking arms at their startup pose before torque-off...")
         try:
             runtime.move_to(
-                measured, duration_s=6.0, max_joint_delta=0.02,
-                tolerance=0.05, timeout_s=40.0,
+                measured,
+                duration_s=6.0,
+                max_joint_delta=0.02,
+                tolerance=0.05,
+                timeout_s=40.0,
             )
         except Exception as error:
             print(f"park failed ({error}); support the arms before closing")

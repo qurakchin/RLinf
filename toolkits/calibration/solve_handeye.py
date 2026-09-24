@@ -196,9 +196,7 @@ def _board_in_cam(
     found, corners = find_chessboard_custom(gray, pattern)
     if not found:
         return None
-    ok, rvec, tvec = cv2.solvePnP(
-        obj_pts, corners, K, dist, flags=cv2.SOLVEPNP_IPPE
-    )
+    ok, rvec, tvec = cv2.solvePnP(obj_pts, corners, K, dist, flags=cv2.SOLVEPNP_IPPE)
     if not ok:
         return None
     proj, _ = cv2.projectPoints(obj_pts, rvec, tvec, K, dist)
@@ -269,12 +267,24 @@ def _mean_transform(transforms: list[np.ndarray]) -> np.ndarray:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture", type=Path, nargs="?")
-    parser.add_argument("--pattern", type=int, nargs=2, default=(11, 8),
-                        help="Inner corner count (cols rows).")
-    parser.add_argument("--square-size", type=float, default=0.03,
-                        help="Measured square side length in meters.")
-    parser.add_argument("--self-test", action="store_true",
-                        help="Verify the hand-eye solver on synthetic data and exit.")
+    parser.add_argument(
+        "--pattern",
+        type=int,
+        nargs=2,
+        default=(11, 8),
+        help="Inner corner count (cols rows).",
+    )
+    parser.add_argument(
+        "--square-size",
+        type=float,
+        default=0.03,
+        help="Measured square side length in meters.",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Verify the hand-eye solver on synthetic data and exit.",
+    )
     return parser.parse_args()
 
 
@@ -315,7 +325,10 @@ def main() -> None:
             image = cv2.imread(str(path))
             intr = meta["cameras"][cam]
             found = _board_in_cam(
-                image, pattern, obj_pts, _camera_matrix(intr),
+                image,
+                pattern,
+                obj_pts,
+                _camera_matrix(intr),
                 np.zeros(5),  # D405 color distortion is negligible at 640x480
             )
             if found is None:
@@ -326,8 +339,14 @@ def main() -> None:
                 continue
             per_cam[cam] = t
             vis = image.copy()
-            cv2.drawFrameAxes(vis, _camera_matrix(intr), np.zeros(5),
-                              cv2.Rodrigues(t[:3, :3])[0], t[:3, 3], 0.05)
+            cv2.drawFrameAxes(
+                vis,
+                _camera_matrix(intr),
+                np.zeros(5),
+                cv2.Rodrigues(t[:3, :3])[0],
+                t[:3, 3],
+                0.05,
+            )
             cv2.imwrite(str(overlay_dir / f"{cam}_{idx:06d}.png"), vis)
         detections[idx] = per_cam
     counts = {
@@ -345,9 +364,7 @@ def main() -> None:
     for cam in WRIST_CAMS:
         lo, hi = ARM_SLICE[cam]
         usable = [
-            sample
-            for sample in samples
-            if cam in detections.get(sample["sample"], {})
+            sample for sample in samples if cam in detections.get(sample["sample"], {})
         ]
         if len(usable) < 5:
             print(f"{cam}: only {len(usable)} usable views; need >= 5, skipping")
@@ -381,7 +398,9 @@ def main() -> None:
             if len(usable) <= 5 or dev.max() <= max(3 * dev.std(), 0.005):
                 break
             keep = [
-                sample for sample, d in zip(usable, dev) if d <= max(3 * dev.std(), 0.005)
+                sample
+                for sample, d in zip(usable, dev)
+                if d <= max(3 * dev.std(), 0.005)
             ]
             print(
                 f"{cam}: rejecting {len(usable) - len(keep)} outlier view(s) "

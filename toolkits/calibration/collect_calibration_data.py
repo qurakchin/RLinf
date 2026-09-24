@@ -273,9 +273,7 @@ def main() -> None:
         time.sleep(1.0)
         for name, serial in CAMERA_SERIALS.items():
             cameras[name] = _Camera(serial, args.width, args.height, 30)
-        print(
-            "Arms are held. Support them now; they become compliant in 3 s..."
-        )
+        print("Arms are held. Support them now; they become compliant in 3 s...")
         time.sleep(3.0)
         _float_arms(runtime)
 
@@ -318,9 +316,10 @@ def main() -> None:
                 window.pop(0)
             spread = float(np.max(np.ptp(np.asarray(window), axis=0)))
             stationary = len(window) == max_len and spread < args.stationary_tol
-            diverse = last_saved is None or float(
-                np.max(np.abs(state - last_saved))
-            ) > args.min_pose_distance
+            diverse = (
+                last_saved is None
+                or float(np.max(np.abs(state - last_saved))) > args.min_pose_distance
+            )
 
             if stationary and diverse:
                 images = {name: cam.latest for name, cam in cameras.items()}

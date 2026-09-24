@@ -102,7 +102,9 @@ def _grid_from_blobs(
     if len(cents) < n_sq_x * n_sq_y * 0.4:
         return False, None
     cents = np.asarray(cents)
-    pitch = float(np.median(sizes))  # checkerboard cells are adjacent: pitch == square side
+    pitch = float(
+        np.median(sizes)
+    )  # checkerboard cells are adjacent: pitch == square side
 
     # Cluster centroid x/y into grid lines via pitch-quantized voting.
     col_idx = np.round(cents[:, 0] / pitch).astype(int)

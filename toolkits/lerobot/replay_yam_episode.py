@@ -360,11 +360,17 @@ def parse_args() -> argparse.Namespace:
         help="Per-joint gravity compensation scale; default keeps the SDK value.",
     )
     parser.add_argument(
-        "--grav-comp-kd", type=float, nargs=6, default=None,
+        "--grav-comp-kd",
+        type=float,
+        nargs=6,
+        default=None,
         help="Per-joint gravity compensation damping.",
     )
     parser.add_argument(
-        "--coulomb-friction", type=float, nargs=6, default=None,
+        "--coulomb-friction",
+        type=float,
+        nargs=6,
+        default=None,
         help="Per-joint coulomb friction compensation; requires "
         "--use-coulomb-friction to take effect.",
     )

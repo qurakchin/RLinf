@@ -84,11 +84,22 @@ def main() -> None:
             p_cam = t_top_base[cam] @ np.append(t_base_tcp[:3, 3], 1.0)
             uv = K @ p_cam[:3] / p_cam[2]
             cv2.drawMarker(
-                image, (int(uv[0]), int(uv[1])), color,
-                cv2.MARKER_TILTED_CROSS, 24, 2,
+                image,
+                (int(uv[0]), int(uv[1])),
+                color,
+                cv2.MARKER_TILTED_CROSS,
+                24,
+                2,
             )
-            cv2.putText(image, cam, (int(uv[0]) + 8, int(uv[1]) - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            cv2.putText(
+                image,
+                cam,
+                (int(uv[0]) + 8, int(uv[1]) - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+            )
         cv2.imwrite(str(out_dir / f"verify_{idx:06d}.png"), image)
         print(f"verify_{idx:06d}.png saved")
 

@@ -134,15 +134,28 @@ class _Camera:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arm", choices=("left", "right"), required=True)
-    parser.add_argument("--camera", choices=tuple(CAMERA_SERIALS), default=None,
-                        help="Camera to capture from; defaults to the arm's wrist camera.")
+    parser.add_argument(
+        "--camera",
+        choices=tuple(CAMERA_SERIALS),
+        default=None,
+        help="Camera to capture from; defaults to the arm's wrist camera.",
+    )
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--scale", type=float, default=1.0,
-                        help="Multiplier on all perturbation magnitudes.")
-    parser.add_argument("--extra-offset", type=float, nargs=6, default=None,
-                        metavar=("J0", "J1", "J2", "J3", "J4", "J5"),
-                        help="Constant joint offset added to every pose, e.g. to "
-                        "turn the arm toward the board first.")
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=1.0,
+        help="Multiplier on all perturbation magnitudes.",
+    )
+    parser.add_argument(
+        "--extra-offset",
+        type=float,
+        nargs=6,
+        default=None,
+        metavar=("J0", "J1", "J2", "J3", "J4", "J5"),
+        help="Constant joint offset added to every pose, e.g. to "
+        "turn the arm toward the board first.",
+    )
     parser.add_argument("--settle-s", type=float, default=0.8)
     return parser.parse_args()
 
@@ -212,9 +225,7 @@ def main() -> None:
             image = camera.capture()
             path = out_images / f"pose_{len(captured):03d}.png"
             cv2.imwrite(str(path), image)
-            captured.append(
-                {"image": path.name, "measured": measured.tolist()}
-            )
+            captured.append({"image": path.name, "measured": measured.tolist()})
             print(f"pose {pose_idx} -> {path.name}")
     finally:
         if camera is not None:
