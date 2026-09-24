@@ -86,7 +86,7 @@ YAM 使用原有 Franka
 平移按比例缩小；旋转缩放最短空间旋转的旋转向量，并左乘当前姿态。
 各次尝试都从同一实测关节角初始化，不使用失败解作为种子。第一个通过全部校验
 的中间目标解进入现有的关节限幅流程，缩步成功不会中断录制。
-单臂本帧所有尝试共用 ``pico.ik.max_solve_s``（示例 30 ms）；超时、无效解、
+单臂本帧所有尝试共用 ``pico.ik.max_solve_s`` （示例 30 ms）；超时、无效解、
 夹爪关节漂移、种子越界和求解器异常不触发缩步。SDK 调用不可中途抢占，
 预算在调用间及返回后检查，超过总预算的结果不下发。这不是硬实时期限。
 ``left/right_ik_attempts`` 报告包含首次求解的尝试次数，
@@ -113,7 +113,7 @@ IK 收敛后，相对实测关节角向通过校验的目标解按统一比例�
 将 J1～J6 的每步上限统一为 0.3 rad（左右臂共用）。
 整体插值比例取所有关节的 ``limit_i / abs(q_target_i - q_measured_i)`` 与 1 的最小值，
 保持各关节运动比例；随后运行时按相同上限和硬关节限位再次检查。
-向量设为 ``null`` 时回退到标量 ``max_joint_delta``（示例 0.08 rad）。
+向量设为 ``null`` 时回退到标量 ``max_joint_delta`` （示例 0.08 rad）。
 这些值限制每次指令的关节差值，并非末端角速度或加速度限制，效果依赖实际控制周期。
 ``left/right_joint_step_fraction`` 报告比例，``left/right_limiting_joint`` 报告瓶颈
 关节编号（1～6，0 表示未限幅），``left/right_ik_max_joint_delta`` 报告完整解的
@@ -185,7 +185,7 @@ RLinf 把“资源调度”和“设备控制”明确分开：
      -> component_placement 选择 hardware rank 0
      -> WorkerInfo.hardware_infos
      -> RealWorldEnv._create_env()
-     -> create_dual_yam_joint_env()
+     -> create_DualYamJointEnv()
      -> 可选 DualYamLeaderIntervention
      -> 可选 YamPico 设备 + YamPicoEpisode    # VR 采集封装
      -> DualYamJointEnv
@@ -416,7 +416,7 @@ RLinf 关节限制；如果 RLinf 配置超出 SDK 限制，启动检查会拒�
    bash examples/embodiment/collect_data.sh \
      realworld_dual_yam_collect_data
 
-示例配置默认采集 50 个 ``pick_block`` 回合。为了保持 RLinf 既有的“配置名启动”
+示例配置默认采集 50 个回合，任务串是一条整桌整理指令。为了保持 RLinf 既有的“配置名启动”
 风格，如需创建其他任务配方，请复制或修改
 ``realworld_dual_yam_collect_data.yaml`` 中的以下字段：
 
@@ -427,7 +427,7 @@ RLinf 关节限制；如果 RLinf 配置超出 SDK 限制，启动检查会拒�
    env:
      eval:
        override_cfg:
-         task_description: pick_block
+         task_description: "Tidy up the table. ..."   # 当前配置的指令
 
 该流程会：
 
@@ -435,7 +435,7 @@ RLinf 关节限制；如果 RLinf 配置超出 SDK 限制，启动检查会拒�
 2. 让调度器分配一份完整 ``DualYam`` 资源；
 3. 构建 ``RealWorldEnv`` 和已注册的 ``DualYamJointEnv-v1``；
 4. 启用电机主臂干预与按钮回合控制；
-5. 将成功轨迹同时写入 RLinf replay 和 LeRobot 数据。
+5. 将录制的回合直接写入 LeRobot，跳过 RLinf replay buffer。
 
 整个过程没有 ``--convert`` 阶段，也不会在运行时 clone 或 import YAM 应用仓库。
 
@@ -466,7 +466,7 @@ RLinf 关节限制；如果 RLinf 配置超出 SDK 限制，启动检查会拒�
      - 以 reward ``1`` 和 success 结束回合，并保持遥操同步以继续下一个回合。
    * - 夹爪扳机
      - 默认映射
-     - 松开为夹爪 ``1``（张开），按下为 ``0``（闭合）；在对应主臂设置 ``gripper_invert: true`` 可反转。
+     - 松开为夹爪 ``1`` （张开），按下为 ``0`` （闭合）；在对应主臂设置 ``gripper_invert: true`` 可反转。
 
 示例使用 ``sync_on_reset: false``，操作者准备好后只需按一次顶部按钮接管；
 ``preserve_sync_between_episodes: true`` 使录制按钮只负责切分回合，不释放遥操，
@@ -527,8 +527,8 @@ collector 的占位零动作不会把从臂送向零位。按钮事件采用上�
 输出目录
 --------
 
-``collect_data.sh`` 会创建新的 ``logs/<timestamp>/``。同一个成功回合会写到两个
-位置：
+``collect_data.sh`` 会创建新的 ``logs/<timestamp>/``。成功回合写入其下的
+LeRobot 数据集：
 
 .. code-block:: text
 
@@ -541,14 +541,18 @@ collector 的占位零动作不会把从臂送向零位。按钮事件采用上�
                |-- meta/tasks.jsonl
                |-- meta/stats.json
                |-- data/...
-               `-- videos/...        # 具体布局取决于 LeRobot 版本
+               |-- videos/...        # 具体布局取决于 LeRobot 版本
+               |-- recording_errors.jsonl          # 仅在发生溢出后出现
+               `-- invalid_episodes/overflow_XXXX/ # 一次溢出的截断前缀
+                   |-- frames.pkl
+                   `-- <相机键名>/
 
 示例开启 ``streaming: true`` 并关闭 ``runner.save_demos``：每一帧在录制时直接
 写入 LeRobot。LeRobot v2 的无损 PNG 由现有后台线程直接写入，关闭压缩以降低 CPU 开销，
 不再启动第二层图像队列。主循环不会因写入队列满而等待：若积压达到 240 个任务，
 停止当前回合的录制并报告 ``recording_invalid``，遥操继续。截断前缀的图像与
-``frames.pkl`` 单独保留在 shard 的 ``invalid_episodes/``，错误记入
-``recording_errors.jsonl``；它不进入正常 LeRobot 元数据，也不计成功。待写入追上后
+``frames.pkl`` 被移入新建的 ``invalid_episodes/overflow_XXXX/`` 目录，原因追加到
+shard 根目录的 ``recording_errors.jsonl``；它不进入正常 LeRobot 元数据，也不计成功。待写入追上后
 结束当前录制、重新开始。PNG 不压缩会增加临时磁盘占用和写入带宽。
 LeRobot v2 在回合结束时每批嵌入 16 帧图像并写入 Parquet，完成后再发布文件；
 流式模式每条保留回合使用独立 ``id_N`` 分片，由独立后台线程串行保存、释放资源。
@@ -610,7 +614,7 @@ YAM 文件职责总览
    * - ``requirements/embodied/envs/yam-build-constraints.txt``
      - 将 i2rt 的 ruckig 源码构建约束限制在 YAM 环境内部。
    * - ``examples/embodiment/collect_data.sh``
-     - YAM 配置复用的、保持原状的通用采集入口；它按配置名启动并创建带时间戳的日志目录。
+     - 所有真机配置共用的通用采集入口；它按配置名启动并创建带时间戳的日志目录。YAM 侧改动只补充了入口文件和日志文件变量，默认日志路径保持通用。
    * - ``rlinf/envs/real/__init__.py``
      - 从 RLinf 真机入口导入 YAM task 包，使 Gym 注册生效。
    * - ``rlinf/robotics/robots/__init__.py``、``rlinf/robotics/__init__.py``、``rlinf/envs/real/__init__.py``
@@ -673,8 +677,8 @@ YAM 文件职责总览
 
 主臂采集通过 ``leader_intervention.foot_switch_device`` 指定脚踏板的稳定
 ``/dev/input/by-id/`` 路径；设为 ``null`` 可恢复手柄结束后直接保存。
-已实测 PCsensor 三格脚踏板：左侧 ``KEY_A``（30）删除，右侧 ``KEY_C``（46）保存，
-本机中间踏板为 ``KEY_B``（48），已启用返回操作者确认的初始位。手柄录制键仍负责开始/结束，顶部同步键仍控制主从同步。
+已实测 PCsensor 三格脚踏板：左侧 ``KEY_A`` （30）删除，右侧 ``KEY_C`` （46）保存，
+本机中间踏板为 ``KEY_B`` （48），已启用返回操作者确认的初始位。手柄录制键仍负责开始/结束，顶部同步键仍控制主从同步。
 
 确认数采初始位后，将 ``reset`` 配置为 ``enabled: true, mode: manual``，
 填写同步状态下确认的主臂 ``left_qpos/right_qpos``，并将

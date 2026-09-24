@@ -23,6 +23,8 @@ with poses the test chooses.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 import time
 from types import SimpleNamespace
 
@@ -680,16 +682,20 @@ def test_ik_backtracking_dispatches_only_valid_reduced_targets(
     assert station.arms[side].reference
 
 
-def test_two_real_subscribers_receive_and_close_independently(tmp_path):
+def test_two_real_subscribers_receive_and_close_independently():
     zmq = pytest.importorskip("zmq")
     from rlinf.robotics.parts.transports.pico import PicoExpert
 
+    # ``ipc://`` addresses are capped at ``sizeof(sun_path)`` (103 bytes), and
+    # pytest's own ``tmp_path`` on macOS already exceeds that.
+    directory = tempfile.mkdtemp(prefix="yam-pico-")
+    address = f"ipc://{directory}/pico.ipc"
     context = zmq.Context()
-    publisher = context.socket(zmq.PUB)
-    address = f"ipc://{tmp_path}/pico.ipc"
-    publisher.bind(address)
+    publisher = None
     experts = []
     try:
+        publisher = context.socket(zmq.PUB)
+        publisher.bind(address)
         for side in ("left", "right"):
             experts.append(
                 PicoExpert(
@@ -728,8 +734,10 @@ def test_two_real_subscribers_receive_and_close_independently(tmp_path):
     finally:
         for expert in experts:
             expert.stop()
-        publisher.close(linger=0)
+        if publisher is not None:
+            publisher.close(linger=0)
         context.term()
+        shutil.rmtree(directory, ignore_errors=True)
     assert all(not thread.is_alive() for thread in threads)
 
 

@@ -230,7 +230,7 @@ RLinf keeps resource scheduling separate from device control:
      -> component_placement selects hardware rank 0
      -> WorkerInfo.hardware_infos
      -> RealWorldEnv._create_env()
-     -> create_dual_yam_joint_env()
+     -> create_DualYamJointEnv()
      -> optional DualYamLeaderIntervention
      -> optional YamPico device + YamPicoEpisode    # VR collection
      -> DualYamJointEnv
@@ -485,8 +485,9 @@ From the RLinf repository root, start a 50-episode collection:
    bash examples/embodiment/collect_data.sh \
      realworld_dual_yam_collect_data
 
-The supplied config collects 50 ``pick_block`` episodes. To keep the launcher in
-RLinf's existing config-name style, copy or edit the following fields in
+The supplied config collects 50 episodes and stores one tabletop-tidying
+instruction as the task string. To keep the launcher in RLinf's existing
+config-name style, copy or edit the following fields in
 ``realworld_dual_yam_collect_data.yaml`` when creating another recipe:
 
 .. code-block:: yaml
@@ -496,7 +497,7 @@ RLinf's existing config-name style, copy or edit the following fields in
    env:
      eval:
        override_cfg:
-         task_description: pick_block
+         task_description: "Tidy up the table. ..."   # the shipped instruction
 
 What this does:
 
@@ -504,7 +505,7 @@ What this does:
 2. asks the scheduler for one complete ``DualYam`` resource;
 3. constructs ``RealWorldEnv`` and the registered ``DualYamJointEnv-v1`` task;
 4. enables motorized-leader intervention and button-controlled episodes;
-5. writes successful demonstrations directly to RLinf replay and LeRobot data.
+5. writes recorded episodes directly to LeRobot, skipping the RLinf replay buffer.
 
 There is no ``--convert`` step and no runtime clone/import of a YAM application
 repository.
@@ -607,8 +608,8 @@ policy dataconfig must map the literal dataset keys explicitly.
 Output Layout
 -------------
 
-``collect_data.sh`` creates a fresh ``logs/<timestamp>/`` directory. The same
-successful episode is written to two destinations:
+``collect_data.sh`` creates a fresh ``logs/<timestamp>/`` directory. The
+successful episode is written to LeRobot under it:
 
 .. code-block:: text
 
@@ -621,16 +622,21 @@ successful episode is written to two destinations:
                |-- meta/tasks.jsonl
                |-- meta/stats.json
                |-- data/...
-               `-- videos/...        # layout depends on the installed LeRobot version
+               |-- videos/...        # layout depends on the installed LeRobot version
+               |-- recording_errors.jsonl          # only after an overflow
+               `-- invalid_episodes/overflow_XXXX/ # isolated prefix for one overflow
+                   |-- frames.pkl
+                   `-- <camera keys>/
 
 The example enables ``streaming: true`` and disables ``runner.save_demos``:
 every recorded frame is written to the LeRobot dataset as it is captured
 by the existing export thread. LeRobot v2 uses lossless, uncompressed PNG to
 reduce CPU overhead, without a second image queue. At 240 pending tasks, the
 current recording is stopped with ``recording_invalid`` instead of blocking
-teleoperation. Its contiguous prefix is isolated as images and ``frames.pkl``
-under the shard's ``invalid_episodes/``, with ``recording_errors.jsonl`` recording
-the reason; it is excluded from normal LeRobot metadata and success counts.
+teleoperation. Its contiguous prefix is moved into a fresh
+``invalid_episodes/overflow_XXXX/`` directory as images and ``frames.pkl``, and
+the reason is appended to ``recording_errors.jsonl`` at the shard root; the
+prefix is excluded from normal LeRobot metadata and success counts.
 End that recording and restart after the writer catches up. Uncompressed PNG
 requires more temporary disk space and write bandwidth.
 For LeRobot v2, episode saving embeds images in batches of 16
@@ -700,7 +706,7 @@ Implementation Map
    * - ``requirements/embodied/envs/yam-build-constraints.txt``
      - Keeps i2rt's ruckig source-build constraint local to the YAM environment.
    * - ``examples/embodiment/collect_data.sh``
-     - Existing, unchanged generic collection launcher used by the YAM recipe; it selects the config by name and creates the timestamped log directory.
+     - Generic collection launcher shared by every real-world recipe; it selects the config by name and creates the timestamped log directory. The YAM change adds the explicit entry-point and log-file variables while leaving the default log path generic.
    * - ``rlinf/envs/real/__init__.py``
      - Imports the YAM task package so Gym registration is available through RLinf's real-world environment entry point.
    * - ``rlinf/robotics/robots/__init__.py``, ``rlinf/robotics/__init__.py``, and ``rlinf/envs/real/__init__.py``

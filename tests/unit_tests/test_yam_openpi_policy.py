@@ -34,7 +34,7 @@ def test_yam_inputs_accept_split_training_views():
             "observation/extra_view_image-0": _sample_image(1),
             "observation/extra_view_image-1": _sample_image(2),
             "observation/state": np.arange(14, dtype=np.float32),
-            "actions": np.zeros((50, 14), dtype=np.float32),
+            "actions": np.zeros((30, 14), dtype=np.float32),
             "prompt": b"pick block",
         }
     )
@@ -43,7 +43,7 @@ def test_yam_inputs_accept_split_training_views():
     assert transformed["image"]["left_wrist_0_rgb"][0, 0, 0] == 1
     assert transformed["image"]["right_wrist_0_rgb"][0, 0, 0] == 2
     assert transformed["state"].shape == (14,)
-    assert transformed["actions"].shape == (50, 14)
+    assert transformed["actions"].shape == (30, 14)
     assert transformed["prompt"] == "pick block"
 
 
@@ -67,10 +67,10 @@ def test_yam_config_matches_official_pi05_shape_and_output_contract():
     config = get_openpi_config("pi05_yam_joint")
 
     assert config.model.pi05 is True
-    assert config.model.action_horizon == 50
+    assert config.model.action_horizon == 30
     assert config.model.action_dim == 32
     assert config.model.discrete_state_input is True
-    assert YamOutputs()({"actions": np.zeros((50, 32))})["actions"].shape == (
-        50,
+    assert YamOutputs()({"actions": np.zeros((30, 32))})["actions"].shape == (
+        30,
         14,
     )
