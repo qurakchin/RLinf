@@ -491,7 +491,7 @@ class DualYamJointEnv(gym.Env):
         for camera_info in self._camera_specs:
             camera = self._camera_factory(camera_info)
             self._cameras.append(camera)
-            camera.open()
+            camera.connect()
         for camera in self._cameras:
             frame = camera.get_frame(timeout=self.config.camera_warmup_timeout_s)
             self._last_camera_frame[camera.name] = self._process_frame(frame)
@@ -557,7 +557,7 @@ class DualYamJointEnv(gym.Env):
         failed: list[BaseCamera] = []
         for camera in reversed(self._cameras):
             try:
-                camera.close()
+                camera.disconnect()
             except Exception as error:  # pragma: no cover - hardware cleanup path
                 errors.append(error)
                 failed.append(camera)
