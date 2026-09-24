@@ -371,14 +371,23 @@ class CollectEpisode(gym.Wrapper):
         self._closed = True
         result = None
         primary_error = None
+        env_close_attempted = False
         try:
             if self.streaming:
                 for env_idx in range(self.num_envs):
                     if self._episode_review_pending[env_idx]:
                         self._stream_end_episode(env_idx)
+            # Release robot hardware before potentially lengthy dataset finalization.
+            try:
+                if hasattr(self.env, "close"):
+                    env_close_attempted = True
+                    result = self.env.close()
+            except BaseException as error:
+                primary_error = error
             self._finalize_lerobot()
         except BaseException as error:
-            primary_error = error
+            if primary_error is None:
+                primary_error = error
         try:
             self._wait_futures()
         except BaseException as error:
@@ -391,7 +400,7 @@ class CollectEpisode(gym.Wrapper):
                     self._executor = None
             finally:
                 try:
-                    if hasattr(self.env, "close"):
+                    if not env_close_attempted and hasattr(self.env, "close"):
                         result = self.env.close()
                 finally:
                     try:
