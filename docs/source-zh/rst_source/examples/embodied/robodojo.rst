@@ -13,17 +13,17 @@
 .. grid:: 2 4 4 4
    :gutter: 2
 
-   .. grid-item-card:: 仿真器
+   .. grid-item-card:: 模型
       :text-align: center
 
-      RoboDojo · Isaac Sim 5.1
+      π₀.₅（Pi_05）
 
-   .. grid-item-card:: 机器人
+   .. grid-item-card:: 算法
       :text-align: center
 
-      ARX-X5 双臂
+      PPO
 
-   .. grid-item-card:: 示例任务
+   .. grid-item-card:: 任务
       :text-align: center
 
       Put Bottles Into Dustbin
@@ -31,11 +31,11 @@
    .. grid-item-card:: 硬件
       :text-align: center
 
-      NVIDIA GPU · Linux x86_64
+      1 节点 · 1+ GPU
 
-| **你将完成：** 安装环境 → 准备场景资产 → 验证安装 → 启动单环境任务。
+| **你将完成：** 安装环境 → 下载场景资产和 Pi_05 检查点 → 验证安装 → 启动单环境任务。
 | **前置条件：** :doc:`基础安装 </rst_source/start/installation>` · NVIDIA CUDA GPU ·
-  至少 80 GB 可用磁盘空间。
+  至少 120 GB 可用磁盘空间。
 
 任务
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -57,37 +57,30 @@ RLinf 当前提供 ``put_bottles_into_dustbin`` 的环境配置，用作接入�
 
    examples/embodiment/config/env/robodojo_put_bottles_into_dustbin.yaml
 
-RoboDojo 的其他任务使用相同的环境接口，只需修改 ``task_config.task_name``\
-和对应的任务参数。
+RoboDojo 的其他任务使用相同的环境接口，只需修改 ``task_config.task_name`` 和对应的任务参数。
 
 观测与动作
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 80
+   :widths: 18 82
 
    * - 字段
      - 规格
-   * - ``main_images``
-     - 头部相机 RGB，``[B, H, W, 3]`` uint8。
-   * - ``wrist_images``
-     - 可选左右腕部相机 RGB，``[B, n, H, W, 3]`` uint8，或 ``None``。
-   * - ``states``
-     - 左右机械臂关节、左右夹爪状态，默认 ``[B, 14]`` float32。
-   * - ``task_descriptions``
-     - RoboDojo 根据当前场景生成的自然语言指令。
-   * - ``actions``
-     - 默认 14 维连续动作，顺序为左臂 6 维、右臂 6 维、左夹爪 1 维、右夹爪 1 维。
+   * - 观测
+     - ``main_images`` 为头部相机 RGB；``wrist_images`` 为可选的左右腕部相机 RGB；``states`` 为 ``[B, 14]`` float32 本体状态，包含左右机械臂关节和夹爪状态。
+   * - 动作
+     - 默认 14 维连续动作 ``actions``：左臂 6 维、右臂 6 维、左夹爪 1 维、右夹爪 1 维。
    * - 奖励
      - 默认根据任务成功状态生成稀疏奖励。
+   * - 提示词
+     - RoboDojo 根据当前场景生成的自然语言指令，存放在 ``task_descriptions``。
 
 版本锁定
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-RLinf 使用 ``requirements/install.sh`` 和\
-``requirements/embodied/envs/robodojo-override.txt`` 统一锁定 RoboDojo 的\
-模拟器、PyTorch 和兼容性依赖。当前组合如下：
+RLinf 使用 ``requirements/install.sh`` 和 ``requirements/embodied/envs/robodojo-override.txt`` 统一锁定 RoboDojo 的模拟器、PyTorch 和兼容性依赖。当前组合如下：
 
 .. list-table::
    :header-rows: 1
@@ -135,9 +128,7 @@ RoboDojo 当前支持 Linux x86_64 和 NVIDIA CUDA GPU，暂不支持纯 CPU、m
 
    bash requirements/install.sh embodied --model openpi --env robodojo
 
-安装器会自动安装 PyTorch 2.7、Isaac Sim 5.1 和固定版本的 IsaacLab，\
-并对齐 Isaac Sim 与 IsaacLab 的依赖版本。不要单独执行\
-``pip install rlinf-robodojo-runtime``，否则可能得到无法启动的依赖组合。
+安装器会自动安装 PyTorch 2.7、Isaac Sim 5.1 和固定版本的 IsaacLab，并对齐 Isaac Sim 与 IsaacLab 的依赖版本。不要单独执行 ``pip install rlinf-robodojo-runtime``，否则可能得到无法启动的依赖组合。
 
 .. note::
 
@@ -147,9 +138,7 @@ RoboDojo 当前支持 Linux x86_64 和 NVIDIA CUDA GPU，暂不支持纯 CPU、m
 下载场景资产
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-依赖安装不会自动下载场景资产。请在执行安装前导出 ``ROBODOJO_ASSETS_ROOT``，\
-安装器会将该值写入 ``.venv/bin/activate``；未设置时记录的是 RLinf 仓库根目录下的\
-``data/robodojo``。然后下载约 39 GB 的 ``Assets/``：
+依赖安装不会自动下载场景资产。请在执行安装前导出 ``ROBODOJO_ASSETS_ROOT``，安装器会将该值写入 ``.venv/bin/activate``；未设置时记录的是 RLinf 仓库根目录下的 ``data/robodojo``。然后下载约 39 GB 的 ``Assets/``：
 
 .. code-block:: bash
 
@@ -188,9 +177,7 @@ RoboDojo 当前支持 Linux x86_64 和 NVIDIA CUDA GPU，暂不支持纯 CPU、m
 
 .. note::
 
-   ``ROBODOJO_ASSETS_ROOT`` 应指向包含 ``Assets/`` 的父目录，而不是\
-   ``Assets/`` 本身。使用 Hugging Face 镜像时，可在下载前设置\
-   ``HF_ENDPOINT``。
+   ``ROBODOJO_ASSETS_ROOT`` 应指向包含 ``Assets/`` 的父目录，而不是 ``Assets/`` 本身。使用 Hugging Face 镜像时，可在下载前设置 ``HF_ENDPOINT``。
 
 验证安装
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -209,6 +196,37 @@ RoboDojo 当前支持 Linux x86_64 和 NVIDIA CUDA GPU，暂不支持纯 CPU、m
    print("source:", source_root())
    print("assets:", assets_root())
    PY
+
+下载模型
+----------------------------------------
+
+评估配置使用 RoboDojo 官方发布的 Pi_05 检查点，即基于 ``RoboDojo-sim-arx_x5`` 仿真数据训练的 π₀.₅ policy。它和场景资产放在同一个 ``RoboDojo-Benchmark/RoboDojo`` 仓库里，位于 ``ckpt/RoboDojo/Pi_05/``，每次训练 run 一个目录。示例配置使用其中的 ``joint-0``：
+
+.. code-block:: bash
+
+   export ROBODOJO_ASSETS_ROOT=/path/to/robodojo
+   source .venv/bin/activate
+   hf download RoboDojo-Benchmark/RoboDojo \
+     --repo-type dataset \
+     --local-dir "$ROBODOJO_ASSETS_ROOT" \
+     --include "ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/**"
+
+下载后是一个 OpenPI 检查点目录：
+
+.. code-block:: text
+
+   $ROBODOJO_ASSETS_ROOT/ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/
+   └── 59999/
+       ├── _CHECKPOINT_METADATA
+       ├── assets/arx_x5_sim/norm_stats.json
+       ├── params/
+       └── train_state/
+
+``rollout.model.model_path`` 应指向 ``59999/``，``rollout.model.openpi_data.norm_stats_path`` 应指向其 ``assets/`` 下的 ``norm_stats.json``，覆盖方式见「运行」。同级的 ``joint-1``、``joint-2`` 是同一检查点的另外两次训练 run，``ckpt/RoboDojo/Pi_0/`` 下是对应的 π₀ 检查点。
+
+.. note::
+
+   只下载一个 run。整个 ``Pi_05`` 目录包含三次 run，约 70 GB，而评估只加载其中一个。
 
 运行
 ----------------------------------------
@@ -254,8 +272,7 @@ step 和 close 后，再提高 ``env.train.total_num_envs``。
 
    examples/embodiment/config/env/robodojo_put_bottles_into_dustbin.yaml
 
-策略的 ``action_dim`` 应与 ``action_dims`` 的总和一致。示例配置使用\
-``[6, 6, 1, 1]``，即 14 维动作。
+策略的 ``action_dim`` 应与 ``action_dims`` 的总和一致。示例配置使用 ``[6, 6, 1, 1]``，即 14 维动作。
 
 **用 Pi_5 检查点做策略评估**
 
@@ -276,33 +293,23 @@ step 和 close 后，再提高 ``env.train.total_num_envs``。
    bash evaluations/run_eval.sh robodojo \
      robodojo_put_bottles_into_dustbin_pi05_eval
 
-脚本会在 ``logs/<时间戳>-<配置名>/`` 下记录日志，结果写入\
-``runner.logger.log_path`` 指定的目录。默认只运行一个环境；确认稳定后可以用\
-Hydra 覆盖提高并行度，例如 ``env.eval.total_num_envs=4`` 配合\
-``cluster.component_placement.env,rollout=0-3``。
+脚本会在 ``logs/<时间戳>-<配置名>/`` 下记录日志，结果写入 ``runner.logger.log_path`` 指定的目录。默认只运行一个环境；确认稳定后可以用 Hydra 覆盖提高并行度，例如 ``env.eval.total_num_envs=4`` 配合 ``cluster.component_placement.env,rollout=0-3``。
 
-14 维状态/动作的布局由 ``state_action_order`` 决定。官方 Pi_5 检查点使用\
-ALOHA 顺序 ``[左臂, 左夹爪, 右臂, 右夹爪]``，因此评估配置设置\
-``state_action_order: aloha``；训练配置保持默认的 ``native``，即运行时顺序\
-``[左臂, 右臂, 左夹爪, 右夹爪]``。
+14 维状态/动作的布局由 ``state_action_order`` 决定。官方 Pi_5 检查点使用 ALOHA 顺序 ``[左臂, 左夹爪, 右臂, 右夹爪]``，因此评估配置设置 ``state_action_order: aloha``；训练配置保持默认的 ``native``，即运行时顺序 ``[左臂, 右臂, 左夹爪, 右夹爪]``。
 
-评估配置中的 ``rollout.model.model_path`` 和\
-``rollout.model.openpi_data.norm_stats_path`` 需要指向本地检查点。换成其他\
-检查点时同时覆盖这两项：
+评估配置中的 ``rollout.model.model_path`` 只是占位路径。``rollout.model.openpi_data.norm_stats_path`` 默认由它推导，但下载得到的检查点里 norm stats 位于 ``assets/arx_x5_sim/`` 下，因此两项都要覆盖：
 
 .. code-block:: bash
 
    bash evaluations/run_eval.sh robodojo \
      robodojo_put_bottles_into_dustbin_pi05_eval \
-     rollout.model.model_path=/path/to/pi05_robodojo_arx_x5 \
-     rollout.model.openpi_data.norm_stats_path=/path/to/RoboDojo-sim-arx_x5-joint-0/59999/assets/arx_x5_sim/norm_stats.json
+     rollout.model.model_path="$ROBODOJO_ASSETS_ROOT/ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/59999" \
+     rollout.model.openpi_data.norm_stats_path="$ROBODOJO_ASSETS_ROOT/ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/59999/assets/arx_x5_sim/norm_stats.json"
 
 可视化与结果
 ----------------------------------------
 
-训练启动方式与 RLinf 的其他 embodied 环境一致。关键指标为\
-``env/success_once``，完整指标说明见\
-:doc:`训练指标 <../../reference/metrics>`。
+训练启动方式与 RLinf 的其他 embodied 环境一致。关键指标为 ``env/success_once``，完整指标说明见 :doc:`训练指标 <../../reference/metrics>`。
 
 如需保存 rollout 视频，可在环境配置中启用：
 

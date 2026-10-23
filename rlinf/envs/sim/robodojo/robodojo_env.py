@@ -92,8 +92,7 @@ def state_action_permutations(action_order: str, action_dims):
         return None, None
     if action_order != "aloha":
         raise ValueError(
-            "state_action_order must be 'native' or 'aloha', "
-            f"got {action_order!r}."
+            f"state_action_order must be 'native' or 'aloha', got {action_order!r}."
         )
     if action_dims is None or len(action_dims) != 4:
         raise ValueError(
@@ -289,7 +288,10 @@ class RoboDojoEnv(gym.Env):
                 self.venv.reset(env_idx=env_idx, env_seeds=seeds)
                 break
             except RuntimeError as exc:
-                if not _is_unstable_scene(exc) or attempt == UNSTABLE_RESET_ATTEMPTS - 1:
+                if (
+                    not _is_unstable_scene(exc)
+                    or attempt == UNSTABLE_RESET_ATTEMPTS - 1
+                ):
                     raise
                 # A saved layout failed the runtime's settle check. Draw the
                 # next layout when this call owns the seeds; otherwise replay

@@ -15,17 +15,17 @@ environment interface.
 .. grid:: 2 4 4 4
    :gutter: 2
 
-   .. grid-item-card:: Simulator
+   .. grid-item-card:: Models
       :text-align: center
 
-      RoboDojo · Isaac Sim 5.1
+      π₀.₅ (Pi_05)
 
-   .. grid-item-card:: Robot
+   .. grid-item-card:: Algorithms
       :text-align: center
 
-      Dual-arm ARX-X5
+      PPO
 
-   .. grid-item-card:: Example task
+   .. grid-item-card:: Tasks
       :text-align: center
 
       Put Bottles Into Dustbin
@@ -33,12 +33,12 @@ environment interface.
    .. grid-item-card:: Hardware
       :text-align: center
 
-      NVIDIA GPU · Linux x86_64
+      1 node · 1+ GPU
 
-| **You'll do:** install → prepare scene assets → verify the installation →
-  launch a single-environment task.
+| **You'll do:** install → download scene assets and the Pi_05 checkpoint →
+  verify the installation → launch a single-environment task.
 | **Prerequisites:** :doc:`Base installation </rst_source/start/installation>` ·
-  an NVIDIA CUDA GPU · at least 80 GB of free disk space.
+  an NVIDIA CUDA GPU · at least 120 GB of free disk space.
 
 Tasks
 ~~~~~
@@ -70,23 +70,22 @@ Observation and Action
 
 .. list-table::
    :header-rows: 1
-   :widths: 22 78
+   :widths: 18 82
 
    * - Field
      - Specification
-   * - ``main_images``
-     - Head-camera RGB, ``[B, H, W, 3]`` uint8.
-   * - ``wrist_images``
-     - Optional left/right wrist-camera RGB, ``[B, n, H, W, 3]`` uint8, or ``None``.
-   * - ``states``
-     - Left/right arm joints and gripper states, ``[B, 14]`` float32 by default.
-   * - ``task_descriptions``
-     - Natural-language instructions generated from the current scene.
-   * - ``actions``
-     - 14 continuous values by default: left arm 6, right arm 6, left gripper 1,
-       right gripper 1.
+   * - Observation
+     - Head-camera RGB in ``main_images``, optional left/right wrist-camera RGB
+       in ``wrist_images``, and a ``[B, 14]`` float32 proprioceptive state in
+       ``states`` that holds the left/right arm joints and gripper states.
+   * - Action
+     - 14 continuous values in ``actions`` by default: left arm 6, right arm 6,
+       left gripper 1, right gripper 1.
    * - Reward
      - Sparse task-completion reward by default.
+   * - Prompt
+     - Natural-language instruction generated from the current scene and exposed
+       as ``task_descriptions``.
 
 Version Lock
 ~~~~~~~~~~~~
@@ -207,6 +206,46 @@ This check validates the Python package and CUDA without starting the simulator:
    print("assets:", assets_root())
    PY
 
+Download the Model
+------------------
+
+The evaluation configuration uses RoboDojo's official Pi_05 checkpoint, a
+π₀.₅ policy trained on the ``RoboDojo-sim-arx_x5`` simulation data. It ships
+in the same ``RoboDojo-Benchmark/RoboDojo`` repository as the scene assets,
+under ``ckpt/RoboDojo/Pi_05/``, with one directory per training run. Download
+the run the example configuration evaluates:
+
+.. code-block:: bash
+
+   export ROBODOJO_ASSETS_ROOT=/path/to/robodojo
+   source .venv/bin/activate
+   hf download RoboDojo-Benchmark/RoboDojo \
+     --repo-type dataset \
+     --local-dir "$ROBODOJO_ASSETS_ROOT" \
+     --include "ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/**"
+
+The result is an OpenPI checkpoint directory:
+
+.. code-block:: text
+
+   $ROBODOJO_ASSETS_ROOT/ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/
+   └── 59999/
+       ├── _CHECKPOINT_METADATA
+       ├── assets/arx_x5_sim/norm_stats.json
+       ├── params/
+       └── train_state/
+
+Point ``rollout.model.model_path`` at ``59999/`` and
+``rollout.model.openpi_data.norm_stats_path`` at the ``norm_stats.json`` under
+its ``assets/``; the overrides are shown under Run It. ``joint-1`` and
+``joint-2`` are the other two runs of the same checkpoint, and
+``ckpt/RoboDojo/Pi_0/`` holds the corresponding π₀ checkpoints.
+
+.. note::
+
+   Download one run. The whole ``Pi_05`` tree is about 70 GB across its three
+   runs, and the evaluator loads one.
+
 Run It
 ------
 
@@ -287,16 +326,17 @@ configuration sets ``state_action_order: aloha``. Training configurations keep
 the default ``native`` order, which is the runtime order
 ``[left arm, right arm, left gripper, right gripper]``.
 
-``rollout.model.model_path`` and ``rollout.model.openpi_data.norm_stats_path``
-in the evaluation configuration must point at a local checkpoint. Override both
-when switching checkpoints:
+``rollout.model.model_path`` in the evaluation configuration is a placeholder
+for the checkpoint directory. ``rollout.model.openpi_data.norm_stats_path`` is
+derived from it by default, but the downloaded checkpoint keeps its norm stats
+under ``assets/arx_x5_sim/``, so override both:
 
 .. code-block:: bash
 
    bash evaluations/run_eval.sh robodojo \
      robodojo_put_bottles_into_dustbin_pi05_eval \
-     rollout.model.model_path=/path/to/pi05_robodojo_arx_x5 \
-     rollout.model.openpi_data.norm_stats_path=/path/to/RoboDojo-sim-arx_x5-joint-0/59999/assets/arx_x5_sim/norm_stats.json
+     rollout.model.model_path="$ROBODOJO_ASSETS_ROOT/ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/59999" \
+     rollout.model.openpi_data.norm_stats_path="$ROBODOJO_ASSETS_ROOT/ckpt/RoboDojo/Pi_05/RoboDojo-sim-arx_x5-joint-0/59999/assets/arx_x5_sim/norm_stats.json"
 
 Visualization and Results
 -------------------------

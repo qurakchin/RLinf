@@ -305,6 +305,58 @@ def test_robodojo_aloha_order_maps_state_and_actions(monkeypatch):
         env.offload()
 
 
+def test_robodojo_reset_retries_an_unstable_layout(make_env):
+    env = make_env()
+    reset = env.venv.reset
+    attempts = []
+
+    def flaky_reset(env_idx=None, env_seeds=None):
+        attempts.append(env_seeds)
+        if len(attempts) == 1:
+            raise RuntimeError("UnStableError: layout drifted")
+        return reset(env_idx=env_idx, env_seeds=env_seeds)
+
+    env.venv.reset = flaky_reset
+
+    env.reset()
+
+    assert len(attempts) == 2
+
+
+def test_robodojo_reset_gives_up_after_repeated_instability(make_env):
+    from rlinf.envs.sim.robodojo.robodojo_env import UNSTABLE_RESET_ATTEMPTS
+
+    env = make_env()
+    attempts = []
+
+    def unstable_reset(env_idx=None, env_seeds=None):
+        attempts.append(env_seeds)
+        raise RuntimeError("UnStableError: layout drifted")
+
+    env.venv.reset = unstable_reset
+
+    with pytest.raises(RuntimeError, match="UnStableError"):
+        env.reset()
+
+    assert len(attempts) == UNSTABLE_RESET_ATTEMPTS
+
+
+def test_robodojo_reset_does_not_retry_other_errors(make_env):
+    env = make_env()
+    attempts = []
+
+    def failing_reset(env_idx=None, env_seeds=None):
+        attempts.append(env_seeds)
+        raise RuntimeError("simulator crashed")
+
+    env.venv.reset = failing_reset
+
+    with pytest.raises(RuntimeError, match="simulator crashed"):
+        env.reset()
+
+    assert len(attempts) == 1
+
+
 def test_robodojo_installed_bridge_is_called(monkeypatch):
     bridge = pytest.importorskip("robodojo_runtime.bridge")
     calls = []
