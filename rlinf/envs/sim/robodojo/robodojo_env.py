@@ -65,6 +65,63 @@ from rlinf.envs.utils import (
 
 __all__ = ["RoboDojoEnv"]
 
+_NATIVE_ACTION_LABELS = ("left_arm", "right_arm", "left_gripper", "right_gripper")
+_ALOHA_ACTION_LABELS = ("left_arm", "left_gripper", "right_arm", "right_gripper")
+
+# Saved layouts occasionally fail RoboDojo's settle check: an object drifts past
+# its 4 cm / 5 degree threshold, differently on each replay of the same layout.
+# The official evaluator abandons such a layout and continues; here the reset is
+# retried instead, otherwise UnStableError reaches the worker and ends the run.
+UNSTABLE_RESET_ATTEMPTS = 8
+
+
+def _is_unstable_scene(exc: BaseException) -> bool:
+    """Whether a bridge error is the runtime's layout settle failure."""
+    return "UnStableError" in str(exc)
+
+
+def state_action_permutations(action_order: str, action_dims):
+    """Return the index lists that convert between the runtime and model layouts.
+
+    The runtime emits ``[left arm, right arm, left gripper, right gripper]``.
+    OpenPI Aloha checkpoints (including RoboDojo's official Pi_05) are trained
+    on ``[left arm, left gripper, right arm, right gripper]``. ``native`` keeps
+    the runtime layout; ``aloha`` returns ``(env_to_model, model_to_env)``.
+    """
+    if action_order == "native":
+        return None, None
+    if action_order != "aloha":
+        raise ValueError(
+            "state_action_order must be 'native' or 'aloha', "
+            f"got {action_order!r}."
+        )
+    if action_dims is None or len(action_dims) != 4:
+        raise ValueError(
+            "state_action_order='aloha' requires task_config.action_dims with "
+            f"four widths, got {action_dims!r}."
+        )
+    widths = {
+        label: int(width) for label, width in zip(_NATIVE_ACTION_LABELS, action_dims)
+    }
+    if any(width <= 0 for width in widths.values()):
+        raise ValueError(f"action_dims must be positive, got {action_dims!r}.")
+
+    starts = {}
+    offset = 0
+    for label in _NATIVE_ACTION_LABELS:
+        starts[label] = offset
+        offset += widths[label]
+
+    native_to_model = [
+        index
+        for label in _ALOHA_ACTION_LABELS
+        for index in range(starts[label], starts[label] + widths[label])
+    ]
+    model_to_native = [0] * len(native_to_model)
+    for model_index, native_index in enumerate(native_to_model):
+        model_to_native[native_index] = model_index
+    return native_to_model, model_to_native
+
 
 class RoboDojoEnv(gym.Env):
     """Own a runtime bridge and expose RoboTwin-style rollout operations.
@@ -105,6 +162,10 @@ class RoboDojoEnv(gym.Env):
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
         self.task_name = cfg.task_config.task_name
         self.center_crop = cfg.get("center_crop", False)
+        self.state_action_order = str(cfg.get("state_action_order", "native")).lower()
+        self._state_perm, self._action_perm = state_action_permutations(
+            self.state_action_order, cfg.task_config.get("action_dims")
+        )
         self.record_metrics = record_metrics
         self._is_start = True
         self._closed = False
@@ -202,6 +263,11 @@ class RoboDojoEnv(gym.Env):
             ]
             for obs in raw_obs
         ]
+        states = torch.stack(
+            [torch.as_tensor(obs["state"], dtype=torch.float32) for obs in raw_obs]
+        )
+        if self._state_perm is not None:
+            states = states[..., self._state_perm]
         return {
             "main_images": torch.stack(
                 [image_tensor(obs["full_image"]) for obs in raw_obs]
@@ -209,9 +275,7 @@ class RoboDojoEnv(gym.Env):
             "wrist_images": torch.stack([torch.stack(images) for images in wrists])
             if wrists[0]
             else None,
-            "states": torch.stack(
-                [torch.as_tensor(obs["state"], dtype=torch.float32) for obs in raw_obs]
-            ),
+            "states": states,
             "task_descriptions": [obs["instruction"] for obs in raw_obs],
         }
 
@@ -219,10 +283,20 @@ class RoboDojoEnv(gym.Env):
         self, env_idx: int | list[int] | None = None, env_seeds: list[int] | None = None
     ) -> tuple[dict, dict]:
         """Reset selected slots and return all slots' observations and empty infos."""
-        self.venv.reset(
-            env_idx=env_idx,
-            env_seeds=self.reset_state_ids.tolist() if env_seeds is None else env_seeds,
-        )
+        seeds = self.reset_state_ids.tolist() if env_seeds is None else list(env_seeds)
+        for attempt in range(UNSTABLE_RESET_ATTEMPTS):
+            try:
+                self.venv.reset(env_idx=env_idx, env_seeds=seeds)
+                break
+            except RuntimeError as exc:
+                if not _is_unstable_scene(exc) or attempt == UNSTABLE_RESET_ATTEMPTS - 1:
+                    raise
+                # A saved layout failed the runtime's settle check. Draw the
+                # next layout when this call owns the seeds; otherwise replay
+                # the requested ones, since the check is not deterministic.
+                if env_seeds is None:
+                    self.update_reset_state_ids(env_idx)
+                    seeds = self.reset_state_ids.tolist()
         observations = self._extract_obs_image(self.venv.get_obs())
         self._reset_metrics(env_idx)
         self._is_start = False
@@ -247,6 +321,8 @@ class RoboDojoEnv(gym.Env):
             raise ValueError(
                 "Actions must have shape (num_envs, positive horizon, action_dim)."
             )
+        if self._action_perm is not None:
+            actions = actions[..., self._action_perm]
         raw_obs, reward, terminated, truncated, info_list = self.venv.step(actions)
         obs = self._extract_obs_image(raw_obs)
         infos = list_of_dict_to_dict_of_list(info_list)

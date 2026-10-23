@@ -3736,8 +3736,8 @@ install_gim_arm_env() {
 
 install_robodojo_env() {
     # The runtime distribution owns the simulator stack: Isaac Sim 5.1, the
-    # IsaacLab fork RoboDojo tracks, cuRobo and the Torch family they need.
-    # Installing it here keeps those pins out of the rest of the environment.
+    # IsaacLab fork RoboDojo tracks, and the Torch family they need. Installing
+    # it here keeps those pins out of the rest of the environment.
     if [[ "${PLATFORM}" != "nvidia" ]]; then
         echo "RoboDojo currently requires --platform nvidia and a CUDA GPU." >&2
         exit 1
@@ -3779,16 +3779,13 @@ install_robodojo_env() {
     fi
     echo "export ROBODOJO_ASSETS_ROOT=${escaped_assets_root}" >> "$VENV_DIR/bin/activate"
 
-    # Torch first: the runtime pins torch==2.7.0, and cuRobo is a source build
-    # that compiles against whichever Torch is already installed. TORCH_CUDA_ARCH_LIST
-    # only affects that build.
+    # Torch first: the runtime pins torch==2.7.0, and the IsaacLab extensions
+    # build against whichever Torch is already installed. TORCH_CUDA_ARCH_LIST
+    # only affects those builds.
     #
-    # ``--no-config`` is required here: the repository's [tool.uv]
-    # override-dependencies pins torch==2.11.0 for every other environment, and
-    # uv applies that override to ``uv pip install`` as well, silently replacing
-    # the runtime's torch==2.7.0. The simulator stack must resolve on its own
-    # pins, so the RoboDojo installs below ignore pyproject.toml and use the
-    # compatibility overrides from the upstream simulator installer.
+    # ``--no-config`` keeps these installs on the runtime's own pins: the
+    # simulator stack must resolve from the upstream compatibility overrides
+    # below, not from the repository's override-dependencies.
     local cuda_mm cuda_major cuda_minor
     cuda_mm=$(detect_cuda_major_minor) || {
         echo "Could not detect CUDA. RoboDojo requires a working NVIDIA CUDA driver." >&2
@@ -3812,15 +3809,9 @@ install_robodojo_env() {
         --index-url "$torch_index" --overrides "$override_file" \
         torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0
 
-    # cuRobo and the IsaacLab fork are pinned to the revisions the RoboDojo
-    # runtime was validated with. Bump the runtime, override file, and these
-    # revisions together after revalidating.
-    #   cuRobo    yuechen0614/curobo    895c6517243f8cb091c73c018c8167192d39599a
-    #   IsaacLab  yuechen0614/IsaacLab  afca7b09d60d8beb9c1cb28b43066499940b969b
-    uv pip install --no-config --prerelease=allow --no-build-isolation \
-        --overrides "$override_file" \
-        "nvidia-curobo[cu12] @ git+${GITHUB_PREFIX}https://github.com/yuechen0614/curobo.git@895c6517243f8cb091c73c018c8167192d39599a"
-
+    # The runtime package pulls in the simulator stack and the Torch family it
+    # needs. Bump its ref, the override file, and the IsaacLab ref below
+    # together after revalidating.
     uv pip install --no-config --prerelease=allow \
         --overrides "$override_file" "${index_args[@]}" \
         "rlinf-robodojo-runtime @ git+${GITHUB_PREFIX}https://github.com/RLinf/RoboDojo.git@${runtime_ref}"
@@ -3831,6 +3822,8 @@ install_robodojo_env() {
     # IsaacLab's wheel intentionally contains only isaaclab/__init__.py. The
     # extension metadata and modules live beside the source package, so the
     # runtime's three IsaacLab dependencies must be installed editable on top.
+    # The fork is pinned to the revision the runtime was validated with
+    # (yuechen0614/IsaacLab afca7b09d60d8beb9c1cb28b43066499940b969b).
     isaaclab_dir=$(clone_or_reuse_repo \
         ROBODOJO_ISAACLAB_PATH \
         "$VENV_DIR/robodojo-isaaclab" \
@@ -3848,59 +3841,21 @@ install_robodojo_env() {
     python - <<'PY'
 import json
 import os
+from importlib.metadata import distribution
 from pathlib import Path
 
 import torch
-from robodojo_runtime import assets_root, source_root
-from robodojo_runtime.bridge import VectorEnv
+from robodojo_runtime import source_root
+from robodojo_runtime.bridge import VectorEnv  # noqa: F401 - RLinf's entry point
 
 assert torch.cuda.is_available(), "PyTorch cannot see a CUDA GPU."
-source = source_root()
-assert source.is_dir(), f"RoboDojo source tree is missing: {source}"
-isaaclab_source = Path(os.environ["ROBODOJO_ISAACLAB_SOURCE"])
-assert (isaaclab_source / "isaaclab" / "config" / "extension.toml").is_file()
-from importlib.metadata import distribution
-
+assert source_root().is_dir(), "RoboDojo source tree is missing."
+isaaclab = Path(os.environ["ROBODOJO_ISAACLAB_SOURCE"]) / "isaaclab/config/extension.toml"
+assert isaaclab.is_file(), "IsaacLab source tree is missing extension.toml."
 direct_url = json.loads(distribution("isaaclab").read_text("direct_url.json"))
-assert direct_url["url"].startswith("file://"), direct_url
-assets = assets_root()
-print(f"[install.sh] RoboDojo runtime: {source}")
-print(f"[install.sh] IsaacLab source: {isaaclab_source}")
-print(f"[install.sh] RoboDojo assets root: {assets}")
-print(f"[install.sh] torch={torch.__version__} cuda={torch.version.cuda}")
+assert direct_url["url"].startswith("file://"), "isaaclab is not an editable install."
+print("[install.sh] RoboDojo environment verified.")
 PY
-
-    if [[ "${ROBODOJO_DOWNLOAD_ASSETS:-0}" == "1" ]]; then
-        echo "[install.sh] Downloading RoboDojo scene assets into ${ROBODOJO_ASSETS_ROOT}"
-        echo "[install.sh] The Assets download is about 39 GB."
-        uv pip install "huggingface_hub>=0.34,<2"
-        python - <<'PY'
-import os
-from pathlib import Path
-
-from huggingface_hub import snapshot_download
-
-root = Path(os.environ["ROBODOJO_ASSETS_ROOT"]).expanduser().resolve()
-required = ("Robots", "Object", "Material", "Eval_Layout")
-if not all((root / "Assets" / name).is_dir() for name in required):
-    root.mkdir(parents=True, exist_ok=True)
-    snapshot_download(
-        repo_id=os.environ.get("ROBODOJO_HF_REPO", "RoboDojo-Benchmark/RoboDojo"),
-        repo_type="dataset",
-        revision=os.environ.get("ROBODOJO_HF_REVISION", "main"),
-        local_dir=root,
-        allow_patterns=["Assets/**"],
-    )
-missing = [name for name in required if not (root / "Assets" / name).is_dir()]
-if missing:
-    raise SystemExit(f"RoboDojo assets are incomplete; missing: {', '.join(missing)}")
-print(f"[install.sh] RoboDojo assets ready: {root / 'Assets'}")
-PY
-    else
-        echo "[install.sh] Dependencies installed; scene assets were not downloaded."
-        echo "[install.sh] To include assets in the install, rerun with:"
-        echo "  ROBODOJO_DOWNLOAD_ASSETS=1 ROBODOJO_ASSETS_ROOT=${ROBODOJO_ASSETS_ROOT} bash requirements/install.sh embodied --env robodojo"
-    fi
 }
 
 install_robotwin_env() {

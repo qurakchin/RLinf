@@ -92,8 +92,9 @@ Version Lock
 ~~~~~~~~~~~~
 
 RLinf locks the RoboDojo simulator, PyTorch stack, and compatibility
-dependencies in ``requirements/embodied/envs/robodojo-override.txt``. The
-current combination is:
+dependencies in ``requirements/install.sh`` and
+``requirements/embodied/envs/robodojo-override.txt``. The current combination
+is:
 
 .. list-table::
    :header-rows: 1
@@ -113,8 +114,6 @@ current combination is:
      - 5.1.0
    * - IsaacLab
      - 0.54.3 · commit ``afca7b09``
-   * - cuRobo
-     - commit ``895c651``
 
 Installation
 ------------
@@ -144,7 +143,7 @@ Users in mainland China can add ``--use-mirror``. To include OpenPI:
 
    bash requirements/install.sh embodied --model openpi --env robodojo
 
-The installer installs PyTorch 2.7, Isaac Sim 5.1, pinned IsaacLab and cuRobo,
+The installer installs PyTorch 2.7, Isaac Sim 5.1, and the pinned IsaacLab,
 and applies the validated compatibility pins. Do not install
 ``rlinf-robodojo-runtime`` separately; a plain dependency resolve can produce
 an environment that cannot start.
@@ -157,15 +156,21 @@ an environment that cannot start.
 Download Scene Assets
 ~~~~~~~~~~~~~~~~~~~~~
 
-Dependency installation does not download scene assets. Set a persistent asset
-root, then download the approximately 39 GB ``Assets/`` tree:
+Dependency installation does not download scene assets. Export
+``ROBODOJO_ASSETS_ROOT`` before running the installer so that the value is
+recorded in ``.venv/bin/activate``; otherwise the recorded default is
+``data/robodojo`` under the RLinf repository root. Then download the
+approximately 39 GB ``Assets/`` tree:
 
 .. code-block:: bash
 
    export ROBODOJO_ASSETS_ROOT=/path/to/robodojo
-   ROBODOJO_DOWNLOAD_ASSETS=1 \
-     bash requirements/install.sh embodied --env robodojo
    source .venv/bin/activate
+   uv pip install "huggingface_hub>=0.34,<2"
+   hf download RoboDojo-Benchmark/RoboDojo \
+     --repo-type dataset \
+     --local-dir "$ROBODOJO_ASSETS_ROOT" \
+     --include "Assets/**"
 
 You can also place existing assets in this directory. The required layout is:
 
@@ -181,7 +186,7 @@ You can also place existing assets in this directory. The required layout is:
 .. note::
 
    ``ROBODOJO_ASSETS_ROOT`` must point to the parent of ``Assets/``, not to
-   ``Assets/`` itself. Set ``HF_ENDPOINT`` before installation when using a
+   ``Assets/`` itself. Set ``HF_ENDPOINT`` before the download when using a
    Hugging Face mirror.
 
 Verify the Installation
@@ -251,6 +256,48 @@ Reference the environment preset from your training configuration:
 The policy's ``action_dim`` must equal the sum of ``action_dims``. The example
 uses ``[6, 6, 1, 1]``, which is a 14-dimensional action.
 
+**Evaluate a Pi_5 checkpoint**
+
+``evaluations/robodojo/robodojo_put_bottles_into_dustbin_pi05_eval.yaml`` reuses
+the environment preset above and evaluates ``put_bottles_into_dustbin`` with an
+OpenPI Pi_5 checkpoint. Install the policy dependencies as well:
+
+.. code-block:: bash
+
+   bash requirements/install.sh embodied --model openpi --env robodojo
+   source .venv/bin/activate
+
+Then start the evaluation:
+
+.. code-block:: bash
+
+   export ROBODOJO_ASSETS_ROOT=/path/to/robodojo
+   bash evaluations/run_eval.sh robodojo \
+     robodojo_put_bottles_into_dustbin_pi05_eval
+
+The script logs to ``logs/<timestamp>-<config_name>/`` and writes results to the
+directory given by ``runner.logger.log_path``. It runs one environment by
+default; once that is stable, raise the parallelism with Hydra overrides such as
+``env.eval.total_num_envs=4`` and ``cluster.component_placement.env,rollout=0-3``.
+
+``state_action_order`` selects the layout of the 14-dimensional state and action
+vectors. The official Pi_5 checkpoint was trained on the ALOHA order
+``[left arm, left gripper, right arm, right gripper]``, so the evaluation
+configuration sets ``state_action_order: aloha``. Training configurations keep
+the default ``native`` order, which is the runtime order
+``[left arm, right arm, left gripper, right gripper]``.
+
+``rollout.model.model_path`` and ``rollout.model.openpi_data.norm_stats_path``
+in the evaluation configuration must point at a local checkpoint. Override both
+when switching checkpoints:
+
+.. code-block:: bash
+
+   bash evaluations/run_eval.sh robodojo \
+     robodojo_put_bottles_into_dustbin_pi05_eval \
+     rollout.model.model_path=/path/to/pi05_robodojo_arx_x5 \
+     rollout.model.openpi_data.norm_stats_path=/path/to/RoboDojo-sim-arx_x5-joint-0/59999/assets/arx_x5_sim/norm_stats.json
+
 Visualization and Results
 -------------------------
 
@@ -277,7 +324,7 @@ Activate the virtual environment created by the installer. If you used
 
 **Dependency resolution fails**
 
-Do not install Isaac Sim, IsaacLab, cuRobo, or the RoboDojo runtime manually.
+Do not install Isaac Sim, IsaacLab, or the RoboDojo runtime manually.
 Remove the failed environment and rerun the installation command so the pinned
 versions and compatibility overrides are applied together.
 

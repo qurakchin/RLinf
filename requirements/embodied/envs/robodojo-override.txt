@@ -8,10 +8,6 @@
 # are the combination used by RoboDojo and validated with RLinf.
 #
 # Keep this file, requirements/install.sh, and the runtime metadata in sync.
-rlinf-robodojo-runtime==0.3.0
-torch==2.7.0
-torchvision==0.22.0
-torchaudio==2.7.0
 numpy==1.26.0
 isaacsim[all,extscache]==5.1.0
 fastapi==0.115.7
@@ -28,8 +24,7 @@ h5py==3.16.0
 warp-lang==1.18.0
 
 # Source pins. The IsaacLab distributions are installed editable so their
-# extension metadata is present; cuRobo is built against Torch 2.7.
+# extension metadata is present.
 isaaclab @ git+https://github.com/yuechen0614/IsaacLab.git@afca7b09d60d8beb9c1cb28b43066499940b969b#subdirectory=source/isaaclab
 isaaclab_assets @ git+https://github.com/yuechen0614/IsaacLab.git@afca7b09d60d8beb9c1cb28b43066499940b969b#subdirectory=source/isaaclab_assets
 isaaclab_tasks @ git+https://github.com/yuechen0614/IsaacLab.git@afca7b09d60d8beb9c1cb28b43066499940b969b#subdirectory=source/isaaclab_tasks
-nvidia-curobo[cu12] @ git+https://github.com/yuechen0614/curobo.git@895c6517243f8cb091c73c018c8167192d39599a

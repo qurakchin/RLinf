@@ -230,6 +230,81 @@ def test_robodojo_action_passthrough():
     assert prepare_actions(actions, "robodojo", "openpi", 1, 14) is actions
 
 
+def test_robodojo_aloha_order_maps_state_and_actions(monkeypatch):
+    from rlinf.envs.sim.robodojo.robodojo_env import state_action_permutations
+
+    env_to_model, model_to_env = state_action_permutations("aloha", [6, 6, 1, 1])
+    assert env_to_model == [0, 1, 2, 3, 4, 5, 12, 6, 7, 8, 9, 10, 11, 13]
+    assert model_to_env == [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 6, 13]
+
+    recorded = {}
+
+    class RecordingVectorEnv:
+        def __init__(self, task_config, n_envs, env_seeds):
+            self.n_envs = n_envs
+
+        def reset(self, env_idx=None, env_seeds=None):
+            pass
+
+        def get_obs(self):
+            return [
+                {
+                    "full_image": np.zeros((4, 4, 3), dtype=np.uint8),
+                    "state": np.arange(14, dtype=np.float32),
+                    "instruction": "test task",
+                }
+            ] * self.n_envs
+
+        def step(self, actions):
+            recorded["actions"] = np.array(actions, copy=True)
+            return (
+                self.get_obs(),
+                np.zeros(self.n_envs, dtype=np.float32),
+                np.zeros(self.n_envs, dtype=bool),
+                np.zeros(self.n_envs, dtype=bool),
+                [{} for _ in range(self.n_envs)],
+            )
+
+        def check_seeds(self, seeds):
+            return [True] * len(seeds)
+
+        def close(self, clear_cache):
+            pass
+
+    bridge = ModuleType("robodojo_runtime.bridge")
+    bridge.VectorEnv = RecordingVectorEnv
+    monkeypatch.setitem(sys.modules, "robodojo_runtime", ModuleType("robodojo_runtime"))
+    monkeypatch.setitem(sys.modules, "robodojo_runtime.bridge", bridge)
+
+    cfg = OmegaConf.create(
+        {
+            "seed": 0,
+            "group_size": 1,
+            "auto_reset": False,
+            "ignore_terminations": False,
+            "use_rel_reward": False,
+            "use_custom_reward": False,
+            "use_fixed_reset_state_ids": False,
+            "state_action_order": "aloha",
+            "task_config": {
+                "task_name": "test_task",
+                "action_dims": [6, 6, 1, 1],
+            },
+            "assets_path": "/unused/stub-assets",
+            "max_episode_steps": 5,
+            "reward_coef": 1.0,
+        }
+    )
+    env = RoboDojoEnv(cfg, 1, 0, 1, None, record_metrics=False)
+    try:
+        obs, _ = env.reset()
+        assert obs["states"][0].tolist() == env_to_model
+        env.step(np.arange(14, dtype=np.float32).reshape(1, 1, 14))
+        assert recorded["actions"][0, 0].tolist() == model_to_env
+    finally:
+        env.offload()
+
+
 def test_robodojo_installed_bridge_is_called(monkeypatch):
     bridge = pytest.importorskip("robodojo_runtime.bridge")
     calls = []

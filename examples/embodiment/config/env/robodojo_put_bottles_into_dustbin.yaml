@@ -17,6 +17,13 @@ max_episode_steps: 700 # ARX-X5 tasks are budgeted 700 control steps
 
 is_eval: False
 
+# Joint layout of the env-local 14-dim state/action vector. "native" is the
+# RoboDojo runtime order [left arm, right arm, left gripper, right gripper];
+# "aloha" exposes [left arm, left gripper, right arm, right gripper], which is
+# what OpenPI Aloha checkpoints (RoboDojo's official Pi_05 included) were
+# trained on.
+state_action_order: native
+
 # Directory that contains Assets/, not Assets/ itself.
 assets_path: ${oc.env:ROBODOJO_ASSETS_ROOT,/workspace/dataset/robodojo}
 # Optional JSON with per-task success seeds; null samples reset seeds instead.
